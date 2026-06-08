@@ -10,16 +10,12 @@ st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
 # Forçar centralização absoluta de cabeçalhos e células da tabela via CSS injetado
 st.markdown("""
     <style>
-        /* Centraliza o texto de todas as células de dados */
+        /* Centraliza o texto de todas as células de dados e cabeçalhos */
         .stDataFrame div[data-testid="stTable"] td, 
+        .stDataFrame div[data-testid="stTable"] th,
         div[data-testid="data-grid-canvas"] {
             text-align: center !important;
         }
-        /* Centraliza o texto dos cabeçalhos das colunas */
-        .stDataFrame div[data-testid="stTable"] th {
-            text-align: center !important;
-        }
-        /* Garante a centralização interna nos blocos de texto do Streamlit Dataframe */
         div[data-testid="stDataFrame"] {
             text-align: center !important;
         }
@@ -95,19 +91,31 @@ for classe, ativos in MINHA_CARTEIRA.items():
         
         subtotal = qtd * preco
         total_geral += subtotal
+        
+        # Criação do formato de exibição customizado para cada tipo de ativo (Inteiro vs Decimal)
+        if ticker == 'BTC':
+            qtd_formatada = f"{qtd:.8f}"
+        elif ticker == 'Renda+ 2050':
+            qtd_formatada = f"{qtd:.2f}"
+        else:
+            qtd_formatada = f"{int(qtd)}"
+            
         linhas_tabela.append({
             'Ativo': ticker, 
             'Classe': classe, 
-            'Quantidade': qtd, 
-            'Preço Atual': preco, 
+            'Preço Atual': preco,
+            'Qtd': qtd_formatada, 
             'Total Atual': subtotal
         })
 
 df = pd.DataFrame(linhas_tabela)
-df['Participação'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# Ordena a tabela do maior patrimônio para o menor por padrão
+# Ordena do maior patrimônio para o menor por padrão
 df = df.sort_values(by='Total Atual', ascending=False)
+
+# Reorganiza a ordem física das colunas conforme solicitado
+df = df[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -131,7 +139,6 @@ with aba_dash:
     col1, col2 = st.columns(2)
     with col1:
         fig_classe = px.pie(df, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
-        # Rotação em 90 graus + sentido horário joga as maiores fatias direto para a esquerda superior (2º quadrante)
         fig_classe.update_traces(rotation=90, direction='clockwise', textinfo='percent+label')
         st.plotly_chart(fig_classe, use_container_width=True)
     with col2:
@@ -141,19 +148,24 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    st.subheader('📋 Detalhamento Fino da Carteira')
-    
-    # Configuração das Colunas (reforçando alinhamento centralizado nas propriedades também)
+    # Título removido conforme solicitado. Configuração de colunas apenas para formatação visual e alinhamento.
     config_colunas = {
         'Ativo': st.column_config.TextColumn("Ativo", alignment="center"),
         'Classe': st.column_config.TextColumn("Classe", alignment="center"),
-        'Quantidade': st.column_config.NumberColumn("Qtd", format="%.2f", alignment="center"),
         'Preço Atual': st.column_config.NumberColumn("Preço Atual", format="R$ %.2f", alignment="center"),
+        'Qtd': st.column_config.TextColumn("Qtd", alignment="center"), # Tratado como texto pré-formatado para aceitar inteiros e decimais na mesma coluna
         'Total Atual': st.column_config.NumberColumn("Total Atual", format="R$ %.2f", alignment="center"),
-        'Participação': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
+        'Part. %': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
     }
         
-    st.dataframe(df, use_container_width=True, hide_index=True, column_config=config_colunas)
+    # Exibição do Dataframe desativando qualquer clique de edição (disabled=True tranca todas as colunas)
+    st.data_editor(
+        df, 
+        use_container_width=True, 
+        hide_index=True, 
+        column_config=config_colunas,
+        disabled=True
+    )
 
 with aba_novos_aportes:
     st.subheader('💡 Área para planejamento futuro')
