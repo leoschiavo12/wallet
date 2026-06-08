@@ -7,35 +7,6 @@ import pandas as pd
 # 1. Configuração da Página
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
 
-# Estilização global para tabelas HTML normais ficarem bonitas e centralizadas no Streamlit
-st.markdown("""
-    <style>
-        .tabela-carteira {
-            width: 100%;
-            border-collapse: collapse;
-            font-family: sans-serif;
-            margin: 20px 0;
-        }
-        .tabela-carteira th {
-            background-color: #f0f2f6;
-            color: #31333F;
-            font-weight: bold;
-            padding: 12px;
-            border: 1px solid #e6e9ef;
-            text-align: center !important;
-        }
-        .tabela-carteira td {
-            padding: 12px;
-            border: 1px solid #e6e9ef;
-            text-align: center !important;
-            color: #31333F;
-        }
-        .tabela-carteira tr:nth-child(even) {
-            background-color: #f8f9fb;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
 # 2. Funções de Busca de Preços
 def obter_precos_b3(tickers_lista):
     if not tickers_lista: return {}
@@ -106,23 +77,45 @@ for classe, ativos in MINHA_CARTEIRA.items():
         subtotal = qtd * preco
         total_geral += subtotal
         
+        # Formatação precisa das quantidades por tipo de ativo
+        if ticker == 'BTC':
+            qtd_formatada = f"{qtd:.8f}"
+        elif ticker == 'Renda+ 2050':
+            qtd_formatada = f"{qtd:.2f}"
+        else:
+            qtd_formatada = f"{int(qtd)}"
+            
         linhas_tabela.append({
             'Ativo': ticker, 
             'Classe': classe, 
-            'Preço Numérico': preco,
-            'Qtd Numérica': qtd,
-            'Total Numérico': subtotal
+            'Preço Atual': preco,
+            'Qtd': qtd_formatada, 
+            'Total Atual': subtotal
         })
 
-df_base = pd.DataFrame(linhas_tabela)
-df_base['Part. % Numérica'] = (df_base['Total Numérico'] / total_geral * 100) if total_geral > 0 else 0
+df = pd.DataFrame(linhas_tabela)
+df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# Ordenação padrão pelo maior patrimônio
-df_base = df_base.sort_values(by='Total Numérico', ascending=False)
+# Ordena a tabela do maior patrimônio para o menor (comportamento padrão da tabela)
+df = df.sort_values(by='Total Atual', ascending=False)
 
-# Agrupamento por classe para o gráfico de rosca principal
-df_classes = df_base.groupby('Classe')['Total Numérico'].sum().reset_index()
-df_classes = df_classes.sort_values(by='Total Numérico', ascending=False)
+# Organização física exata das colunas desejadas
+df = df[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
+
+# --- PROCESSAMENTO DOS GRÁFICOS ---
+# Criando o agrupamento por classe e FORÇANDO a ordem dos quadrantes sugerida por você
+df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
+df_resumo_classe['%'] = (df_resumo_classe['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+
+# Mapeamento para garantir FII (2ºQ), Tesouro (3ºQ), ETF (4ºQ) e Cripto (1ºQ)
+ordem_quadrantes = {'FII': 0, 'Tesouro Direto': 1, 'ETF': 2, 'Cripto': 3}
+df_resumo_classe['Ordem'] = df_resumo_classe['Classe'].map(ordem_quadrantes)
+df_resumo_classe = df_resumo_classe.sort_values(by='Ordem')
+
+# O mesmo para os ativos: agrupar por classe primeiro para manter os quadrantes coordenados
+df_ativos_ordenados = df.copy()
+df_ativos_ordenados['Ordem_Classe'] = df_ativos_ordenados['Classe'].map(ordem_quadrantes)
+df_ativos_ordenados = df_ativos_ordenados.sort_values(by=['Ordem_Classe', 'Total Atual'], ascending=[True, False])
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -130,13 +123,10 @@ aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Sim
 with aba_dash:
     st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
     
-    # Resumo Percentual (Pílulas)
-    df_resumo_classe = df_base.groupby('Classe')['Total Numérico'].sum().reset_index()
-    df_resumo_classe['%'] = (df_resumo_classe['Total Numérico'] / total_geral * 100) if total_geral > 0 else 0
-    df_resumo_classe = df_resumo_classe.sort_values(by='%', ascending=False)
-    
+    # Resumo Percentual de pílulas ordenadas por tamanho
+    df_pilulas = df_resumo_classe.sort_values(by='%', ascending=False)
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
-    for _, row in df_resumo_classe.iterrows():
+    for _, row in df_pilulas.iterrows():
         html_legenda += f"<div style='background-color: #f0f2f6; padding: 4px 12px; border-radius: 15px; font-size: 14px; color: #31333F; font-weight: 500;'><span style='color: #666;'>{row['Classe']}:</span> {row['%']:.2f}%</div>"
     html_legenda += "</div>"
     st.markdown(html_legenda, unsafe_allow_html=True)
@@ -145,40 +135,36 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        fig_classe = px.pie(df_classes, values='Total Numérico', names='Classe', title='Distribuição por Classe', hole=0.4)
-        fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label')
+        # Gráfico por Classe montado com a ordem fixa dos quadrantes e desativando a auto-reordenação interna do Plotly
+        fig_classe = px.pie(df_resumo_classe, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
+        fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label', sort=False)
         st.plotly_chart(fig_classe, use_container_width=True)
     with col2:
-        fig_ativo = px.pie(df_base, values='Total Numérico', names='Ativo', title='Distribuição por Ativo', hole=0.4)
-        fig_ativo.update_traces(rotation=90, direction='counterclockwise')
+        # Gráfico por Ativo seguindo a mesma coerência geográfica
+        fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
+        fig_ativo.update_traces(rotation=90, direction='counterclockwise', sort=False)
         fig_ativo.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    # Construção da Tabela HTML Pura para garantir Centralização e Bloqueio de Edição Absolutos
-    html_tabela = "<table class='tabela-carteira'>"
-    html_tabela += "<thead><tr><th>Ativo</th><th>Classe</th><th>Preço Atual</th><th>Qtd</th><th>Total Atual</th><th>Part. %</th></tr></thead>"
-    html_tabela += "<tbody>"
-    
-    for idx, row in df_base.iterrows():
-        # Formatação inteligente das casas decimais da Qtd
-        if row['Ativo'] == 'BTC':
-            qtd_txt = f"{row['Qtd Numérica']:.8f}"
-        elif row['Ativo'] == 'Renda+ 2050':
-            qtd_txt = f"{row['Qtd Numérica']:.2f}"
-        else:
-            qtd_txt = f"{int(row['Qtd Numérica'])}"
-            
-        preco_txt = f"R$ {row['Preço Numérico']:.2f}"
-        total_txt = f"R$ {row['Total Numérico']:.2f}"
-        part_txt = f"{row['Part. % Numérica']:.2f}%"
+    # Configuração nativa de colunas usando alinhamento centralizado direto na API do Streamlit
+    config_colunas = {
+        'Ativo': st.column_config.TextColumn("Ativo", alignment="center"),
+        'Classe': st.column_config.TextColumn("Classe", alignment="center"),
+        'Preço Atual': st.column_config.NumberColumn("Preço Atual", format="R$ %.2f", alignment="center"),
+        'Qtd': st.column_config.TextColumn("Qtd", alignment="center"), 
+        'Total Atual': st.column_config.NumberColumn("Total Atual", format="R$ %.2f", alignment="center"),
+        'Part. %': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
+    }
         
-        html_tabela += f"<tr><td>{row['Ativo']}</td><td>{row['Classe']}</td><td>{preco_txt}</td><td>{qtd_txt}</td><td>{total_txt}</td><td>{part_txt}</td></tr>"
-        
-    html_tabela += "</tbody></table>"
-    
-    # Injeta a tabela diretamente na interface
-    st.markdown(html_tabela, unsafe_allow_html=True)
+    # Exibição bonita padrão do Streamlit totalmente bloqueada contra edições
+    st.data_editor(
+        df, 
+        use_container_width=True, 
+        hide_index=True, 
+        column_config=config_colunas,
+        disabled=True
+    )
 
 with aba_novos_aportes:
     st.subheader('💡 Área para planejamento futuro')
