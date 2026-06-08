@@ -7,16 +7,14 @@ import pandas as pd
 # 1. Configuração da Página
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
 
-# Forçar centralização absoluta de cabeçalhos e células da tabela via CSS injetado
+# Forçar o alinhamento centralizado de todas as células usando markdown global
 st.markdown("""
     <style>
-        /* Centraliza o texto de todas as células de dados e cabeçalhos */
-        .stDataFrame div[data-testid="stTable"] td, 
-        .stDataFrame div[data-testid="stTable"] th,
-        div[data-testid="data-grid-canvas"],
-        .stDataFrame div {
+        div[data-testid="stDataFrame"] td, 
+        div[data-testid="stDataFrame"] th,
+        .stDataFrame iframe,
+        div[data-grid-canvas] {
             text-align: center !important;
-            justify-content: center !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -91,34 +89,39 @@ for classe, ativos in MINHA_CARTEIRA.items():
         subtotal = qtd * preco
         total_geral += subtotal
         
-        # Formatação inteligente das casas decimais por ativo
-        if ticker == 'BTC':
-            qtd_formatada = f"{qtd:.8f}"
-        elif ticker == 'Renda+ 2050':
-            qtd_formatada = f"{qtd:.2f}"
-        else:
-            qtd_formatada = f"{int(qtd)}"
-            
         linhas_tabela.append({
             'Ativo': ticker, 
             'Classe': classe, 
-            'Preço Atual': preco,
-            'Qtd': qtd_formatada, 
-            'Total Atual': subtotal
+            'Preço Numérico': preco,
+            'Qtd Numérica': qtd,
+            'Total Numérico': subtotal
         })
 
-df = pd.DataFrame(linhas_tabela)
-df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+df_base = pd.DataFrame(linhas_tabela)
+df_base['Part. % Numérica'] = (df_base['Total Numérico'] / total_geral * 100) if total_geral > 0 else 0
 
-# Ordena do maior patrimônio para o menor por padrão
-df = df.sort_values(by='Total Atual', ascending=False)
+# Ordenação padrão pelo maior patrimônio
+df_base = df_base.sort_values(by='Total Numérico', ascending=False)
 
-# Reorganiza a ordem física das colunas: Preço Atual veio ANTES de Qtd
-df = df[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
+# Criando a tabela final com os textos pré-formatados para FORÇAR a centralização
+df_exibicao = pd.DataFrame()
+df_exibicao['Ativo'] = df_base['Ativo']
+df_exibicao['Classe'] = df_base['Classe']
+df_exibicao['Preço Atual'] = df_base['Preço Numérico'].map('R$ {:.2f}'.format)
 
-# Agrupamento por classe para o gráfico de rosca principal
-df_classes = df.groupby('Classe')['Total Atual'].sum().reset_index()
-df_classes = df_classes.sort_values(by='Total Atual', ascending=False)
+# Tratamento das regras de casas decimais para Qtd
+qtd_formatada = []
+for idx, row in df_base.iterrows():
+    if row['Ativo'] == 'BTC':
+        qtd_formatada.append(f"{row['Qtd Numérica']:.8f}")
+    elif row['Ativo'] == 'Renda+ 2050':
+        qtd_formatada.append(f"{row['Qtd Numérica']:.2f}")
+    else:
+        qtd_formatada.append(f"{int(row['Qtd Numérica'])}")
+df_exibicao['Qtd'] = qtd_formatada
+
+df_exibicao['Total Atual'] = df_base['Total Numérico'].map('R$ {:.2f}'.format)
+df_exibicao['Part. %'] = df_base['Part. % Numérica'].map('{:.2f}%'.format)
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -127,8 +130,8 @@ with aba_dash:
     st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
     
     # Resumo Percentual (Pílulas)
-    df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
-    df_resumo_classe['%'] = (df_resumo_classe['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+    df_resumo_classe = df_base.groupby('Classe')['Total Numérico'].sum().reset_index()
+    df_resumo_classe['%'] = (df_resumo_classe['Total Numérico'] / total_geral * 100) if total_geral > 0 else 0
     df_resumo_classe = df_resumo_classe.sort_values(by='%', ascending=False)
     
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
@@ -141,33 +144,34 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        fig_classe = px.pie(df_classes, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
-        # Rotação 90 + Sentido Anti-Horário distribui perfeitamente nos quadrantes: 2º -> 3º -> 4º -> 1º
+        # Gráfico por Classe ordenado explicitamente do maior para o menor
+        fig_classe = px.pie(df_resumo_classe, values='Total Numérico', names='Classe', title='Distribuição por Classe', hole=0.4)
         fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label')
         st.plotly_chart(fig_classe, use_container_width=True)
     with col2:
-        fig_ativo = px.pie(df, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
+        # Gráfico por Ativo ordenado explicitamente do maior para o menor
+        fig_ativo = px.pie(df_base, values='Total Numérico', names='Ativo', title='Distribuição por Ativo', hole=0.4)
         fig_ativo.update_traces(rotation=90, direction='counterclockwise')
         fig_ativo.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    # Título removido e tabela configurada como não editável (disabled=True)
+    # Configuração de alinhamento textual explícito
     config_colunas = {
         'Ativo': st.column_config.TextColumn("Ativo", alignment="center"),
         'Classe': st.column_config.TextColumn("Classe", alignment="center"),
-        'Preço Atual': st.column_config.NumberColumn("Preço Atual", format="R$ %.2f", alignment="center"),
+        'Preço Atual': st.column_config.TextColumn("Preço Atual", alignment="center"),
         'Qtd': st.column_config.TextColumn("Qtd", alignment="center"),
-        'Total Atual': st.column_config.NumberColumn("Total Atual", format="R$ %.2f", alignment="center"),
-        'Part. %': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
+        'Total Atual': st.column_config.TextColumn("Total Atual", alignment="center"),
+        'Part. %': st.column_config.TextColumn("Part. %", alignment="center")
     }
         
-    st.data_editor(
-        df, 
+    # Exibição estritamente travada para leitura e totalmente centralizada
+    st.dataframe(
+        df_exibicao, 
         use_container_width=True, 
         hide_index=True, 
-        column_config=config_colunas,
-        disabled=True
+        column_config=config_colunas
     )
 
 with aba_novos_aportes:
