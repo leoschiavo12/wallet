@@ -109,11 +109,11 @@ for classe, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# --- ESTRUTURAÇÃO DOS DADOS ---
+# --- ORDENAÇÃO DE DADOS PADRÃO (DO MAIOR PARA O MENOR) ---
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
 
-# Mapeamento fixo de cores para manter a identidade das classes
+# Mapeamento de cores fixas para manter a consistência visual das classes
 mapa_cores = {
     'FII': '#26a69a',           
     'Tesouro Direto': '#29b6f6', 
@@ -121,14 +121,14 @@ mapa_cores = {
     'Cripto': '#ff5252'          
 }
 
+# Ordenação para a tabela detalhada e para o gráfico de ativos
 df_tabela = df.sort_values(by='Total Atual', ascending=False)
 df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
 
-# Ordem estrutural de desenho das fatias
-ordem_geografica = ['FII', 'Tesouro Direto', 'Cripto', 'ETF']
-
-df['Ordem_Classe_Geo'] = df['Classe'].apply(lambda x: ordem_geografica.index(x))
-df_ativos_ordenados = df.sort_values(by=['Ordem_Classe_Geo', 'Total Atual'], ascending=[True, False])
+# Ordenação dos ativos por classe (do maior patrimônio para o menor)
+lista_classes_desc = df_resumo_classe['Classe'].tolist()
+df['Ordem_Classe_Desc'] = df['Classe'].apply(lambda x: lista_classes_desc.index(x))
+df_ativos_ordenados = df.sort_values(by=['Ordem_Classe_Desc', 'Total Atual'], ascending=[True, False])
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -136,7 +136,7 @@ aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Sim
 with aba_dash:
     st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
     
-    # Legenda Superior Dinâmica (Pílulas)
+    # Legenda Superior Dinâmica (Pílulas) em ordem decrescente
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
     for _, row in df_resumo_classe.iterrows():
         perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
@@ -152,21 +152,19 @@ with aba_dash:
                             title='Distribuição por Classe', hole=0.4,
                             color='Classe', color_discrete_map=mapa_cores)
         
-        # AJUSTE FINO DE ROTAÇÃO:
-        # Alterado de 180 para 0 para rotacionar o gráfico e jogar o FII e o Tesouro Direto 
-        # para a metade superior do círculo (quadrantes superiores).
-        fig_classe.update_traces(rotation=0, direction='counterclockwise', textinfo='percent+label')
-        fig_classe.update_layout(
-            legend=dict(itemsizing='constant'),
-            xaxis=dict(categoryorder='array', categoryarray=ordem_geografica)
-        )
+        # AJUSTE DA DISTRIBUIÇÃO DOS QUADRANTES:
+        # Iniciando às 12h (90°) no sentido anti-horário ('counterclockwise').
+        # O maior elemento (FII) ocupará o quadrante superior esquerdo.
+        # O segundo maior (Tesouro Direto) ocupará o quadrante superior direito.
+        fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label', sort=False)
+        fig_classe.update_layout(legend=dict(itemsizing='constant'))
         st.plotly_chart(fig_classe, use_container_width=True)
         
     with col2:
         fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', 
                             title='Distribuição por Ativo', hole=0.4)
-        # Sincroniza o gráfico de ativos com a mesma rotação inicial
-        fig_ativo.update_traces(rotation=0, direction='counterclockwise', sort=False)
+        # Sincronização do gráfico de ativos com a mesma lógica de quadrantes
+        fig_ativo.update_traces(rotation=90, direction='counterclockwise', sort=False)
         fig_ativo.update_layout(legend=dict(itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
