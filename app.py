@@ -114,9 +114,16 @@ for classe, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# --- PREPARAÇÃO DOS DADOS PARA GRÁFICOS ---
-df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
-df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False).reset_index(drop=True)
+# --- PREPARAÇÃO DOS DADOS PARA AS BARRAS ÚNICAS ---
+# Criamos uma coluna constante para agrupar tudo em uma única barra vertical
+df['Carteira'] = 'Meu Patrimônio'
+
+# Agrupamento por Classe (Do menor para o maior, pois o Plotly empilha de baixo para cima. Assim, o maior fica na base!)
+df_resumo_classe = df.groupby(['Carteira', 'Classe'])['Total Atual'].sum().reset_index()
+df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=True).reset_index(drop=True)
+
+# Formatação do texto interno em R$ para o gráfico de classes
+df_resumo_classe['Texto_Label'] = df_resumo_classe['Total Atual'].apply(lambda x: f"R$ {x:,.2f}")
 
 mapa_cores = {
     'FII': '#26a69a',           
@@ -125,19 +132,25 @@ mapa_cores = {
     'Cripto': '#ff5252'          
 }
 
+# Ordenação dos ativos (Do menor para o maior para garantir o maior na base da barra)
+df_ativos_grafico = df.sort_values(by='Total Atual', ascending=True).reset_index(drop=True)
+# Formatação do texto interno em % para o gráfico de ativos
+df_ativos_grafico['Texto_Label'] = df_ativos_grafico['Part. %'].apply(lambda x: f"{x:.2f}%" if x > 2 else "")
+
+# Dados finais para a tabela detalhe (Maior para o menor)
 df_tabela = df.sort_values(by='Total Atual', ascending=False)
 df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
-df_ativos_grafico = df.sort_values(by='Total Atual', ascending=False).reset_index(drop=True)
 
-# 5. Interface Gráfica (Linha única e explícita para evitar truncamento)
+# 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(["dashboard", "detalhe", "Simular Novos Aportes"])
 
 with aba_dash:
     st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
     
     # Legenda Superior Dinâmica (Pílulas)
+    df_pilulas = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
-    for _, row in df_resumo_classe.iterrows():
+    for _, row in df_pilulas.iterrows():
         perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
         html_legenda += f"<div style='background-color: #f0f2f6; padding: 4px 12px; border-radius: 15px; font-size: 14px; color: #31333F; font-weight: 500;'><span style='color: #666;'>{row['Classe']}:</span> {perc:.2f}%</div>"
     html_legenda += "</div>"
@@ -147,15 +160,17 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Gráfico por Classe em uma única linha de declaração
-        fig_classe = px.bar(df_resumo_classe, x='Total Atual', y='Classe', title='Distribuição por Classe (R$)', orientation='h', color='Classe', color_discrete_map=mapa_cores, text_auto='.2f')
-        fig_classe.update_layout(showlegend=False, xaxis_title="", yaxis_title="", yaxis=dict(autorange="reversed"))
+        # Gráfico de Barra Única por Classe (Exibindo R$)
+        fig_classe = px.bar(df_resumo_classe, x='Carteira', y='Total Atual', color='Classe', title='Distribuição por Classe (Soma 100%)', color_discrete_map=mapa_cores, text='Texto_Label')
+        fig_classe.update_layout(xaxis_title="", yaxis_title="Total em R$", showlegend=True, barmode='stack')
+        fig_classe.update_traces(textposition='inside', textfont_size=12)
         st.plotly_chart(fig_classe, use_container_width=True)
         
     with col2:
-        # Gráfico por Ativo em uma única linha de declaração
-        fig_ativo = px.bar(df_ativos_grafico, x='Total Atual', y='Ativo', title='Distribuição por Ativo (R$)', orientation='h', text_auto='.2f')
-        fig_ativo.update_layout(showlegend=False, xaxis_title="", yaxis_title="", yaxis=dict(autorange="reversed"), height=550) 
+        # Gráfico de Barra Única por Ativo (Exibindo % em relação ao total)
+        fig_ativo = px.bar(df_ativos_grafico, x='Carteira', y='Total Atual', color='Ativo', title='Distribuição por Ativo (Soma 100%)', text='Texto_Label')
+        fig_ativo.update_layout(xaxis_title="", yaxis_title="Total em R$", showlegend=True, barmode='stack')
+        fig_ativo.update_traces(textposition='inside', textfont_size=11)
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
