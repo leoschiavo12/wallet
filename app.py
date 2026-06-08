@@ -98,28 +98,4 @@ for classe, ativos in MINHA_CARTEIRA.items():
         else:
             qtd_formatada = f"{int(qtd)}"
             
-        linhas_tabela.append({
-            'Ativo': ticker, 
-            'Classe': classe, 
-            'Preço Atual': preco,
-            'Qtd': qtd_formatada, 
-            'Total Atual': subtotal
-        })
-
-df = pd.DataFrame(linhas_tabela)
-df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
-
-# --- PREPARAÇÃO E ORDENAÇÃO ESTÁVEL DE DADOS ---
-# Forçamos a tabela resumo a vir estritamente na ordem decrescente de valor
-df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
-df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False).reset_index(drop=True)
-
-# Cores mapeadas diretamente numa lista correspondente à ordenação decrescente
-# Para evitar descompasso interno no Plotly que quebra os gráficos
-mapa_cores_fixas = {
-    'FII': '#26a69a',           
-    'Tesouro Direto': '#29b6f6', 
-    'ETF': '#ff8a80',            
-    'Cripto': '#ff5252'          
-}
-lista_cores_ordenada = [mapa_cores_fixas[classe] for classe in df_resumo_classe
+        linhas_tabela
