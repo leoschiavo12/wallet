@@ -117,21 +117,30 @@ df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 
 # --- PREPARAÇÃO DOS DADOS PARA GRÁFICOS ---
 df['Carteira'] = ''
 
-# Agrupamento por Classe em ordem decrescente de valor para fixar o maior na base
+# Nova Paleta de Cores Premium (Estilo Pastel Confortável)
+mapa_cores_classe = {
+    'FII': '#4A7C7A',            # Azul-petróleo fosco
+    'Tesouro Direto': '#689775',  # Verde sálvia suave
+    'ETF': '#C05C46',             # Terracota / Coral queimado
+    'Cripto': '#E1B16A'           # Areia / Dourado queimado
+}
+paleta_ativos_continua = px.colors.sequential.Tealrose
+
+# 1. Tratamento do Gráfico de Classes
 df_resumo_classe = df.groupby(['Carteira', 'Classe'])['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False).reset_index(drop=True)
-df_resumo_classe['Texto_Label'] = df_resumo_classe['Total Atual'].apply(lambda x: f"R$ {x:,.2f}")
 
-mapa_cores = {
-    'FII': '#26a69a',           
-    'Tesouro Direto': '#29b6f6', 
-    'ETF': '#ff8a80',            
-    'Cripto': '#ff5252'          
-}
+# Geração do rótulo completo: "Classe <br> R$ Valor <br> %" (usando <br> para quebrar linha no Plotly)
+def gerar_rotulo_classe(row):
+    perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+    return f"<b>{row['Classe']}</b><br>R$ {row['Total Atual']:,.2f}<br>{perc:.1f}%"
 
-# Ordenação dos ativos (Maior para o menor patrimônio)
+df_resumo_classe['Texto_Label'] = df_resumo_classe.apply(gerar_rotulo_classe, axis=1)
+
+# 2. Tratamento do Gráfico de Ativos (Injetando a % diretamente no nome da Legenda)
 df_ativos_grafico = df.sort_values(by='Total Atual', ascending=False).reset_index(drop=True)
-df_ativos_grafico['Texto_Label'] = df_ativos_grafico['Part. %'].apply(lambda x: f"{x:.2f}%" if x > 1.5 else "")
+df_ativos_grafico['Ativo_Legenda'] = df_ativos_grafico.apply(lambda r: f"{r['Ativo']} ({r['Part. %']:.2f}%)", axis=1)
+df_ativos_grafico['Texto_Label'] = df_ativos_grafico['Part. %'].apply(lambda x: f"{x:.1f}%" if x > 2.2 else "")
 
 df_tabela = df.sort_values(by='Total Atual', ascending=False)
 df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
@@ -154,45 +163,6 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Gráfico por Classe (Escala Y 100% autogerida pelo Plotly baseado no volume em R$)
-        fig_classe = px.bar(df_resumo_classe, x='Carteira', y='Total Atual', color='Classe', title='Distribuição por Classe', color_discrete_map=mapa_cores, text='Texto_Label')
-        
-        fig_classe.update_layout(
-            xaxis=dict(title="", showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(title="", showgrid=True, zeroline=False, autorange=True), # Autorange garante adaptação infinita de valores
-            barmode='stack',
-            legend=dict(title="", traceorder="normal")
-        )
-        # uniformtext com min_size esconde o texto dinamicamente se o patrimônio daquela classe ficar pequeno demais no gráfico
-        fig_classe.update_layout(uniformtext_minsize=10, uniformtext_mode='hide')
-        fig_classe.update_traces(width=0.28, textposition='inside', textfont=dict(size=12, color="white"))
-        st.plotly_chart(fig_classe, use_container_width=True)
-        
-    with col2:
-        # Gráfico por Ativo (Escala Y percentual fixa de 0 a 100%)
-        fig_ativo = px.bar(df_ativos_grafico, x='Carteira', y='Part. %', color='Ativo', title='Distribuição por Ativo', text='Texto_Label')
-        
-        fig_ativo.update_layout(
-            xaxis=dict(title="", showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(title="", showgrid=True, zeroline=False, ticksuffix="%"),
-            barmode='stack',
-            legend=dict(title="", traceorder="normal")
-        )
-        fig_ativo.update_layout(uniformtext_minsize=9, uniformtext_mode='hide')
-        fig_ativo.update_traces(width=0.28, textposition='inside', textfont=dict(size=11, color="white"))
-        st.plotly_chart(fig_ativo, use_container_width=True)
-
-with aba_detalhe:
-    config_colunas = {
-        'Ativo': st.column_config.TextColumn("Ativo", alignment="center"),
-        'Classe': st.column_config.TextColumn("Classe", alignment="center"),
-        'Preço Atual': st.column_config.NumberColumn("Preço Atual", format="R$ %.2f", alignment="center"),
-        'Qtd': st.column_config.TextColumn("Qtd", alignment="center"), 
-        'Total Atual': st.column_config.NumberColumn("Total Atual", format="R$ %.2f", alignment="center"),
-        'Part. %': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
-    }
-    st.dataframe(df_tabela, use_container_width=True, hide_index=True, column_config=config_colunas)
-
-with aba_novos_aportes:
-    st.subheader('💡 Área para planejamento futuro')
-    st.info('Aqui nós vamos programar os botões para salvar as compras mês a mês no banco de dados!')
+        # Gráfico por Classe (Legenda removida e informações todas no bloco)
+        fig_classe = px.bar(
+            df_resumo_classe, x='Carteira', y='Total Atual', color='Classe',
