@@ -95,25 +95,17 @@ for classe, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# --- LÓGICA DINÂMICA COMPLETA DE ORDENAÇÃO DE QUADRANTES ---
-
-# 1. Agrupar classes e calcular ordem de grandeza real (Dinâmico para se reajustar sozinho)
+# --- PREPARAÇÃO DOS DADOS PARA OS GRÁFICOS ---
+# Agrupa classes e ordena em ordem decrescente de valor real
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
-# Ordena do maior patrimônio absoluto para o menor
 df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
 
-# Criamos um ranking automatizado (0 = maior de todos, 1 = segundo maior...)
-df_resumo_classe['Rank_Classe'] = range(len(df_resumo_classe))
+# Mapeia a ordem de tamanho das classes para os ativos não se misturarem (resolve PKIN11)
+lista_classes_ordenada = df_resumo_classe['Classe'].tolist()
+df['Ordem_Classe'] = df['Classe'].apply(lambda x: lista_classes_ordenada.index(x))
+df_ativos_ordenados = df.sort_values(by=['Ordem_Classe', 'Total Atual'], ascending=[True, False])
 
-# 2. Mapear esse ranking de volta nos ativos individuais
-df_ativos_ordenados = df.copy()
-mapeamento_rank = dict(zip(df_resumo_classe['Classe'], df_resumo_classe['Rank_Classe']))
-df_ativos_ordenados['Rank_Classe'] = df_ativos_ordenados['Classe'].map(mapeamento_rank)
-
-# Ordenação dos Ativos: Primeiro pela maior classe, depois pelo maior ativo dentro daquela classe
-df_ativos_ordenados = df_ativos_ordenados.sort_values(by=['Rank_Classe', 'Total Atual'], ascending=[True, False])
-
-# Reorganizar a tabela da aba detalhe puro para ordem decrescente padrão de patrimônio
+# Tabela da aba Detalhe (Sempre ordenada por maior patrimônio)
 df_tabela = df.sort_values(by='Total Atual', ascending=False)
 df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
 
@@ -123,13 +115,11 @@ aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Sim
 with aba_dash:
     st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
     
-    # Resumo Percentual (Pílulas) dinâmico e em ordem decrescente
-    df_pilulas = df_resumo_classe.copy()
-    df_pilulas['%'] = (df_pilulas['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
-    
+    # Legenda superior dinâmica e decrescente (Pílulas)
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
-    for _, row in df_pilulas.iterrows():
-        html_legenda += f"<div style='background-color: #f0f2f6; padding: 4px 12px; border-radius: 15px; font-size: 14px; color: #31333F; font-weight: 500;'><span style='color: #666;'>{row['Classe']}:</span> {row['%']:.2f}%</div>"
+    for _, row in df_resumo_classe.iterrows():
+        perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+        html_legenda += f"<div style='background-color: #f0f2f6; padding: 4px 12px; border-radius: 15px; font-size: 14px; color: #31333F; font-weight: 500;'><span style='color: #666;'>{row['Classe']}:</span> {perc:.2f}%</div>"
     html_legenda += "</div>"
     st.markdown(html_legenda, unsafe_allow_html=True)
     
@@ -137,17 +127,16 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Gráfico por Classe: sort=False força o Plotly a respeitar a nossa ordem matemática decrescente e cravar nos 90°
+        # Gráfico de Classes: Início em 0 com sentido horário gera o preenchimento perfeito dos quadrantes de cima para baixo
         fig_classe = px.pie(df_resumo_classe, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
-        fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label', sort=False)
-        # Força a legenda lateral do gráfico a acompanhar a ordem decrescente exata
+        fig_classe.update_traces(rotation=0, direction='clockwise', textinfo='percent+label', sort=False)
         fig_classe.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_classe, use_container_width=True)
         
     with col2:
-        # Gráfico por Ativo: Mantém os blocos unidos por classe sem misturar ativos (resolve o bug do PKIN11)
+        # Gráfico de Ativos: Mantém os blocos unidos por classe sem misturar nada
         fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
-        fig_ativo.update_traces(rotation=90, direction='counterclockwise', sort=False)
+        fig_ativo.update_traces(rotation=0, direction='clockwise', sort=False)
         fig_ativo.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
