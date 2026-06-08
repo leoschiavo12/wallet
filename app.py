@@ -5,9 +5,13 @@ import plotly.express as px
 import pandas as pd
 
 # 1. Configuração da Página
-st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
+st.set_page_config(
+    page_title="SmartWallet", 
+    layout="wide", 
+    page_icon="📊"
+)
 
-# Injeção de CSS para garantir a centralização da tabela nativa do Streamlit
+# Injeção de CSS para centralização de tabelas
 st.markdown("""
     <style>
         .stDataFrame div [role="gridcell"] > div {
@@ -25,14 +29,20 @@ st.markdown("""
 def obter_precos_b3(tickers_lista):
     if not tickers_lista:
         return {}
-    tickers_formatados = [f"{t.upper()}.SA" for t in tickers_lista]
+    tk_formatados = [f"{t.upper()}.SA" for t in tickers_lista]
     precos = {}
     try:
-        dados = yf.download(tickers_formatados, period="5d", group_by='ticker', progress=False, auto_adjust=True)
+        dados = yf.download(
+            tk_formatados, 
+            period="5d", 
+            group_by='ticker', 
+            progress=False, 
+            auto_adjust=True
+        )
         for t in tickers_lista:
             chave = f"{t.upper()}.SA"
             try:
-                if len(tickers_formatados) > 1:
+                if len(tk_formatados) > 1:
                     preco = dados[chave]['Close'].ffill().iloc[-1]
                 else:
                     preco = dados['Close'].ffill().iloc[-1]
@@ -45,7 +55,10 @@ def obter_precos_b3(tickers_lista):
 
 def obter_preco_btc():
     try:
-        res = requests.get("https://api.coinbase.com/v2/prices/BTC-BRL/spot", timeout=5)
+        res = requests.get(
+            "https://api.coinbase.com/v2/prices/BTC-BRL/spot", 
+            timeout=5
+        )
         return float(res.json()['data']['amount'])
     except:
         return 0.0
@@ -114,18 +127,4 @@ for classe, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# --- PREPARAÇÃO DOS DADOS PARA OS GRÁFICOS ---
-df['Carteira'] = ''
-
-# Nova paleta refinada para classes e escala sequencial agradável para ativos
-cores_customizadas_classe = {
-    'FII': '#3A6B68',            # Azul-petróleo acinzentado fosco
-    'Tesouro Direto': '#5F8D75',  # Verde sálvia contemporâneo
-    'ETF': '#B86B5C',             # Terracota suave / Rosa antigo
-    'Cripto': '#D4A35D'           # Ouro velho fosco
-}
-paleta_ativos = px.colors.diverging.Geyser
-
-# 1. Tratamento do Gráfico de Classes (Dados unificados por bloco)
-df_resumo_classe = df.groupby(['Carteira', 'Classe'])['Total Atual'].sum().reset_index()
-df_resumo_classe = df_resumo_
+#
