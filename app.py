@@ -109,18 +109,22 @@ for classe, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# --- CÁLCULO E LOGÍSTICA DE QUADRANTES ---
+# --- ESTRATÉGIA REVERSA DE QUADRANTES ---
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
-df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
 
-# Organização para o gráfico de ativos acompanhar os blocos unidos por classe em ordem decrescente
-lista_classes_ordenada = df_resumo_classe['Classe'].tolist()
-df['Ordem_Classe'] = df['Classe'].apply(lambda x: lista_classes_ordenada.index(x))
-df_ativos_ordenados = df.sort_values(by=['Ordem_Classe', 'Total Atual'], ascending=[True, False])
-
-# Tabela Detalhe (Ordenada estritamente pelo maior patrimônio líquido)
+# 1. Para as pílulas de legenda e tabela detalhe, mantemos do maior para o menor
+df_resumo_classe_desc = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
 df_tabela = df.sort_values(by='Total Atual', ascending=False)
 df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
+
+# 2. MÁGICA: Para o gráfico rotacionar em cascata empurrando o FII para o topo esquerdo,
+# nós ordenamos o dataframe do MENOR para o MAIOR ativo.
+df_classes_grafico = df_resumo_classe.sort_values(by='Total Atual', ascending=True)
+
+# Fazemos o mesmo agrupamento reverso para os ativos acompanharem suas classes
+lista_classes_reversa = df_classes_grafico['Classe'].tolist()
+df['Ordem_Classe'] = df['Classe'].apply(lambda x: lista_classes_reversa.index(x))
+df_ativos_ordenados = df.sort_values(by=['Ordem_Classe', 'Total Atual'], ascending=[True, True])
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -128,9 +132,9 @@ aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Sim
 with aba_dash:
     st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
     
-    # Legenda Superior Dinâmica (Pílulas)
+    # Legenda Superior Dinâmica (Pílulas) do Maior para o Menor
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
-    for _, row in df_resumo_classe.iterrows():
+    for _, row in df_resumo_classe_desc.iterrows():
         perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
         html_legenda += f"<div style='background-color: #f0f2f6; padding: 4px 12px; border-radius: 15px; font-size: 14px; color: #31333F; font-weight: 500;'><span style='color: #666;'>{row['Classe']}:</span> {perc:.2f}%</div>"
     html_legenda += "</div>"
@@ -140,20 +144,18 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        fig_classe = px.pie(df_resumo_classe, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
-        
-        # AJUSTE GEOMÉTRICO EXATO:
-        # Mudando a rotação para iniciar no ângulo correto e definindo o sentido anti-horário com o sort desativado,
-        # fazemos o FII (maior) ocupar o quadrante superior esquerdo, empurrando os outros sequencialmente.
-        fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label', sort=False)
-        fig_classe.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
+        fig_classe = px.pie(df_classes_grafico, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
+        # Começa em 90° (topo) e roda em sentido horário. Como o FII é o último da lista, ele vai terminar de ser desenhado
+        # exatamente no quadrante superior esquerdo, completando o ciclo perfeito!
+        fig_classe.update_traces(rotation=90, direction='clockwise', textinfo='percent+label', sort=False)
+        # Força a legenda lateral a manter a ordem decrescente bonita do maior para o menor
+        fig_classe.update_layout(legend=dict(categoryorder='total descending', itemsizing='constant'))
         st.plotly_chart(fig_classe, use_container_width=True)
         
     with col2:
         fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
-        # Aplica a mesma regra para manter a simetria visual perfeita entre os dois gráficos
-        fig_ativo.update_traces(rotation=90, direction='counterclockwise', sort=False)
-        fig_ativo.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
+        fig_ativo.update_traces(rotation=90, direction='clockwise', sort=False)
+        fig_ativo.update_layout(legend=dict(categoryorder='total descending', itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
