@@ -23,7 +23,8 @@ st.markdown("""
 
 # 2. Funções de Busca de Preços
 def obter_precos_b3(tickers_lista):
-    if not tickers_lista: return {}
+    if not tickers_lista:
+        return {}
     tickers_formatados = [f"{t.upper()}.SA" for t in tickers_lista]
     precos = {}
     try:
@@ -36,15 +37,18 @@ def obter_precos_b3(tickers_lista):
                 else:
                     preco = dados['Close'].ffill().iloc[-1]
                 precos[t.upper()] = float(preco) if str(preco) != 'nan' else 0.0
-            except: precos[t.upper()] = 0.0
-    except: pass
+            except:
+                precos[t.upper()] = 0.0
+    except:
+        pass
     return precos
 
 def obter_preco_btc():
     try:
         res = requests.get("https://api.coinbase.com/v2/prices/BTC-BRL/spot", timeout=5)
         return float(res.json()['data']['amount'])
-    except: return 0.0
+    except:
+        return 0.0
 
 def obter_preco_renda_2050():
     return 490.64
@@ -70,7 +74,8 @@ MINHA_CARTEIRA = {
 # 4. Processamento de Dados
 todos_b3 = []
 for classe_nome, ativos in MINHA_CARTEIRA.items():
-    if classe_nome in ['ETF', 'FII']: todos_b3.extend(ativos.keys())
+    if classe_nome in ['ETF', 'FII']:
+        todos_b3.extend(ativos.keys())
 
 bancada_precos = obter_precos_b3(todos_b3)
 preco_btc = obter_preco_btc()
@@ -79,4 +84,8 @@ preco_tesouro = obter_preco_renda_2050()
 linhas_tabela = []
 total_geral = 0.0
 
+# Indentação corrigida e alinhada estritamente com 4 espaços
 for classe, ativos in MINHA_CARTEIRA.items():
+    for ticker, qtd in ativos.items():
+        if classe in ['ETF', 'FII']: 
+            preco = bancada_precos.get(
