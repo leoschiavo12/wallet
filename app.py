@@ -69,8 +69,8 @@ MINHA_CARTEIRA = {
 
 # 4. Processamento de Dados
 todos_b3 = []
-for c, ativos in MINHA_CARTEIRA.items():
-    if c in ['ETF', 'FII']: todos_b3.extend(ativos.keys())
+for classe_nome, ativos in MINHA_CARTEIRA.items():
+    if classe_nome in ['ETF', 'FII']: todos_b3.extend(ativos.keys())
 
 bancada_precos = obter_precos_b3(todos_b3)
 preco_btc = obter_preco_btc()
@@ -109,21 +109,29 @@ for classe, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# --- ESTRATÉGIA REVERSA DE QUADRANTES ---
+# --- ESTRUTURAÇÃO DOS DADOS ---
+# Agrupamento limpo por classe ordenado do maior para o menor patrimônio
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
+df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
 
-# 1. Para as pílulas e tabela, mantemos o padrão decrescente clássico (Maior pro Menor)
-df_resumo_classe_desc = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
+# Mapeamento estrito de cores fixas para evitar que o Plotly mude as cores sozinho
+mapa_cores = {
+    'FII': '#26a69a',           # Verde/Ciano limpo
+    'Tesouro Direto': '#29b6f6', # Azul brilhante
+    'ETF': '#ff8a80',            # Coral/Rosa suave
+    'Cripto': '#ff5252'          # Vermelho vivo
+}
+
+# Tabela Detalhe estruturada
 df_tabela = df.sort_values(by='Total Atual', ascending=False)
 df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
 
-# 2. Ordem Inversa para o Gráfico se comportar na Cascata desejada
-df_classes_grafico = df_resumo_classe.sort_values(by='Total Atual', ascending=True)
+# Ordem geográfica exata desejada: FII -> Tesouro Direto -> Cripto -> ETF
+ordem_geografica = ['FII', 'Tesouro Direto', 'Cripto', 'ETF']
 
-# Vincula e ordena os ativos de forma idêntica à reversão das classes
-lista_classes_reversa = df_classes_grafico['Classe'].tolist()
-df['Ordem_Classe'] = df['Classe'].apply(lambda x: lista_classes_reversa.index(x))
-df_ativos_ordenados = df.sort_values(by=['Ordem_Classe', 'Total Atual'], ascending=[True, True])
+# Forçar a ordenação dos ativos para seguirem estritamente esse desenho de blocos
+df['Ordem_Classe_Geo'] = df['Classe'].apply(lambda x: ordem_geografica.index(x))
+df_ativos_ordenados = df.sort_values(by=['Ordem_Classe_Geo', 'Total Atual'], ascending=[True, False])
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -133,7 +141,7 @@ with aba_dash:
     
     # Legenda Superior Dinâmica (Pílulas)
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
-    for _, row in df_resumo_classe_desc.iterrows():
+    for _, row in df_resumo_classe.iterrows():
         perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
         html_legenda += f"<div style='background-color: #f0f2f6; padding: 4px 12px; border-radius: 15px; font-size: 14px; color: #31333F; font-weight: 500;'><span style='color: #666;'>{row['Classe']}:</span> {perc:.2f}%</div>"
     html_legenda += "</div>"
@@ -143,16 +151,26 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        fig_classe = px.pie(df_classes_grafico, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
-        # Rotação 90° + sentido horário + sort desativado (Inicia o menor na direita e crava o FII no canto superior esquerdo)
-        fig_classe.update_traces(rotation=90, direction='clockwise', textinfo='percent+label', sort=False)
-        # Ajustado o layout de legenda sem a propriedade que dava erro
-        fig_classe.update_layout(legend=dict(itemsizing='constant'))
+        # Gráfico de Classes configurado com cores explícitas
+        fig_classe = px.pie(df_resumo_classe, values='Total Atual', names='Classe', 
+                            title='Distribuição por Classe', hole=0.4,
+                            color='Classe', color_discrete_map=mapa_cores)
+        
+        # XEQUE-MATE DOS QUADRANTES:
+        # Iniciamos em 180° e rodamos no sentido anti-horário. Usando a propriedade 'categoryarray',
+        # forçamos o Plotly a desenhar os blocos exatamente na sequência espacial que você planejou.
+        fig_classe.update_traces(rotation=180, direction='counterclockwise', textinfo='percent+label')
+        fig_classe.update_layout(
+            legend=dict(itemsizing='constant'),
+            xaxis=dict(categoryorder='array', categoryarray=ordem_geografica)
+        )
         st.plotly_chart(fig_classe, use_container_width=True)
         
     with col2:
-        fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
-        fig_ativo.update_traces(rotation=90, direction='clockwise', sort=False)
+        # Gráfico de Ativos espelhando perfeitamente a mesma ordem e rotação das classes
+        fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', 
+                            title='Distribuição por Ativo', hole=0.4)
+        fig_ativo.update_traces(rotation=180, direction='counterclockwise', sort=False)
         fig_ativo.update_layout(legend=dict(itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
