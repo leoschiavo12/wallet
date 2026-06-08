@@ -115,9 +115,9 @@ df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
 # --- PREPARAÇÃO DOS DADOS PARA GRÁFICOS ---
-df['Carteira'] = '' # Removido o rótulo de texto do eixo X para limpar a base
+df['Carteira'] = ''
 
-# Agrupamento por Classe (Do maior para o menor patrimônio)
+# Agrupamento por Classe em ordem decrescente de valor para fixar o maior na base
 df_resumo_classe = df.groupby(['Carteira', 'Classe'])['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False).reset_index(drop=True)
 df_resumo_classe['Texto_Label'] = df_resumo_classe['Total Atual'].apply(lambda x: f"R$ {x:,.2f}")
@@ -129,7 +129,7 @@ mapa_cores = {
     'Cripto': '#ff5252'          
 }
 
-# Ordenação dos ativos (Do maior para o menor patrimônio)
+# Ordenação dos ativos (Maior para o menor patrimônio)
 df_ativos_grafico = df.sort_values(by='Total Atual', ascending=False).reset_index(drop=True)
 df_ativos_grafico['Texto_Label'] = df_ativos_grafico['Part. %'].apply(lambda x: f"{x:.2f}%" if x > 1.5 else "")
 
@@ -154,30 +154,31 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Gráfico por Classe
+        # Gráfico por Classe (Escala Y 100% autogerida pelo Plotly baseado no volume em R$)
         fig_classe = px.bar(df_resumo_classe, x='Carteira', y='Total Atual', color='Classe', title='Distribuição por Classe', color_discrete_map=mapa_cores, text='Texto_Label')
         
-        # Limpeza total dos eixos e ordenação decrescente da legenda interativa
         fig_classe.update_layout(
             xaxis=dict(title="", showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(title="", showgrid=True, zeroline=False),
+            yaxis=dict(title="", showgrid=True, zeroline=False, autorange=True), # Autorange garante adaptação infinita de valores
             barmode='stack',
-            legend=dict(title="", traceorder="normal") # Mantém a ordem decrescente do DataFrame
+            legend=dict(title="", traceorder="normal")
         )
+        # uniformtext com min_size esconde o texto dinamicamente se o patrimônio daquela classe ficar pequeno demais no gráfico
+        fig_classe.update_layout(uniformtext_minsize=10, uniformtext_mode='hide')
         fig_classe.update_traces(width=0.28, textposition='inside', textfont=dict(size=12, color="white"))
         st.plotly_chart(fig_classe, use_container_width=True)
         
     with col2:
-        # Gráfico por Ativo
+        # Gráfico por Ativo (Escala Y percentual fixa de 0 a 100%)
         fig_ativo = px.bar(df_ativos_grafico, x='Carteira', y='Part. %', color='Ativo', title='Distribuição por Ativo', text='Texto_Label')
         
-        # Limpeza total dos eixos e ordenação decrescente da legenda interativa
         fig_ativo.update_layout(
             xaxis=dict(title="", showgrid=False, zeroline=False, showticklabels=False),
             yaxis=dict(title="", showgrid=True, zeroline=False, ticksuffix="%"),
             barmode='stack',
-            legend=dict(title="", traceorder="normal") # Mantém a ordem decrescente do DataFrame
+            legend=dict(title="", traceorder="normal")
         )
+        fig_ativo.update_layout(uniformtext_minsize=9, uniformtext_mode='hide')
         fig_ativo.update_traces(width=0.28, textposition='inside', textfont=dict(size=11, color="white"))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
