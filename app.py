@@ -112,16 +112,15 @@ df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 
 # --- ESTRATÉGIA REVERSA DE QUADRANTES ---
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 
-# 1. Para as pílulas de legenda e tabela detalhe, mantemos do maior para o menor
+# 1. Para as pílulas e tabela, mantemos o padrão decrescente clássico (Maior pro Menor)
 df_resumo_classe_desc = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
 df_tabela = df.sort_values(by='Total Atual', ascending=False)
 df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
 
-# 2. MÁGICA: Para o gráfico rotacionar em cascata empurrando o FII para o topo esquerdo,
-# nós ordenamos o dataframe do MENOR para o MAIOR ativo.
+# 2. Ordem Inversa para o Gráfico se comportar na Cascata desejada
 df_classes_grafico = df_resumo_classe.sort_values(by='Total Atual', ascending=True)
 
-# Fazemos o mesmo agrupamento reverso para os ativos acompanharem suas classes
+# Vincula e ordena os ativos de forma idêntica à reversão das classes
 lista_classes_reversa = df_classes_grafico['Classe'].tolist()
 df['Ordem_Classe'] = df['Classe'].apply(lambda x: lista_classes_reversa.index(x))
 df_ativos_ordenados = df.sort_values(by=['Ordem_Classe', 'Total Atual'], ascending=[True, True])
@@ -132,7 +131,7 @@ aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Sim
 with aba_dash:
     st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
     
-    # Legenda Superior Dinâmica (Pílulas) do Maior para o Menor
+    # Legenda Superior Dinâmica (Pílulas)
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
     for _, row in df_resumo_classe_desc.iterrows():
         perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
@@ -145,17 +144,16 @@ with aba_dash:
     col1, col2 = st.columns(2)
     with col1:
         fig_classe = px.pie(df_classes_grafico, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
-        # Começa em 90° (topo) e roda em sentido horário. Como o FII é o último da lista, ele vai terminar de ser desenhado
-        # exatamente no quadrante superior esquerdo, completando o ciclo perfeito!
+        # Rotação 90° + sentido horário + sort desativado (Inicia o menor na direita e crava o FII no canto superior esquerdo)
         fig_classe.update_traces(rotation=90, direction='clockwise', textinfo='percent+label', sort=False)
-        # Força a legenda lateral a manter a ordem decrescente bonita do maior para o menor
-        fig_classe.update_layout(legend=dict(categoryorder='total descending', itemsizing='constant'))
+        # Ajustado o layout de legenda sem a propriedade que dava erro
+        fig_classe.update_layout(legend=dict(itemsizing='constant'))
         st.plotly_chart(fig_classe, use_container_width=True)
         
     with col2:
         fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
         fig_ativo.update_traces(rotation=90, direction='clockwise', sort=False)
-        fig_ativo.update_layout(legend=dict(categoryorder='total descending', itemsizing='constant'))
+        fig_ativo.update_layout(legend=dict(itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
