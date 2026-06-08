@@ -7,14 +7,31 @@ import pandas as pd
 # 1. Configuração da Página
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
 
-# Forçar o alinhamento centralizado de todas as células usando markdown global
+# Estilização global para tabelas HTML normais ficarem bonitas e centralizadas no Streamlit
 st.markdown("""
     <style>
-        div[data-testid="stDataFrame"] td, 
-        div[data-testid="stDataFrame"] th,
-        .stDataFrame iframe,
-        div[data-grid-canvas] {
+        .tabela-carteira {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: sans-serif;
+            margin: 20px 0;
+        }
+        .tabela-carteira th {
+            background-color: #f0f2f6;
+            color: #31333F;
+            font-weight: bold;
+            padding: 12px;
+            border: 1px solid #e6e9ef;
             text-align: center !important;
+        }
+        .tabela-carteira td {
+            padding: 12px;
+            border: 1px solid #e6e9ef;
+            text-align: center !important;
+            color: #31333F;
+        }
+        .tabela-carteira tr:nth-child(even) {
+            background-color: #f8f9fb;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -103,25 +120,9 @@ df_base['Part. % Numérica'] = (df_base['Total Numérico'] / total_geral * 100) 
 # Ordenação padrão pelo maior patrimônio
 df_base = df_base.sort_values(by='Total Numérico', ascending=False)
 
-# Criando a tabela final com os textos pré-formatados para FORÇAR a centralização
-df_exibicao = pd.DataFrame()
-df_exibicao['Ativo'] = df_base['Ativo']
-df_exibicao['Classe'] = df_base['Classe']
-df_exibicao['Preço Atual'] = df_base['Preço Numérico'].map('R$ {:.2f}'.format)
-
-# Tratamento das regras de casas decimais para Qtd
-qtd_formatada = []
-for idx, row in df_base.iterrows():
-    if row['Ativo'] == 'BTC':
-        qtd_formatada.append(f"{row['Qtd Numérica']:.8f}")
-    elif row['Ativo'] == 'Renda+ 2050':
-        qtd_formatada.append(f"{row['Qtd Numérica']:.2f}")
-    else:
-        qtd_formatada.append(f"{int(row['Qtd Numérica'])}")
-df_exibicao['Qtd'] = qtd_formatada
-
-df_exibicao['Total Atual'] = df_base['Total Numérico'].map('R$ {:.2f}'.format)
-df_exibicao['Part. %'] = df_base['Part. % Numérica'].map('{:.2f}%'.format)
+# Agrupamento por classe para o gráfico de rosca principal
+df_classes = df_base.groupby('Classe')['Total Numérico'].sum().reset_index()
+df_classes = df_classes.sort_values(by='Total Numérico', ascending=False)
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -144,35 +145,40 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Gráfico por Classe ordenado explicitamente do maior para o menor
-        fig_classe = px.pie(df_resumo_classe, values='Total Numérico', names='Classe', title='Distribuição por Classe', hole=0.4)
+        fig_classe = px.pie(df_classes, values='Total Numérico', names='Classe', title='Distribuição por Classe', hole=0.4)
         fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label')
         st.plotly_chart(fig_classe, use_container_width=True)
     with col2:
-        # Gráfico por Ativo ordenado explicitamente do maior para o menor
         fig_ativo = px.pie(df_base, values='Total Numérico', names='Ativo', title='Distribuição por Ativo', hole=0.4)
         fig_ativo.update_traces(rotation=90, direction='counterclockwise')
         fig_ativo.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    # Configuração de alinhamento textual explícito
-    config_colunas = {
-        'Ativo': st.column_config.TextColumn("Ativo", alignment="center"),
-        'Classe': st.column_config.TextColumn("Classe", alignment="center"),
-        'Preço Atual': st.column_config.TextColumn("Preço Atual", alignment="center"),
-        'Qtd': st.column_config.TextColumn("Qtd", alignment="center"),
-        'Total Atual': st.column_config.TextColumn("Total Atual", alignment="center"),
-        'Part. %': st.column_config.TextColumn("Part. %", alignment="center")
-    }
+    # Construção da Tabela HTML Pura para garantir Centralização e Bloqueio de Edição Absolutos
+    html_tabela = "<table class='tabela-carteira'>"
+    html_tabela += "<thead><tr><th>Ativo</th><th>Classe</th><th>Preço Atual</th><th>Qtd</th><th>Total Atual</th><th>Part. %</th></tr></thead>"
+    html_tabela += "<tbody>"
+    
+    for idx, row in df_base.iterrows():
+        # Formatação inteligente das casas decimais da Qtd
+        if row['Ativo'] == 'BTC':
+            qtd_txt = f"{row['Qtd Numérica']:.8f}"
+        elif row['Ativo'] == 'Renda+ 2050':
+            qtd_txt = f"{row['Qtd Numérica']:.2f}"
+        else:
+            qtd_txt = f"{int(row['Qtd Numérica'])}"
+            
+        preco_txt = f"R$ {row['Preço Numérico']:.2f}"
+        total_txt = f"R$ {row['Total Numérico']:.2f}"
+        part_txt = f"{row['Part. % Numérica']:.2f}%"
         
-    # Exibição estritamente travada para leitura e totalmente centralizada
-    st.dataframe(
-        df_exibicao, 
-        use_container_width=True, 
-        hide_index=True, 
-        column_config=config_colunas
-    )
+        html_tabela += f"<tr><td>{row['Ativo']}</td><td>{row['Classe']}</td><td>{preco_txt}</td><td>{qtd_txt}</td><td>{total_txt}</td><td>{part_txt}</td></tr>"
+        
+    html_tabela += "</tbody></table>"
+    
+    # Injeta a tabela diretamente na interface
+    st.markdown(html_tabela, unsafe_allow_html=True)
 
 with aba_novos_aportes:
     st.subheader('💡 Área para planejamento futuro')
