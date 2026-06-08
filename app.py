@@ -7,6 +7,25 @@ import pandas as pd
 # 1. Configuração da Página
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
 
+# Forçar centralização absoluta de cabeçalhos e células da tabela via CSS injetado
+st.markdown("""
+    <style>
+        /* Centraliza o texto de todas as células de dados */
+        .stDataFrame div[data-testid="stTable"] td, 
+        div[data-testid="data-grid-canvas"] {
+            text-align: center !important;
+        }
+        /* Centraliza o texto dos cabeçalhos das colunas */
+        .stDataFrame div[data-testid="stTable"] th {
+            text-align: center !important;
+        }
+        /* Garante a centralização interna nos blocos de texto do Streamlit Dataframe */
+        div[data-testid="stDataFrame"] {
+            text-align: center !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
 # 2. Funções de Busca de Preços
 def obter_precos_b3(tickers_lista):
     if not tickers_lista: return {}
@@ -85,8 +104,10 @@ for classe, ativos in MINHA_CARTEIRA.items():
         })
 
 df = pd.DataFrame(linhas_tabela)
-# Ajuste no cálculo da participação (multiplicado por 100)
 df['Participação'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+
+# Ordena a tabela do maior patrimônio para o menor por padrão
+df = df.sort_values(by='Total Atual', ascending=False)
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -110,35 +131,27 @@ with aba_dash:
     col1, col2 = st.columns(2)
     with col1:
         fig_classe = px.pie(df, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
-        # Rotação 0 + sentido anti-horário joga o início para o 2º quadrante (esquerda superior)
-        fig_classe.update_traces(rotation=0, direction='counterclockwise', textinfo='percent+label')
+        # Rotação em 90 graus + sentido horário joga as maiores fatias direto para a esquerda superior (2º quadrante)
+        fig_classe.update_traces(rotation=90, direction='clockwise', textinfo='percent+label')
         st.plotly_chart(fig_classe, use_container_width=True)
     with col2:
         fig_ativo = px.pie(df, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
-        fig_ativo.update_traces(rotation=0, direction='counterclockwise')
+        fig_ativo.update_traces(rotation=90, direction='clockwise')
         fig_ativo.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
     st.subheader('📋 Detalhamento Fino da Carteira')
     
-    # Configuração de Colunas com Centralização e Formatação
+    # Configuração das Colunas (reforçando alinhamento centralizado nas propriedades também)
     config_colunas = {
-        'Ativo': st.column_config.TextColumn("Ativo", width="medium", help="Código do ativo", validate=None),
-        'Classe': st.column_config.TextColumn("Classe"),
-        'Quantidade': st.column_config.NumberColumn("Qtd", format="%.2f"),
-        'Preço Atual': st.column_config.NumberColumn("Preço Atual", format="R$ %.2f"),
-        'Total Atual': st.column_config.NumberColumn("Total Atual", format="R$ %.2f"),
-        'Participação': st.column_config.NumberColumn("Part. %", format="%.2f%%")
+        'Ativo': st.column_config.TextColumn("Ativo", alignment="center"),
+        'Classe': st.column_config.TextColumn("Classe", alignment="center"),
+        'Quantidade': st.column_config.NumberColumn("Qtd", format="%.2f", alignment="center"),
+        'Preço Atual': st.column_config.NumberColumn("Preço Atual", format="R$ %.2f", alignment="center"),
+        'Total Atual': st.column_config.NumberColumn("Total Atual", format="R$ %.2f", alignment="center"),
+        'Participação': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
     }
-    
-    # Exibição do Dataframe (A centralização é aplicada via CSS injetado para garantir eficácia)
-    st.markdown("""
-        <style>
-            div[data-testid="stDataFrame"] td {text-align: center !important;}
-            div[data-testid="stDataFrame"] th {text-align: center !important;}
-        </style>
-        """, unsafe_allow_html=True)
         
     st.dataframe(df, use_container_width=True, hide_index=True, column_config=config_colunas)
 
