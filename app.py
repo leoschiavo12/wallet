@@ -77,7 +77,6 @@ for classe, ativos in MINHA_CARTEIRA.items():
         subtotal = qtd * preco
         total_geral += subtotal
         
-        # Formatação precisa das quantidades por tipo de ativo
         if ticker == 'BTC':
             qtd_formatada = f"{qtd:.8f}"
         elif ticker == 'Renda+ 2050':
@@ -96,26 +95,27 @@ for classe, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# Ordena a tabela do maior patrimônio para o menor (comportamento padrão da tabela)
-df = df.sort_values(by='Total Atual', ascending=False)
+# --- LÓGICA DINÂMICA COMPLETA DE ORDENAÇÃO DE QUADRANTES ---
 
-# Organização física exata das colunas desejadas
-df = df[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
-
-# --- PROCESSAMENTO DOS GRÁFICOS ---
-# Criando o agrupamento por classe e FORÇANDO a ordem dos quadrantes sugerida por você
+# 1. Agrupar classes e calcular ordem de grandeza real (Dinâmico para se reajustar sozinho)
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
-df_resumo_classe['%'] = (df_resumo_classe['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+# Ordena do maior patrimônio absoluto para o menor
+df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
 
-# Mapeamento para garantir FII (2ºQ), Tesouro (3ºQ), ETF (4ºQ) e Cripto (1ºQ)
-ordem_quadrantes = {'FII': 0, 'Tesouro Direto': 1, 'ETF': 2, 'Cripto': 3}
-df_resumo_classe['Ordem'] = df_resumo_classe['Classe'].map(ordem_quadrantes)
-df_resumo_classe = df_resumo_classe.sort_values(by='Ordem')
+# Criamos um ranking automatizado (0 = maior de todos, 1 = segundo maior...)
+df_resumo_classe['Rank_Classe'] = range(len(df_resumo_classe))
 
-# O mesmo para os ativos: agrupar por classe primeiro para manter os quadrantes coordenados
+# 2. Mapear esse ranking de volta nos ativos individuais
 df_ativos_ordenados = df.copy()
-df_ativos_ordenados['Ordem_Classe'] = df_ativos_ordenados['Classe'].map(ordem_quadrantes)
-df_ativos_ordenados = df_ativos_ordenados.sort_values(by=['Ordem_Classe', 'Total Atual'], ascending=[True, False])
+mapeamento_rank = dict(zip(df_resumo_classe['Classe'], df_resumo_classe['Rank_Classe']))
+df_ativos_ordenados['Rank_Classe'] = df_ativos_ordenados['Classe'].map(mapeamento_rank)
+
+# Ordenação dos Ativos: Primeiro pela maior classe, depois pelo maior ativo dentro daquela classe
+df_ativos_ordenados = df_ativos_ordenados.sort_values(by=['Rank_Classe', 'Total Atual'], ascending=[True, False])
+
+# Reorganizar a tabela da aba detalhe puro para ordem decrescente padrão de patrimônio
+df_tabela = df.sort_values(by='Total Atual', ascending=False)
+df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -123,8 +123,10 @@ aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Sim
 with aba_dash:
     st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
     
-    # Resumo Percentual de pílulas ordenadas por tamanho
-    df_pilulas = df_resumo_classe.sort_values(by='%', ascending=False)
+    # Resumo Percentual (Pílulas) dinâmico e em ordem decrescente
+    df_pilulas = df_resumo_classe.copy()
+    df_pilulas['%'] = (df_pilulas['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+    
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
     for _, row in df_pilulas.iterrows():
         html_legenda += f"<div style='background-color: #f0f2f6; padding: 4px 12px; border-radius: 15px; font-size: 14px; color: #31333F; font-weight: 500;'><span style='color: #666;'>{row['Classe']}:</span> {row['%']:.2f}%</div>"
@@ -135,19 +137,21 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Gráfico por Classe montado com a ordem fixa dos quadrantes e desativando a auto-reordenação interna do Plotly
+        # Gráfico por Classe: sort=False força o Plotly a respeitar a nossa ordem matemática decrescente e cravar nos 90°
         fig_classe = px.pie(df_resumo_classe, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
         fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label', sort=False)
+        # Força a legenda lateral do gráfico a acompanhar a ordem decrescente exata
+        fig_classe.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_classe, use_container_width=True)
+        
     with col2:
-        # Gráfico por Ativo seguindo a mesma coerência geográfica
+        # Gráfico por Ativo: Mantém os blocos unidos por classe sem misturar ativos (resolve o bug do PKIN11)
         fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
         fig_ativo.update_traces(rotation=90, direction='counterclockwise', sort=False)
         fig_ativo.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    # Configuração nativa de colunas usando alinhamento centralizado direto na API do Streamlit
     config_colunas = {
         'Ativo': st.column_config.TextColumn("Ativo", alignment="center"),
         'Classe': st.column_config.TextColumn("Classe", alignment="center"),
@@ -157,9 +161,8 @@ with aba_detalhe:
         'Part. %': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
     }
         
-    # Exibição bonita padrão do Streamlit totalmente bloqueada contra edições
     st.data_editor(
-        df, 
+        df_tabela, 
         use_container_width=True, 
         hide_index=True, 
         column_config=config_colunas,
