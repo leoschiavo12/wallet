@@ -110,26 +110,23 @@ df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
 # --- ESTRUTURAÇÃO DOS DADOS ---
-# Agrupamento limpo por classe ordenado do maior para o menor patrimônio
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
 
-# Mapeamento estrito de cores fixas para evitar que o Plotly mude as cores sozinho
+# Mapeamento fixo de cores para manter a identidade das classes
 mapa_cores = {
-    'FII': '#26a69a',           # Verde/Ciano limpo
-    'Tesouro Direto': '#29b6f6', # Azul brilhante
-    'ETF': '#ff8a80',            # Coral/Rosa suave
-    'Cripto': '#ff5252'          # Vermelho vivo
+    'FII': '#26a69a',           
+    'Tesouro Direto': '#29b6f6', 
+    'ETF': '#ff8a80',            
+    'Cripto': '#ff5252'          
 }
 
-# Tabela Detalhe estruturada
 df_tabela = df.sort_values(by='Total Atual', ascending=False)
 df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
 
-# Ordem geográfica exata desejada: FII -> Tesouro Direto -> Cripto -> ETF
+# Ordem estrutural de desenho das fatias
 ordem_geografica = ['FII', 'Tesouro Direto', 'Cripto', 'ETF']
 
-# Forçar a ordenação dos ativos para seguirem estritamente esse desenho de blocos
 df['Ordem_Classe_Geo'] = df['Classe'].apply(lambda x: ordem_geografica.index(x))
 df_ativos_ordenados = df.sort_values(by=['Ordem_Classe_Geo', 'Total Atual'], ascending=[True, False])
 
@@ -151,15 +148,14 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Gráfico de Classes configurado com cores explícitas
         fig_classe = px.pie(df_resumo_classe, values='Total Atual', names='Classe', 
                             title='Distribuição por Classe', hole=0.4,
                             color='Classe', color_discrete_map=mapa_cores)
         
-        # XEQUE-MATE DOS QUADRANTES:
-        # Iniciamos em 180° e rodamos no sentido anti-horário. Usando a propriedade 'categoryarray',
-        # forçamos o Plotly a desenhar os blocos exatamente na sequência espacial que você planejou.
-        fig_classe.update_traces(rotation=180, direction='counterclockwise', textinfo='percent+label')
+        # AJUSTE FINO DE ROTAÇÃO:
+        # Alterado de 180 para 0 para rotacionar o gráfico e jogar o FII e o Tesouro Direto 
+        # para a metade superior do círculo (quadrantes superiores).
+        fig_classe.update_traces(rotation=0, direction='counterclockwise', textinfo='percent+label')
         fig_classe.update_layout(
             legend=dict(itemsizing='constant'),
             xaxis=dict(categoryorder='array', categoryarray=ordem_geografica)
@@ -167,10 +163,10 @@ with aba_dash:
         st.plotly_chart(fig_classe, use_container_width=True)
         
     with col2:
-        # Gráfico de Ativos espelhando perfeitamente a mesma ordem e rotação das classes
         fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', 
                             title='Distribuição por Ativo', hole=0.4)
-        fig_ativo.update_traces(rotation=180, direction='counterclockwise', sort=False)
+        # Sincroniza o gráfico de ativos com a mesma rotação inicial
+        fig_ativo.update_traces(rotation=0, direction='counterclockwise', sort=False)
         fig_ativo.update_layout(legend=dict(itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
