@@ -13,11 +13,10 @@ st.markdown("""
         /* Centraliza o texto de todas as células de dados e cabeçalhos */
         .stDataFrame div[data-testid="stTable"] td, 
         .stDataFrame div[data-testid="stTable"] th,
-        div[data-testid="data-grid-canvas"] {
+        div[data-testid="data-grid-canvas"],
+        .stDataFrame div {
             text-align: center !important;
-        }
-        div[data-testid="stDataFrame"] {
-            text-align: center !important;
+            justify-content: center !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -92,7 +91,7 @@ for classe, ativos in MINHA_CARTEIRA.items():
         subtotal = qtd * preco
         total_geral += subtotal
         
-        # Criação do formato de exibição customizado para cada tipo de ativo (Inteiro vs Decimal)
+        # Formatação inteligente das casas decimais por ativo
         if ticker == 'BTC':
             qtd_formatada = f"{qtd:.8f}"
         elif ticker == 'Renda+ 2050':
@@ -114,8 +113,12 @@ df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 
 # Ordena do maior patrimônio para o menor por padrão
 df = df.sort_values(by='Total Atual', ascending=False)
 
-# Reorganiza a ordem física das colunas conforme solicitado
+# Reorganiza a ordem física das colunas: Preço Atual veio ANTES de Qtd
 df = df[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
+
+# Agrupamento por classe para o gráfico de rosca principal
+df_classes = df.groupby('Classe')['Total Atual'].sum().reset_index()
+df_classes = df_classes.sort_values(by='Total Atual', ascending=False)
 
 # 5. Interface Gráfica
 aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Simular Novos Aportes'])
@@ -138,27 +141,27 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        fig_classe = px.pie(df, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
-        fig_classe.update_traces(rotation=90, direction='clockwise', textinfo='percent+label')
+        fig_classe = px.pie(df_classes, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
+        # Rotação 90 + Sentido Anti-Horário distribui perfeitamente nos quadrantes: 2º -> 3º -> 4º -> 1º
+        fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label')
         st.plotly_chart(fig_classe, use_container_width=True)
     with col2:
         fig_ativo = px.pie(df, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
-        fig_ativo.update_traces(rotation=90, direction='clockwise')
+        fig_ativo.update_traces(rotation=90, direction='counterclockwise')
         fig_ativo.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    # Título removido conforme solicitado. Configuração de colunas apenas para formatação visual e alinhamento.
+    # Título removido e tabela configurada como não editável (disabled=True)
     config_colunas = {
         'Ativo': st.column_config.TextColumn("Ativo", alignment="center"),
         'Classe': st.column_config.TextColumn("Classe", alignment="center"),
         'Preço Atual': st.column_config.NumberColumn("Preço Atual", format="R$ %.2f", alignment="center"),
-        'Qtd': st.column_config.TextColumn("Qtd", alignment="center"), # Tratado como texto pré-formatado para aceitar inteiros e decimais na mesma coluna
+        'Qtd': st.column_config.TextColumn("Qtd", alignment="center"),
         'Total Atual': st.column_config.NumberColumn("Total Atual", format="R$ %.2f", alignment="center"),
         'Part. %': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
     }
         
-    # Exibição do Dataframe desativando qualquer clique de edição (disabled=True tranca todas as colunas)
     st.data_editor(
         df, 
         use_container_width=True, 
