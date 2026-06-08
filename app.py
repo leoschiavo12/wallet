@@ -114,55 +114,18 @@ for classe, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# --- PREPARAÇÃO DOS DADOS PARA GRÁFICOS ---
+# --- PREPARAÇÃO DOS DADOS PARA OS GRÁFICOS ---
 df['Carteira'] = ''
 
-# Nova Paleta de Cores Premium (Estilo Pastel Confortável)
-mapa_cores_classe = {
-    'FII': '#4A7C7A',            # Azul-petróleo fosco
-    'Tesouro Direto': '#689775',  # Verde sálvia suave
-    'ETF': '#C05C46',             # Terracota / Coral queimado
-    'Cripto': '#E1B16A'           # Areia / Dourado queimado
+# Nova paleta refinada para classes e escala sequencial agradável para ativos
+cores_customizadas_classe = {
+    'FII': '#3A6B68',            # Azul-petróleo acinzentado fosco
+    'Tesouro Direto': '#5F8D75',  # Verde sálvia contemporâneo
+    'ETF': '#B86B5C',             # Terracota suave / Rosa antigo
+    'Cripto': '#D4A35D'           # Ouro velho fosco
 }
-paleta_ativos_continua = px.colors.sequential.Tealrose
+paleta_ativos = px.colors.diverging.Geyser
 
-# 1. Tratamento do Gráfico de Classes
+# 1. Tratamento do Gráfico de Classes (Dados unificados por bloco)
 df_resumo_classe = df.groupby(['Carteira', 'Classe'])['Total Atual'].sum().reset_index()
-df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False).reset_index(drop=True)
-
-# Geração do rótulo completo: "Classe <br> R$ Valor <br> %" (usando <br> para quebrar linha no Plotly)
-def gerar_rotulo_classe(row):
-    perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
-    return f"<b>{row['Classe']}</b><br>R$ {row['Total Atual']:,.2f}<br>{perc:.1f}%"
-
-df_resumo_classe['Texto_Label'] = df_resumo_classe.apply(gerar_rotulo_classe, axis=1)
-
-# 2. Tratamento do Gráfico de Ativos (Injetando a % diretamente no nome da Legenda)
-df_ativos_grafico = df.sort_values(by='Total Atual', ascending=False).reset_index(drop=True)
-df_ativos_grafico['Ativo_Legenda'] = df_ativos_grafico.apply(lambda r: f"{r['Ativo']} ({r['Part. %']:.2f}%)", axis=1)
-df_ativos_grafico['Texto_Label'] = df_ativos_grafico['Part. %'].apply(lambda x: f"{x:.1f}%" if x > 2.2 else "")
-
-df_tabela = df.sort_values(by='Total Atual', ascending=False)
-df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
-
-# 5. Interface Gráfica
-aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(["dashboard", "detalhe", "Simular Novos Aportes"])
-
-with aba_dash:
-    st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
-    
-    # Legenda Superior Dinâmica (Pílulas)
-    html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
-    for _, row in df_resumo_classe.iterrows():
-        perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
-        html_legenda += f"<div style='background-color: #f0f2f6; padding: 4px 12px; border-radius: 15px; font-size: 14px; color: #31333F; font-weight: 500;'><span style='color: #666;'>{row['Classe']}:</span> {perc:.2f}%</div>"
-    html_legenda += "</div>"
-    st.markdown(html_legenda, unsafe_allow_html=True)
-    
-    st.markdown('---')
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        # Gráfico por Classe (Legenda removida e informações todas no bloco)
-        fig_classe = px.bar(
-            df_resumo_classe, x='Carteira', y='Total Atual', color='Classe',
+df_resumo_classe = df_resumo_
