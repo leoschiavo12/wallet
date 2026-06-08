@@ -7,6 +7,19 @@ import pandas as pd
 # 1. Configuração da Página
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
 
+# Forçar a centralização visual dos textos usando CSS nas tabelas nativas
+st.markdown("""
+    <style>
+        /* Alinha cabeçalhos e células ao centro de forma agressiva */
+        div[data-testid="stDataFrame"] th,
+        div[data-testid="stDataFrame"] td,
+        div[data-testid="stDataFrame"] [role="gridcell"] {
+            text-align: center !important;
+            justify-content: center !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
 # 2. Funções de Busca de Preços
 def obter_precos_b3(tickers_lista):
     if not tickers_lista: return {}
@@ -95,17 +108,17 @@ for classe, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas_tabela)
 df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
 
-# --- PREPARAÇÃO DOS DADOS PARA OS GRÁFICOS ---
-# Agrupa classes e ordena em ordem decrescente de valor real
+# --- ESTRUTURA DOS GRÁFICOS ---
+# Agrupa e ordena estritamente por tamanho
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values(by='Total Atual', ascending=False)
 
-# Mapeia a ordem de tamanho das classes para os ativos não se misturarem (resolve PKIN11)
+# Organiza os ativos agrupados por classe e por tamanho interno
 lista_classes_ordenada = df_resumo_classe['Classe'].tolist()
 df['Ordem_Classe'] = df['Classe'].apply(lambda x: lista_classes_ordenada.index(x))
 df_ativos_ordenados = df.sort_values(by=['Ordem_Classe', 'Total Atual'], ascending=[True, False])
 
-# Tabela da aba Detalhe (Sempre ordenada por maior patrimônio)
+# Tabela detalhe
 df_tabela = df.sort_values(by='Total Atual', ascending=False)
 df_tabela = df_tabela[['Ativo', 'Classe', 'Preço Atual', 'Qtd', 'Total Atual', 'Part. %']]
 
@@ -115,7 +128,7 @@ aba_dash, aba_detalhe, aba_novos_aportes = st.tabs(['dashboard', 'detalhe', 'Sim
 with aba_dash:
     st.metric(label="Valor Total do Patrimônio Real", value=f"R$ {total_geral:,.2f}")
     
-    # Legenda superior dinâmica e decrescente (Pílulas)
+    # Pílulas da legenda superior
     html_legenda = "<div style='display: flex; gap: 20px; flex-wrap: wrap; margin-top: -10px; margin-bottom: 20px;'>"
     for _, row in df_resumo_classe.iterrows():
         perc = (row['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
@@ -127,16 +140,15 @@ with aba_dash:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Gráfico de Classes: Início em 0 com sentido horário gera o preenchimento perfeito dos quadrantes de cima para baixo
         fig_classe = px.pie(df_resumo_classe, values='Total Atual', names='Classe', title='Distribuição por Classe', hole=0.4)
-        fig_classe.update_traces(rotation=0, direction='clockwise', textinfo='percent+label', sort=False)
+        # rotation=90 + counterclockwise + sort=False joga o primeiro bloco rigorosamente para a esquerda superior (2º Quadrante)
+        fig_classe.update_traces(rotation=90, direction='counterclockwise', textinfo='percent+label', sort=False)
         fig_classe.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_classe, use_container_width=True)
         
     with col2:
-        # Gráfico de Ativos: Mantém os blocos unidos por classe sem misturar nada
         fig_ativo = px.pie(df_ativos_ordenados, values='Total Atual', names='Ativo', title='Distribuição por Ativo', hole=0.4)
-        fig_ativo.update_traces(rotation=0, direction='clockwise', sort=False)
+        fig_ativo.update_traces(rotation=90, direction='counterclockwise', sort=False)
         fig_ativo.update_layout(legend=dict(traceorder='normal', itemsizing='constant'))
         st.plotly_chart(fig_ativo, use_container_width=True)
 
@@ -150,12 +162,11 @@ with aba_detalhe:
         'Part. %': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
     }
         
-    st.data_editor(
+    st.dataframe(
         df_tabela, 
         use_container_width=True, 
         hide_index=True, 
-        column_config=config_colunas,
-        disabled=True
+        column_config=config_colunas
     )
 
 with aba_novos_aportes:
