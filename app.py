@@ -57,7 +57,7 @@ def abreviar_rs(valor):
             s = s[:-2]
         return f"R$ {s}k"
     else:
-        return f"R$ {valor:,.0f}".replace(',', '.')
+        return f"R$ {int(valor)}"
 
 def formatar_brl(valor):
     s = f"{valor:,.2f}"
@@ -94,12 +94,11 @@ with aba_dash:
     st.metric("patrimonio total", formatar_brl(total_geral))
     st.markdown('---')
 
+    # linha unica com donut e barras alinhados
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
         total_classe = df_resumo_classe['total atual'].sum()
-
-        # label visivel: apenas "Classe\nXX,X%" — sem valor absoluto
         labels_donut = []
         hover_donut  = []
         for _, row in df_resumo_classe.iterrows():
@@ -122,7 +121,7 @@ with aba_dash:
         ))
         fig_donut.update_layout(
             margin=dict(t=60, b=60, l=80, r=80),
-            height=300,
+            height=380,
             showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'
@@ -144,13 +143,7 @@ with aba_dash:
                 line=dict(color='rgba(255,255,255,0.08)', width=1, dash='dot')
             ))
 
-        # texto em cima da barra: "XX,X%\nR$ X.XXX"
-        texto_barras = [
-            f"{str(round(row['part. %'], 1)).replace('.', ',')}%<br>{formatar_brl(row['total atual'])}"
-            for _, row in df_ativo.iterrows()
-        ]
-
-        # hover com nome + % + R$
+        # hover card: nome + % + R$
         hover_barras = [
             f"<b>{row['ativo']}</b><br>{str(round(row['part. %'], 2)).replace('.', ',')}%<br>{formatar_brl(row['total atual'])}"
             for _, row in df_ativo.iterrows()
@@ -163,8 +156,10 @@ with aba_dash:
                 x=df_ativo['ativo'],
                 y=df_ativo['part. %'],
                 marker_color='#1E88E5',
-                text=texto_barras,
+                # ticker do ativo vertical em cima da barra
+                text=df_ativo['ativo'],
                 textposition='outside',
+                textangle=-90,
                 textfont=dict(size=9, color='white'),
                 cliponaxis=False,
                 hovertemplate='%{customdata}<extra></extra>',
@@ -185,16 +180,12 @@ with aba_dash:
         )
 
         fig_ativo.update_layout(
-            height=420,
+            height=380,
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False,
             shapes=shapes,
-            # nome do ativo no eixo X removido — fica no texto em cima da barra
-            xaxis=dict(
-                tickangle=45,
-                showticklabels=False   # oculta eixo X — label fica em cima da barra
-            )
+            xaxis=dict(showticklabels=False)
         )
 
         fig_ativo.update_yaxes(
@@ -202,7 +193,7 @@ with aba_dash:
             secondary_y=False,
             showgrid=True, gridcolor='#333',
             side='left',
-            range=[0, y_max_pct * 1.4],
+            range=[0, y_max_pct * 1.45],
             tickvals=ticks_pct,
             ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct]
         )
@@ -212,7 +203,7 @@ with aba_dash:
             secondary_y=True,
             showgrid=False,
             side='right',
-            range=[0, y_max_rs * 1.4],
+            range=[0, y_max_rs * 1.45],
             tickvals=ticks_rs,
             ticktext=[abreviar_rs(v) for v in ticks_rs]
         )
