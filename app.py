@@ -90,6 +90,12 @@ def preco_td_de_secrets(nome, fallback):
     except:
         return fallback
 
+def data_td_de_secrets(nome):
+    try:
+        return st.secrets["tesouro_direto_data"][nome]
+    except:
+        return "nao definida" 
+
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
     'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
@@ -129,8 +135,9 @@ with aba_dash:
     for cls, ativos in MINHA_CARTEIRA.items():
         for nome, v in ativos.items():
             if isinstance(v, tuple):
-                prc_atual = preco_td_de_secrets(nome, v[1])
-                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)}")
+                prc_atual  = preco_td_de_secrets(nome, v[1])
+                data_atual = data_td_de_secrets(nome)
+                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual}")
     if avisos:
         st.caption("preco manual (atualize em Settings > Secrets): " + " · ".join(avisos))
 
@@ -155,10 +162,11 @@ with aba_dash:
             hole=0.75,
             textinfo='label',
             textposition='outside',
-            textfont=dict(size=11),
+            textfont=dict(size=10),
             hovertemplate='%{customdata}<extra></extra>',
             customdata=hover_donut,
-            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)])
+            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)]),
+            domain=dict(x=[0.1, 0.9], y=[0.1, 0.9])
         ))
         fig_donut.update_layout(
             margin=dict(t=40, b=40, l=40, r=40),
