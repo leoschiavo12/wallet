@@ -7,7 +7,7 @@ import pandas as pd
 # Configuração da página
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
 
-# CSS para polimento visual
+# CSS para polimento visual e centralização
 st.markdown("""
     <style>
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
@@ -15,13 +15,13 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Funções de Dados (com proteções)
+# Funções de dados
 def obter_precos_b3(tickers):
     if not tickers: return {}
     tk_formatados = [f"{t.upper()}.SA" for t in tickers]
     precos = {}
     try:
-        dados = yf.download(tk_formatados, period="5d", group_by='ticker', progress=False, auto_adjust=True, timeout=7)
+        dados = yf.download(tk_formatados, period="5d", group_by='ticker', progress=False, auto_adjust=True, timeout=10)
         for t in tickers:
             chave = f"{t.upper()}.SA"
             try:
@@ -39,26 +39,35 @@ MINHA_CARTEIRA = {
     'Tesouro Direto': {'Renda+ 2050': 22.5}
 }
 
-# Processamento e cálculos omitidos para brevidade (mantém a lógica anterior)
-# ... (aqui entraria a lógica de total_geral e criação dos DFs) ...
+# Processamento
+todos_b3 = [t for classe in ['ETF', 'FII'] for t in MINHA_CARTEIRA[classe].keys()]
+bancada = obter_precos_b3(todos_b3)
+total_geral = 0.0
+linhas = []
 
-# --- GRÁFICOS OTIMIZADOS ---
-# Paleta: Azul Marinho (FII) -> Turquesa Claro (Cripto)
+for classe, ativos in MINHA_CARTEIRA.items():
+    for ticker, qtd in ativos.items():
+        preco = bancada.get(ticker.upper(), 0.0) if classe in ['ETF', 'FII'] else (385000.0 if ticker == 'BTC' else 490.64)
+        subtotal = qtd * preco
+        total_geral += subtotal
+        linhas.append({'Ativo': ticker, 'Classe': classe, 'Total': subtotal})
+
+df = pd.DataFrame(linhas)
+df['Part'] = (df['Total'] / total_geral) * 100
+df_classe = df.groupby('Classe')['Total'].sum().reset_index()
+
+# Gráficos (Paleta Azul: Escuro para Claro)
 paleta_azul = ['#1A237E', '#0277BD', '#0097A7', '#80DEEA'] 
 
-# 1. Gráfico Classe (Limpando Tooltip)
-fig_classe = px.bar(df_resumo_classe, x='Carteira', y='Total Atual', color='Classe', 
-                    color_discrete_sequence=paleta_azul, text='Texto_Label')
-fig_classe.update_traces(hovertemplate="%{data.name}<br>Valor: R$ %{y:,.2f}<extra></extra>")
+fig_classe = px.bar(df_classe, x='Classe', y='Total', color='Classe', color_discrete_sequence=paleta_azul)
+fig_classe.update_traces(hovertemplate="<b>%{x}</b><br>R$ %{y:,.2f}<extra></extra>")
 fig_classe.update_layout(showlegend=False, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
 
-# 2. Gráfico Ativos (Tooltip customizado)
-fig_ativo = px.bar(df_ativos_grafico, x='Carteira', y='Part. %', color='Ativo', 
-                   color_discrete_sequence=px.colors.sequential.Blues_r, text='Texto_Label')
-fig_ativo.update_traces(hovertemplate="<b>%{data.name}</b><br>Part: %{y:.2f}%<extra></extra>")
+fig_ativo = px.bar(df, x='Ativo', y='Part', color='Ativo', color_discrete_sequence=px.colors.sequential.Blues_r)
+fig_ativo.update_traces(hovertemplate="<b>%{x}</b><br>Part: %{y:.2f}%<extra></extra>")
 fig_ativo.update_layout(showlegend=False, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
 
-# Exibição
+# Layout
 col1, col2 = st.columns(2)
 col1.plotly_chart(fig_classe, use_container_width=True)
 col2.plotly_chart(fig_ativo, use_container_width=True)
