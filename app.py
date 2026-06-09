@@ -13,6 +13,10 @@ st.markdown("""
     <style>
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
+        /* amarelo claro na coluna editavel */
+        [data-testid="stDataEditor"] div[role="gridcell"][aria-colindex="4"] {
+            background-color: rgba(255, 230, 100, 0.12) !important;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -25,7 +29,6 @@ def obter_precos_b3(tickers_lista):
         return {t.upper(): 100.0 for t in tickers_lista}
 
 def obter_preco_btc_brl():
-    # 1. CoinGecko
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=brl"
         resp = requests.get(url, timeout=7)
@@ -34,7 +37,6 @@ def obter_preco_btc_brl():
             return preco
     except:
         pass
-    # 2. Coinbase (USD) * USD/BRL via exchangerate-api
     try:
         btc_usd = float(requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=7).json()['data']['amount'])
         usd_brl = float(requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=7).json()['rates']['BRL'])
@@ -42,13 +44,11 @@ def obter_preco_btc_brl():
             return btc_usd * usd_brl
     except:
         pass
-    # 3. yfinance BTC-BRL
     try:
         dados = yf.download("BTC-BRL", period="2d", progress=False, auto_adjust=True, timeout=7)
         return float(dados['Close'].ffill().iloc[-1])
     except:
         pass
-    # 4. sem preco
     return 0.0
 
 def arredondar_teto(valor, multiplo):
@@ -87,29 +87,38 @@ def formatar_brl(valor):
     s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
     return f"R$ {s}"
 
-
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
     'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
     'Cripto': {'BTC': 0.01492559},
-    # Tesouro Direto: {nome: (qtd_unidades, preco_unitario_venda, 'dd/mm/aaaa')}
-    # Consulte o preco de venda em: https://www.tesourodireto.com.br/titulos/precos-e-taxas.htm
-    'Tesouro Direto': {'Renda+ 2050': (22.5, 4906.40, '09/06/2025')}
+    # Tesouro Direto: {nome: (qtd_unidades, preco_unitario_venda)}
+    # Atualize o preco diretamente na tabela da aba "detalhe"
+    'Tesouro Direto': {'Renda+ 2050': (22.5, 4906.40)}
 }
 
 todos_b3 = [t for cls in ['ETF', 'FII'] for t in MINHA_CARTEIRA[cls].keys()]
 precos = obter_precos_b3(todos_b3)
 precos['BTC'] = obter_preco_btc_brl()
 
+# inicializar precos do TD no session_state (persiste durante a sessao)
+if 'precos_td' not in st.session_state:
+    st.session_state.precos_td = {
+        nome: v[1]
+        for cls, ativos in MINHA_CARTEIRA.items()
+        for nome, v in ativos.items()
+        if isinstance(v, tuple)
+    }
+
 linhas = []
 for cls, ativos in MINHA_CARTEIRA.items():
     for t, v in ativos.items():
         if isinstance(v, tuple):
-            q, prc = v[0], v[1]  # Tesouro Direto: (qtd, preco, data)
+            q   = v[0]
+            prc = st.session_state.precos_td.get(t, v[1])
         else:
-            q = v
+            q   = v
             prc = precos.get(t.upper(), 0.0)
-        linhas.append({'Ativo': t, 'Classe': cls, 'preco_unit': prc, 'Qtd': q, 'Total Atual': q * prc})
+        linhas.append({'Ativo': t, 'Classe': cls, 'preco_unit': prc, 'editavel': isinstance(v, tuple), 'Qtd': q, 'Total Atual': q * prc})
 
 df = pd.DataFrame(linhas)
 total_geral = df['Total Atual'].sum()
@@ -123,14 +132,14 @@ aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "simular n
 with aba_dash:
     st.metric("patrimonio total", formatar_brl(total_geral))
 
-    # aviso para titulos com preco manual
     avisos = []
     for cls, ativos in MINHA_CARTEIRA.items():
         for nome, v in ativos.items():
-            if isinstance(v, tuple) and len(v) == 3:
-                avisos.append(f"**{nome}**: preco manual de {formatar_brl(v[1])} · atualizado em {v[2]}")
+            if isinstance(v, tuple):
+                prc_atual = st.session_state.precos_td.get(nome, v[1])
+                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} — atualize na aba detalhe")
     if avisos:
-        st.caption("precos manuais: " + " · ".join(avisos))
+        st.caption("preco manual: " + " · ".join(avisos))
 
     st.markdown('---')
 
@@ -191,15 +200,12 @@ with aba_dash:
         ]
 
         fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
-
         fig_ativo.add_trace(
             go.Bar(
-                x=df_ativo['Ativo'],
-                y=df_ativo['Part. %'],
+                x=df_ativo['Ativo'], y=df_ativo['Part. %'],
                 marker_color='#1E88E5',
                 text=df_ativo['Ativo'],
-                textposition='outside',
-                textangle=-90,
+                textposition='outside', textangle=-90,
                 textfont=dict(size=9, color='white'),
                 cliponaxis=False,
                 hovertemplate='%{customdata}<extra></extra>',
@@ -207,62 +213,85 @@ with aba_dash:
             ),
             secondary_y=False
         )
-
         fig_ativo.add_trace(
             go.Scatter(
-                x=df_ativo['Ativo'],
-                y=df_ativo['Total Atual'],
-                mode='markers',
-                marker=dict(color='rgba(0,0,0,0)'),
+                x=df_ativo['Ativo'], y=df_ativo['Total Atual'],
+                mode='markers', marker=dict(color='rgba(0,0,0,0)'),
                 hoverinfo='skip'
             ),
             secondary_y=True
         )
-
         fig_ativo.update_layout(
-            height=350,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False,
-            shapes=shapes,
-            xaxis=dict(showticklabels=False)
+            height=350, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            showlegend=False, shapes=shapes, xaxis=dict(showticklabels=False)
         )
-
         fig_ativo.update_yaxes(
-            title_text="part. %",
-            secondary_y=False,
-            showgrid=True, gridcolor='#333',
-            side='left',
+            title_text="part. %", secondary_y=False,
+            showgrid=True, gridcolor='#333', side='left',
             range=[0, y_max_pct * 1.35],
             tickvals=ticks_pct_show,
             ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct_show]
         )
-
         fig_ativo.update_yaxes(
-            title_text="total (R$)",
-            secondary_y=True,
-            showgrid=False,
-            side='right',
+            title_text="total (R$)", secondary_y=True,
+            showgrid=False, side='right',
             range=[0, y_max_rs * 1.35],
             tickvals=ticks_rs_show,
             ticktext=[abreviar_rs(v) for v in ticks_rs_show]
         )
-
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    df_display = df.copy()
-    df_display['preco_unit']  = df_display['preco_unit'].apply(formatar_brl)
-    df_display['Total Atual'] = df_display['Total Atual'].apply(formatar_brl)
-    df_display['Part. %']     = df_display['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
-    df_display['Qtd']         = df_display['Qtd'].apply(lambda x: f"{x:g}".replace('.', ','))
+    st.caption("celulas amarelas sao editaveis. altere o preco e pressione Enter para atualizar.")
 
-    config = {
-        'Ativo':       st.column_config.TextColumn("ativo",          alignment="center"),
-        'Classe':      st.column_config.TextColumn("classe",         alignment="center"),
-        'preco_unit':  st.column_config.TextColumn("preco unitario", alignment="center"),
-        'Qtd':         st.column_config.TextColumn("qtd",            alignment="center"),
-        'Total Atual': st.column_config.TextColumn("total atual",    alignment="center"),
-        'Part. %':     st.column_config.TextColumn("part. %",        alignment="center"),
+    # preparar df para edicao: preco_unit como float para ser editavel
+    df_edit = df[['Ativo', 'Classe', 'editavel', 'preco_unit', 'Qtd', 'Total Atual', 'Part. %']].copy()
+
+    # formatar colunas nao editaveis para exibicao
+    df_edit['Qtd_fmt']         = df_edit['Qtd'].apply(lambda x: f"{x:g}".replace('.', ','))
+    df_edit['Total Atual_fmt'] = df_edit['Total Atual'].apply(formatar_brl)
+    df_edit['Part. %_fmt']     = df_edit['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
+
+    config_edit = {
+        'Ativo':           st.column_config.TextColumn("ativo",         disabled=True,  alignment="center"),
+        'Classe':          st.column_config.TextColumn("classe",        disabled=True,  alignment="center"),
+        'preco_unit':      st.column_config.NumberColumn(
+                               "preco unidade",
+                               disabled=False,
+                               format="%.2f",
+                               min_value=0.0,
+                               help="Editavel apenas para Tesouro Direto"
+                           ),
+        'Qtd_fmt':         st.column_config.TextColumn("qtd",           disabled=True,  alignment="center"),
+        'Total Atual_fmt': st.column_config.TextColumn("total atual",   disabled=True,  alignment="center"),
+        'Part. %_fmt':     st.column_config.TextColumn("part. %",       disabled=True,  alignment="center"),
+        'editavel':        None,  # ocultar coluna auxiliar
+        'Qtd':             None,
+        'Total Atual':     None,
+        'Part. %':         None,
     }
-    st.dataframe(df_display, use_container_width=True, hide_index=True, column_config=config)
+
+    # highlight linhas editaveis via styler
+    def highlight_td(row):
+        if row['editavel']:
+            return [''] * 2 + ['background-color: rgba(255,220,50,0.18); color: #ffe066'] + [''] * 3
+        return [''] * 6
+
+    df_styled = df_edit[['Ativo', 'Classe', 'preco_unit', 'Qtd_fmt', 'Total Atual_fmt', 'Part. %_fmt', 'editavel']].style.apply(highlight_td, axis=1)
+
+    edited = st.data_editor(
+        df_edit[['Ativo', 'Classe', 'preco_unit', 'Qtd_fmt', 'Total Atual_fmt', 'Part. %_fmt', 'editavel']],
+        column_config=config_edit,
+        hide_index=True,
+        use_container_width=True,
+        key='editor_detalhe'
+    )
+
+    # detectar mudanca no preco_unit de linhas editaveis e atualizar session_state
+    for i, row in edited.iterrows():
+        if row['editavel']:
+            ativo = row['Ativo']
+            novo_preco = float(row['preco_unit'])
+            if novo_preco != st.session_state.precos_td.get(ativo, 0.0):
+                st.session_state.precos_td[ativo] = novo_preco
+                st.rerun()
