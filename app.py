@@ -233,9 +233,9 @@ with aba_dash:
         fig_ativo.update_yaxes(
             title_text="total (R$)", secondary_y=True,
             showgrid=False, side='right',
-            range=[0, y_max_pct * 1.2],  # mesmo range do eixo primario (proporcional)
-            tickvals=ticks_pct_show,       # mesmos pontos do eixo %
-            ticktext=[abreviar_rs(round(v / 100 * total_geral)) for v in ticks_pct_show]
+            range=[0, y_max_pct * 1.2],
+            tickvals=[p[0] for p in pares_rs],
+            ticktext=[abreviar_rs(p[1]) for p in pares_rs]
         )
         st.plotly_chart(fig_ativo, use_container_width=True)
 
