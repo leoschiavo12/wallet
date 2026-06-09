@@ -30,4 +30,70 @@ todos_b3 = [t for cls in ['ETF', 'FII'] for t in MINHA_CARTEIRA[cls].keys()]
 precos = obter_precos_b3(todos_b3)
 
 linhas = []
-for cls, ativos in MINHA_
+for cls, ativos in MINHA_CARTEIRA.items():
+    for t, q in ativos.items():
+        prc = precos.get(t.upper(), 385000 if t == 'BTC' else 490.64)
+        linhas.append({'Ativo': t, 'Classe': cls, 'Total Atual': q * prc})
+
+df = pd.DataFrame(linhas)
+total_geral = df['Total Atual'].sum()
+df['Part. %'] = (df['Total Atual'] / total_geral) * 100
+df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
+df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
+df_ativo = df.sort_values(by='Total Atual', ascending=False)
+
+# 4. Interface
+aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "Simular Novos Aportes"])
+
+with aba_dash:
+    st.metric("Patrimônio Total", f"R$ {total_geral:,.2f}")
+
+    st.markdown('---')
+
+    # Layout: donut à esquerda, barras à direita
+    col_donut, col_barras = st.columns([1, 2])
+
+    with col_donut:
+        # go.Pie para controle total de rotation e direction
+        fig_donut = go.Figure(go.Pie(
+            labels=df_resumo_classe['Classe'],
+            values=df_resumo_classe['Total Atual'],
+            hole=0.75,
+            rotation=90,
+            direction='counterclockwise',
+            sort=False,
+            textinfo='percent+label',
+            textposition='outside',
+            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)])
+        ))
+        fig_donut.update_layout(
+            margin=dict(t=60, b=60, l=60, r=60),
+            height=350,
+            showlegend=False,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_donut, use_container_width=True)
+
+    with col_barras:
+        fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_ativo.add_trace(
+            go.Bar(x=df_ativo['Ativo'], y=df_ativo['Total Atual'], marker_color='#1E88E5'),
+            secondary_y=False
+        )
+        fig_ativo.add_trace(
+            go.Scatter(x=df_ativo['Ativo'], y=df_ativo['Part. %'], mode='markers', marker=dict(color='rgba(0,0,0,0)')),
+            secondary_y=True
+        )
+        fig_ativo.update_layout(
+            height=350,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            showlegend=False
+        )
+        fig_ativo.update_yaxes(title_text="Total (R$)", secondary_y=False, showgrid=True, gridcolor='#333', side='right')
+        fig_ativo.update_yaxes(title_text="Participação (%)", secondary_y=True, showgrid=False, side='left')
+        st.plotly_chart(fig_ativo, use_container_width=True)
+
+with aba_detalhe:
+    st.dataframe(df, use_container_width=True)
