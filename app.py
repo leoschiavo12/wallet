@@ -1,11 +1,12 @@
 import streamlit as st
 import yfinance as yf
+import requests
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# 1. Configuração e CSS para a Tabela
+# 1. Configuração e CSS
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
 
 st.markdown("""
@@ -24,6 +25,12 @@ def obter_precos_b3(tickers_lista):
     except:
         return {t.upper(): 100.0 for t in tickers_lista}
 
+def obter_preco_btc():
+    try:
+        res = requests.get("https://api.coinbase.com/v2/prices/BTC-BRL/spot", timeout=4)
+        return float(res.json()['data']['amount'])
+    except: return 385000.00 # Fallback
+
 # 3. Dados
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
@@ -34,11 +41,12 @@ MINHA_CARTEIRA = {
 
 todos_b3 = [t for cls in ['ETF', 'FII'] for t in MINHA_CARTEIRA[cls].keys()]
 precos = obter_precos_b3(todos_b3)
+prc_btc = obter_preco_btc()
 
 linhas = []
 for cls, ativos in MINHA_CARTEIRA.items():
     for t, q in ativos.items():
-        prc = precos.get(t.upper(), 385000 if t == 'BTC' else 490.64)
+        prc = prc_btc if t == 'BTC' else (precos.get(t.upper(), 100.0) if cls in ['ETF', 'FII'] else 490.64)
         linhas.append({'Ativo': t, 'Classe': cls, 'Preço': prc, 'Qtd': q, 'Total Atual': q * prc})
 
 df = pd.DataFrame(linhas)
@@ -51,31 +59,47 @@ df_ativo = df.sort_values(by='Total Atual', ascending=False)
 aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "Simular Novos Aportes"])
 
 with aba_dash:
-    st.metric("Patrimonio Total", f"R$ {total_geral:,.2f}")
+    c1, c2 = st.columns([1, 1.5])
+    c1.metric("Patrimônio Total", f"R$ {total_geral:,.2f}")
+    
+    # Rosca de Classes (Paleta Azul e Tooltip Polido)
+    fig_donut = px.pie(df_resumo_classe, values='Total Atual', names='Classe', hole=0.75, 
+                       color_discrete_sequence=px.colors.sequential.Blues_r)
+    fig_donut.update_traces(
+        textinfo='percent+label', 
+        textposition='outside', 
+        sort=False,
+        hovertemplate="<b>%{label}</b><br>R$ %{value:,.2f}<br>%{percent:.1%}<extra></extra>"
+    )
+    fig_donut.update_layout(margin=dict(t=10, b=10, l=10, r=10), height=200, showlegend=False)
+    c2.plotly_chart(fig_donut, use_container_width=True)
+    
     st.markdown('---')
-
-    col_donut, col_barras = st.columns([1, 2])
-
-    with col_donut:
-        fig_donut = go.Figure(go.Pie(
-            labels=df_resumo_classe['Classe'].tolist(),
-            values=df_resumo_classe['Total Atual'].tolist(),
-            hole=0.75,
-            textinfo='percent+label',
-            textposition='outside',
-            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)])
-        ))
-        fig_donut.update_layout(margin=dict(t=40, b=40, l=40, r=40), height=350, showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_donut, use_container_width=True)
-
-    with col_barras:
-        fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
-        fig_ativo.add_trace(go.Bar(x=df_ativo['Ativo'], y=df_ativo['Total Atual'], marker_color='#1E88E5'), secondary_y=False)
-        fig_ativo.add_trace(go.Scatter(x=df_ativo['Ativo'], y=df_ativo['Part. %'], mode='markers', marker=dict(color='rgba(0,0,0,0)')), secondary_y=True)
-        fig_ativo.update_layout(height=350, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', showlegend=False)
-        fig_ativo.update_yaxes(title_text="Total (R$)", secondary_y=False, showgrid=True, gridcolor='#333', side='right')
-        fig_ativo.update_yaxes(title_text="Participacao (%)", secondary_y=True, showgrid=False, side='left')
-        st.plotly_chart(fig_ativo, use_container_width=True)
+    
+    # Gráfico de Barras (Escalas Invertidas e Tooltip Polido)
+    fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    # Eixo Primário (Direita) - Total (R$)
+    fig_ativo.add_trace(go.Bar(
+        x=df_ativo['Ativo'], 
+        y=df_ativo['Total Atual'], 
+        marker_color='#1E88E5',
+        hovertemplate="<b>Ativo:</b> %{x}<br><b>Total:</b> R$ %{y:,.2f}<extra></extra>"
+    ), secondary_y=False)
+    
+    # Eixo Secundário (Esquerda) - Part (%)
+    fig_ativo.add_trace(go.Scatter(
+        x=df_ativo['Ativo'], 
+        y=df_ativo['Part. %'], 
+        mode='markers', 
+        marker=dict(color='rgba(0,0,0,0)'),
+        hovertemplate="<b>Part.:</b> %{y:.1f}%<extra></extra>"
+    ), secondary_y=True)
+    
+    fig_ativo.update_layout(height=350, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', showlegend=False)
+    fig_ativo.update_yaxes(title_text="Total (R$)", secondary_y=False, showgrid=True, gridcolor='#333', side='right')
+    fig_ativo.update_yaxes(title_text="Participação (%)", secondary_y=True, showgrid=False, side='left')
+    st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
     config = {
