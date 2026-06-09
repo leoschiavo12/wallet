@@ -48,7 +48,8 @@ def gerar_ticks_pct(max_pct_ativo, step=5):
 
 def abreviar_rs(valor):
     if valor >= 1_000_000:
-        return f"R$ {valor/1_000_000:.1f}M".replace('.', ',')
+        v = f"{valor/1_000_000:.1f}".replace('.', ',')
+        return f"R$ {v}M"
     elif valor >= 1_000:
         v = valor / 1_000
         s = f"{v:.1f}".replace('.', ',')
@@ -59,9 +60,7 @@ def abreviar_rs(valor):
         return f"R$ {valor:,.0f}".replace(',', '.')
 
 def formatar_brl(valor):
-    # formata valor como moeda brasileira: R$ 1.234,56
     s = f"{valor:,.2f}"
-    # trocar separadores: , -> X, . -> ,, X -> .
     s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
     return f"R$ {s}"
 
@@ -98,14 +97,17 @@ with aba_dash:
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
-        # etiquetas: "FII\n35,1%\nR$ 14.987"
         total_classe = df_resumo_classe['total atual'].sum()
+
+        # label visivel: apenas "Classe\nXX,X%" — sem valor absoluto
         labels_donut = []
+        hover_donut  = []
         for _, row in df_resumo_classe.iterrows():
-            pct  = row['total atual'] / total_classe * 100
+            pct     = row['total atual'] / total_classe * 100
             pct_str = f"{pct:.1f}%".replace('.', ',')
             rs_str  = formatar_brl(row['total atual'])
-            labels_donut.append(f"{row['classe']}<br>{pct_str}<br>{rs_str}")
+            labels_donut.append(f"{row['classe']}<br>{pct_str}")
+            hover_donut.append(f"<b>{row['classe']}</b><br>{pct_str}<br>{rs_str}")
 
         fig_donut = go.Figure(go.Pie(
             labels=labels_donut,
@@ -114,12 +116,13 @@ with aba_dash:
             textinfo='label',
             textposition='outside',
             textfont=dict(size=11),
-            hovertemplate='<b>%{label}</b><extra></extra>',
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_donut,
             marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)])
         ))
         fig_donut.update_layout(
-            margin=dict(t=40, b=40, l=40, r=40),
-            height=320,
+            margin=dict(t=60, b=60, l=80, r=80),
+            height=300,
             showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'
@@ -141,12 +144,17 @@ with aba_dash:
                 line=dict(color='rgba(255,255,255,0.08)', width=1, dash='dot')
             ))
 
-        # etiquetas em cima de cada barra: "ativo\nXX,X%\nR$ X.XXX"
-        texto_barras = []
-        for _, row in df_ativo.iterrows():
-            pct_str = f"{row['part. %']:.1f}%".replace('.', ',')
-            rs_str  = formatar_brl(row['total atual'])
-            texto_barras.append(f"{pct_str}<br>{rs_str}")
+        # texto em cima da barra: "XX,X%\nR$ X.XXX"
+        texto_barras = [
+            f"{str(round(row['part. %'], 1)).replace('.', ',')}%<br>{formatar_brl(row['total atual'])}"
+            for _, row in df_ativo.iterrows()
+        ]
+
+        # hover com nome + % + R$
+        hover_barras = [
+            f"<b>{row['ativo']}</b><br>{str(round(row['part. %'], 2)).replace('.', ',')}%<br>{formatar_brl(row['total atual'])}"
+            for _, row in df_ativo.iterrows()
+        ]
 
         fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
 
@@ -159,7 +167,8 @@ with aba_dash:
                 textposition='outside',
                 textfont=dict(size=9, color='white'),
                 cliponaxis=False,
-                hovertemplate='<b>%{x}</b><br>part.: %{y:.2f}%<extra></extra>'
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=hover_barras
             ),
             secondary_y=False
         )
@@ -170,8 +179,7 @@ with aba_dash:
                 y=df_ativo['total atual'],
                 mode='markers',
                 marker=dict(color='rgba(0,0,0,0)'),
-                hovertemplate='total: %{customdata}<extra></extra>',
-                customdata=[formatar_brl(v) for v in df_ativo['total atual']]
+                hoverinfo='skip'
             ),
             secondary_y=True
         )
@@ -182,9 +190,11 @@ with aba_dash:
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False,
             shapes=shapes,
-            xaxis=dict(tickangle=45),
-            uniformtext_minsize=8,
-            uniformtext_mode='hide'
+            # nome do ativo no eixo X removido — fica no texto em cima da barra
+            xaxis=dict(
+                tickangle=45,
+                showticklabels=False   # oculta eixo X — label fica em cima da barra
+            )
         )
 
         fig_ativo.update_yaxes(
@@ -192,7 +202,7 @@ with aba_dash:
             secondary_y=False,
             showgrid=True, gridcolor='#333',
             side='left',
-            range=[0, y_max_pct * 1.25],
+            range=[0, y_max_pct * 1.4],
             tickvals=ticks_pct,
             ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct]
         )
@@ -202,7 +212,7 @@ with aba_dash:
             secondary_y=True,
             showgrid=False,
             side='right',
-            range=[0, y_max_rs * 1.25],
+            range=[0, y_max_rs * 1.4],
             tickvals=ticks_rs,
             ticktext=[abreviar_rs(v) for v in ticks_rs]
         )
@@ -210,7 +220,6 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    # formatar colunas numericas para exibicao em PT-BR
     df_display = df.copy()
     df_display['preco_unit']  = df_display['preco_unit'].apply(formatar_brl)
     df_display['total atual'] = df_display['total atual'].apply(formatar_brl)
