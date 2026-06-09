@@ -13,10 +13,6 @@ st.markdown("""
     <style>
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
-        /* amarelo claro na coluna editavel */
-        [data-testid="stDataEditor"] div[role="gridcell"][aria-colindex="4"] {
-            background-color: rgba(255, 230, 100, 0.12) !important;
-        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -87,38 +83,35 @@ def formatar_brl(valor):
     s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
     return f"R$ {s}"
 
+# ── Tesouro Direto: lê de st.secrets, fallback para valor hardcoded ──────────
+def preco_td_de_secrets(nome, fallback):
+    try:
+        return float(st.secrets["tesouro_direto"][nome])
+    except:
+        return fallback
+
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
     'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
     'Cripto': {'BTC': 0.01492559},
-    # Tesouro Direto: {nome: (qtd_unidades, preco_unitario_venda)}
-    # Atualize o preco diretamente na tabela da aba "detalhe"
-    'Tesouro Direto': {'Renda+ 2050': (22.5, 4906.40)}
+    # (qtd, preco_fallback) — preco real vem de st.secrets
+    'Tesouro Direto': {'Renda+ 2050': (24, 490.02)}
 }
 
 todos_b3 = [t for cls in ['ETF', 'FII'] for t in MINHA_CARTEIRA[cls].keys()]
 precos = obter_precos_b3(todos_b3)
 precos['BTC'] = obter_preco_btc_brl()
 
-# inicializar precos do TD no session_state (persiste durante a sessao)
-if 'precos_td' not in st.session_state:
-    st.session_state.precos_td = {
-        nome: v[1]
-        for cls, ativos in MINHA_CARTEIRA.items()
-        for nome, v in ativos.items()
-        if isinstance(v, tuple)
-    }
-
 linhas = []
 for cls, ativos in MINHA_CARTEIRA.items():
     for t, v in ativos.items():
         if isinstance(v, tuple):
-            q   = v[0]
-            prc = st.session_state.precos_td.get(t, v[1])
+            q        = v[0]
+            prc      = preco_td_de_secrets(t, v[1])
         else:
             q   = v
             prc = precos.get(t.upper(), 0.0)
-        linhas.append({'Ativo': t, 'Classe': cls, 'preco_unit': prc, 'editavel': isinstance(v, tuple), 'Qtd': q, 'Total Atual': q * prc})
+        linhas.append({'Ativo': t, 'Classe': cls, 'preco_unit': prc, 'Qtd': q, 'Total Atual': q * prc})
 
 df = pd.DataFrame(linhas)
 total_geral = df['Total Atual'].sum()
@@ -136,10 +129,10 @@ with aba_dash:
     for cls, ativos in MINHA_CARTEIRA.items():
         for nome, v in ativos.items():
             if isinstance(v, tuple):
-                prc_atual = st.session_state.precos_td.get(nome, v[1])
-                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} — atualize na aba detalhe")
+                prc_atual = preco_td_de_secrets(nome, v[1])
+                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)}")
     if avisos:
-        st.caption("preco manual: " + " · ".join(avisos))
+        st.caption("preco manual (atualize em Settings > Secrets): " + " · ".join(avisos))
 
     st.markdown('---')
 
@@ -242,56 +235,18 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    st.caption("celulas amarelas sao editaveis. altere o preco e pressione Enter para atualizar.")
+    df_display = df.copy()
+    df_display['preco_unit']  = df_display['preco_unit'].apply(formatar_brl)
+    df_display['Total Atual'] = df_display['Total Atual'].apply(formatar_brl)
+    df_display['Part. %']     = df_display['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
+    df_display['Qtd']         = df_display['Qtd'].apply(lambda x: f"{x:g}".replace('.', ','))
 
-    # preparar df para edicao: preco_unit como float para ser editavel
-    df_edit = df[['Ativo', 'Classe', 'editavel', 'preco_unit', 'Qtd', 'Total Atual', 'Part. %']].copy()
-
-    # formatar colunas nao editaveis para exibicao
-    df_edit['Qtd_fmt']         = df_edit['Qtd'].apply(lambda x: f"{x:g}".replace('.', ','))
-    df_edit['Total Atual_fmt'] = df_edit['Total Atual'].apply(formatar_brl)
-    df_edit['Part. %_fmt']     = df_edit['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
-
-    config_edit = {
-        'Ativo':           st.column_config.TextColumn("ativo",         disabled=True,  alignment="center"),
-        'Classe':          st.column_config.TextColumn("classe",        disabled=True,  alignment="center"),
-        'preco_unit':      st.column_config.NumberColumn(
-                               "preco unidade",
-                               disabled=False,
-                               format="%.2f",
-                               min_value=0.0,
-                               help="Editavel apenas para Tesouro Direto"
-                           ),
-        'Qtd_fmt':         st.column_config.TextColumn("qtd",           disabled=True,  alignment="center"),
-        'Total Atual_fmt': st.column_config.TextColumn("total atual",   disabled=True,  alignment="center"),
-        'Part. %_fmt':     st.column_config.TextColumn("part. %",       disabled=True,  alignment="center"),
-        'editavel':        None,  # ocultar coluna auxiliar
-        'Qtd':             None,
-        'Total Atual':     None,
-        'Part. %':         None,
+    config = {
+        'Ativo':       st.column_config.TextColumn("ativo",          alignment="center"),
+        'Classe':      st.column_config.TextColumn("classe",         alignment="center"),
+        'preco_unit':  st.column_config.TextColumn("preco unidade",  alignment="center"),
+        'Qtd':         st.column_config.TextColumn("qtd",            alignment="center"),
+        'Total Atual': st.column_config.TextColumn("total atual",    alignment="center"),
+        'Part. %':     st.column_config.TextColumn("part. %",        alignment="center"),
     }
-
-    # highlight linhas editaveis via styler
-    def highlight_td(row):
-        if row['editavel']:
-            return [''] * 2 + ['background-color: rgba(255,220,50,0.18); color: #ffe066'] + [''] * 3
-        return [''] * 6
-
-    df_styled = df_edit[['Ativo', 'Classe', 'preco_unit', 'Qtd_fmt', 'Total Atual_fmt', 'Part. %_fmt', 'editavel']].style.apply(highlight_td, axis=1)
-
-    edited = st.data_editor(
-        df_edit[['Ativo', 'Classe', 'preco_unit', 'Qtd_fmt', 'Total Atual_fmt', 'Part. %_fmt', 'editavel']],
-        column_config=config_edit,
-        hide_index=True,
-        use_container_width=True,
-        key='editor_detalhe'
-    )
-
-    # detectar mudanca no preco_unit de linhas editaveis e atualizar session_state
-    for i, row in edited.iterrows():
-        if row['editavel']:
-            ativo = row['Ativo']
-            novo_preco = float(row['preco_unit'])
-            if novo_preco != st.session_state.precos_td.get(ativo, 0.0):
-                st.session_state.precos_td[ativo] = novo_preco
-                st.rerun()
+    st.dataframe(df_display, use_container_width=True, hide_index=True, column_config=config)
