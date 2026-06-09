@@ -25,12 +25,31 @@ def obter_precos_b3(tickers_lista):
         return {t.upper(): 100.0 for t in tickers_lista}
 
 def obter_preco_btc_brl():
+    # 1. CoinGecko
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=brl"
         resp = requests.get(url, timeout=7)
-        return float(resp.json()['bitcoin']['brl'])
+        preco = float(resp.json()['bitcoin']['brl'])
+        if preco > 0:
+            return preco
     except:
-        return 385000.0
+        pass
+    # 2. Coinbase (USD) * USD/BRL via exchangerate-api
+    try:
+        btc_usd = float(requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=7).json()['data']['amount'])
+        usd_brl = float(requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=7).json()['rates']['BRL'])
+        if btc_usd > 0 and usd_brl > 0:
+            return btc_usd * usd_brl
+    except:
+        pass
+    # 3. yfinance BTC-BRL
+    try:
+        dados = yf.download("BTC-BRL", period="2d", progress=False, auto_adjust=True, timeout=7)
+        return float(dados['Close'].ffill().iloc[-1])
+    except:
+        pass
+    # 4. sem preco
+    return 0.0
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
@@ -68,6 +87,21 @@ def formatar_brl(valor):
     s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
     return f"R$ {s}"
 
+
+def obter_preco_tesouro(nome_titulo):
+    # API publica do Tesouro Direto
+    try:
+        url = "https://www.tesourodireto.com.br/json/br/com/b3/tesourodireto/model/dto/TesouroDiretoDto.json"
+        resp = requests.get(url, timeout=10)
+        titulos = resp.json()['response']['TrsrBdTradgList']
+        for item in titulos:
+            nm = item['TrsrBd']['nm']
+            if nome_titulo.lower() in nm.lower():
+                return float(item['TrsrBd']['untrInvstmtVal'])
+        return 0.0
+    except:
+        return 0.0
+
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
     'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
@@ -79,10 +113,16 @@ todos_b3 = [t for cls in ['ETF', 'FII'] for t in MINHA_CARTEIRA[cls].keys()]
 precos = obter_precos_b3(todos_b3)
 precos['BTC'] = obter_preco_btc_brl()
 
+# buscar precos do Tesouro Direto dinamicamente
+for nome_td in MINHA_CARTEIRA.get('Tesouro Direto', {}).keys():
+    prc_td = obter_preco_tesouro(nome_td)
+    if prc_td > 0:
+        precos[nome_td.upper()] = prc_td
+
 linhas = []
 for cls, ativos in MINHA_CARTEIRA.items():
     for t, q in ativos.items():
-        prc = precos.get(t.upper(), 490.64)
+        prc = precos.get(t.upper(), 0.0)
         linhas.append({'Ativo': t, 'Classe': cls, 'preco_unit': prc, 'Qtd': q, 'Total Atual': q * prc})
 
 df = pd.DataFrame(linhas)
