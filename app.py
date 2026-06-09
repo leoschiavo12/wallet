@@ -209,7 +209,20 @@ with aba_dash:
                 textfont=dict(size=9, color='white'),
                 cliponaxis=False,
                 hovertemplate='%{customdata}<extra></extra>',
-                customdata=hover_barras
+                customdata=hover_barras,
+                yaxis='y'
+            )
+        )
+        # trace invisivel no yaxis2 para forca-lo a aparecer
+        fig_ativo.add_trace(
+            go.Scatter(
+                x=[df_ativo['Ativo'].iloc[0]],
+                y=[0],
+                mode='markers',
+                marker=dict(color='rgba(0,0,0,0)', size=0),
+                hoverinfo='skip',
+                showlegend=False,
+                yaxis='y2'
             )
         )
 
