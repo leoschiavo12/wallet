@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 import math
+import requests
 
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
@@ -22,6 +23,14 @@ def obter_precos_b3(tickers_lista):
         return {t.upper(): float(dados[f"{t.upper()}.SA"]['Close'].ffill().iloc[-1]) for t in tickers_lista}
     except:
         return {t.upper(): 100.0 for t in tickers_lista}
+
+def obter_preco_btc_brl():
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=brl"
+        resp = requests.get(url, timeout=7)
+        return float(resp.json()['bitcoin']['brl'])
+    except:
+        return 385000.0
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
@@ -68,11 +77,12 @@ MINHA_CARTEIRA = {
 
 todos_b3 = [t for cls in ['ETF', 'FII'] for t in MINHA_CARTEIRA[cls].keys()]
 precos = obter_precos_b3(todos_b3)
+precos['BTC'] = obter_preco_btc_brl()
 
 linhas = []
 for cls, ativos in MINHA_CARTEIRA.items():
     for t, q in ativos.items():
-        prc = precos.get(t.upper(), 385000 if t == 'BTC' else 490.64)
+        prc = precos.get(t.upper(), 490.64)
         linhas.append({'Ativo': t, 'Classe': cls, 'preco_unit': prc, 'Qtd': q, 'Total Atual': q * prc})
 
 df = pd.DataFrame(linhas)
