@@ -159,8 +159,8 @@ with aba_dash:
             domain=dict(x=[0.1, 0.9], y=[0.1, 0.9])
         ))
         fig_donut.update_layout(
-            margin=dict(t=40, b=40, l=40, r=40),
-            height=350,
+            margin=dict(t=60, b=60, l=60, r=60),
+            height=400,
             showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'
@@ -232,7 +232,7 @@ with aba_dash:
         )
         # eixo esquerdo: part. %
         fig_ativo.update_yaxes(
-            title_text="part. %",
+            title_text="",
             showgrid=True, gridcolor='#333', side='left',
             range=[0, y_max_pct * 1.2],
             tickvals=ticks_pct_show,
@@ -249,7 +249,7 @@ with aba_dash:
                 range=[0, y_max_pct * 1.2],
                 tickvals=ticks_pct_show,
                 ticktext=ticks_rs_labels,
-                title_text="total (R$)"
+                title_text=""
             )
         )
         st.plotly_chart(fig_ativo, use_container_width=True)
