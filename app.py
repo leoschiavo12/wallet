@@ -38,8 +38,11 @@ for cls, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas)
 total_geral = df['Total Atual'].sum()
 df['Part. %'] = (df['Total Atual'] / total_geral) * 100
+
+# Ordenar classes do maior para o menor - FII primeiro
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
+
 df_ativo = df.sort_values(by='Total Atual', ascending=False)
 
 # 4. Interface
@@ -47,17 +50,28 @@ aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "Simular N
 
 with aba_dash:
     st.metric("Patrimonio Total", f"R$ {total_geral:,.2f}")
-
     st.markdown('---')
 
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
+        total_classe = df_resumo_classe['Total Atual'].sum()
+
+        # Calcular rotation para FII comecar exatamente no topo (90 graus) no sentido anti-horario
+        # No Plotly counterclockwise: rotation = ponto de inicio do primeiro segmento
+        # Para a borda ESQUERDA do FII ficar no topo: rotation = 90
+        # Para a borda DIREITA do FII ficar no topo: rotation = 90 + sweep_FII
+        fii_pct = df_resumo_classe.iloc[0]['Total Atual'] / total_classe
+        fii_sweep = fii_pct * 360
+        # Queremos que FII comece no topo e va para a esquerda
+        # rotation=90 coloca o inicio do primeiro segmento no topo
+        rotation_val = 90
+
         fig_donut = go.Figure(go.Pie(
-            labels=df_resumo_classe['Classe'],
-            values=df_resumo_classe['Total Atual'],
+            labels=df_resumo_classe['Classe'].tolist(),
+            values=df_resumo_classe['Total Atual'].tolist(),
             hole=0.75,
-            rotation=90,
+            rotation=rotation_val,
             direction='counterclockwise',
             sort=False,
             textinfo='percent+label',
