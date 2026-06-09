@@ -5,10 +5,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# 1. Configuracao da Pagina
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
-# 2. Funcoes de Dados
 def obter_precos_b3(tickers_lista):
     tk_formatados = [f"{t.upper()}.SA" for t in tickers_lista]
     try:
@@ -18,7 +16,6 @@ def obter_precos_b3(tickers_lista):
     except:
         return {t.upper(): 100.0 for t in tickers_lista}
 
-# 3. Definicao da Carteira e Calculos
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
     'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
@@ -38,14 +35,10 @@ for cls, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas)
 total_geral = df['Total Atual'].sum()
 df['Part. %'] = (df['Total Atual'] / total_geral) * 100
-
-# Ordenar classes do maior para o menor - FII primeiro
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
-
 df_ativo = df.sort_values(by='Total Atual', ascending=False)
 
-# 4. Interface
 aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "Simular Novos Aportes"])
 
 with aba_dash:
@@ -55,28 +48,34 @@ with aba_dash:
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
-        total_classe = df_resumo_classe['Total Atual'].sum()
+        # O Plotly com counterclockwise ignora o rotation de forma nao intuitiva.
+        # Solucao: usar clockwise (padrao) e calcular o rotation para que
+        # a borda DIREITA do FII fique no topo (90 graus no sistema Plotly onde 0=direita).
+        # Com clockwise, rotation=X coloca o inicio do 1o segmento em X graus (0=direita, 90=topo).
+        # Queremos FII comecando no topo = rotation=90, sentido horario...
+        # MAS queremos anti-horario visualmente.
+        # Truque: inverter a ordem dos dados e usar clockwise.
+        # Assim visualmente parece anti-horario com FII comecando no topo.
 
-        # Calcular rotation para FII comecar exatamente no topo (90 graus) no sentido anti-horario
-        # No Plotly counterclockwise: rotation = ponto de inicio do primeiro segmento
-        # Para a borda ESQUERDA do FII ficar no topo: rotation = 90
-        # Para a borda DIREITA do FII ficar no topo: rotation = 90 + sweep_FII
-        fii_pct = df_resumo_classe.iloc[0]['Total Atual'] / total_classe
-        fii_sweep = fii_pct * 360
-        # Queremos que FII comece no topo e va para a esquerda
-        # rotation=90 coloca o inicio do primeiro segmento no topo
-        rotation_val = 90
+        df_inv = df_resumo_classe.iloc[::-1].reset_index(drop=True)
+
+        # Com clockwise e rotation=90, o ultimo item da lista original (Cripto) comecaria no topo.
+        # Precisamos que FII (maior) fique no topo.
+        # Calculamos onde Cripto terminaria para FII comecar la.
+        total_exc_fii = df_inv['Total Atual'].iloc[:-1].sum()
+        pct_exc_fii = total_exc_fii / df_inv['Total Atual'].sum()
+        rotation_val = 90 + pct_exc_fii * 360
 
         fig_donut = go.Figure(go.Pie(
-            labels=df_resumo_classe['Classe'].tolist(),
-            values=df_resumo_classe['Total Atual'].tolist(),
+            labels=df_inv['Classe'].tolist(),
+            values=df_inv['Total Atual'].tolist(),
             hole=0.75,
             rotation=rotation_val,
-            direction='counterclockwise',
+            direction='clockwise',
             sort=False,
             textinfo='percent+label',
             textposition='outside',
-            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)])
+            marker=dict(colors=list(reversed(px.colors.sequential.Blues_r[:len(df_resumo_classe)])))
         ))
         fig_donut.update_layout(
             margin=dict(t=60, b=60, l=60, r=60),
