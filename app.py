@@ -172,11 +172,19 @@ with aba_dash:
         max_rs  = df_ativo['Total Atual'].max()
 
         y_max_pct, ticks_pct = gerar_ticks_pct(max_pct, step=5)
-        y_max_rs,  ticks_rs  = gerar_ticks_rs(max_rs * (y_max_pct / max_pct))
 
-        # mostrar apenas ticks abaixo do valor maximo real (sem linha sobrando no topo)
+        # ticks % visiveis: sem o tick que ultrapassa o maximo real
         ticks_pct_show = [v for v in ticks_pct if v < max_pct * 1.15]
-        ticks_rs_show  = [v for v in ticks_rs  if v < max_rs  * 1.15]
+
+        # ticks R$ redondos posicionados proporcionalmente no eixo %
+        _, ticks_rs_round = gerar_ticks_rs(max_rs * 1.15)
+        pares_rs = [
+            (rs / total_geral * 100, rs)
+            for rs in ticks_rs_round
+            if rs / total_geral * 100 <= max(ticks_pct_show) * 1.05
+        ]
+        if not pares_rs:
+            pares_rs = [(0, 0)]
 
         shapes = []
         for p in ticks_pct_show[1:]:
@@ -234,8 +242,8 @@ with aba_dash:
             title_text="total (R$)", secondary_y=True,
             showgrid=False, side='right',
             range=[0, y_max_pct * 1.2],
-            tickvals=[p[0] for p in pares_rs],
-            ticktext=[abreviar_rs(p[1]) for p in pares_rs]
+            tickvals=[p[0] for p in pares_rs if p[1] > 0],
+            ticktext=[abreviar_rs(p[1]) for p in pares_rs if p[1] > 0]
         )
         st.plotly_chart(fig_ativo, use_container_width=True)
 
