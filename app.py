@@ -6,6 +6,9 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import math
 import requests
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from datetime import date
 
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
@@ -126,7 +129,7 @@ df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
 df_ativo = df.sort_values(by='Total Atual', ascending=False)
 
-aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "simular novos aportes"])
+aba_dash, aba_detalhe, aba_lanc, aba_aportes = st.tabs(["dashboard", "detalhe", "lancamentos", "simular novos aportes"])
 
 with aba_dash:
     st.metric("patrimonio total", formatar_brl(total_geral))
@@ -280,3 +283,190 @@ with aba_detalhe:
         'Part. %':     st.column_config.TextColumn("part. %",        alignment="center"),
     }
     st.dataframe(df_display, use_container_width=True, hide_index=True, column_config=config)
+
+# ── Google Sheets helpers ─────────────────────────────────────────────────────
+def get_sheets_service():
+    creds = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    return build("sheets", "v4", credentials=creds).spreadsheets()
+
+SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
+SHEET_TAB = "lancamentos"
+HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total", "observacao"]
+
+@st.cache_data(ttl=30)
+def ler_lancamentos():
+    try:
+        svc  = get_sheets_service()
+        res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:H").execute()
+        rows = res.get("values", [])
+        if len(rows) <= 1:
+            return pd.DataFrame(columns=HEADERS)
+        df_l = pd.DataFrame(rows[1:], columns=HEADERS)
+        df_l["quantidade"]    = pd.to_numeric(df_l["quantidade"],    errors="coerce")
+        df_l["preco_unitario"]= pd.to_numeric(df_l["preco_unitario"],errors="coerce")
+        df_l["total"]         = pd.to_numeric(df_l["total"],         errors="coerce")
+        return df_l
+    except Exception as e:
+        st.error(f"Erro ao ler planilha: {e}")
+        return pd.DataFrame(columns=HEADERS)
+
+def salvar_lancamento(row: list):
+    svc = get_sheets_service()
+    svc.values().append(
+        spreadsheetId=SHEET_ID,
+        range=f"{SHEET_TAB}!A:H",
+        valueInputOption="USER_ENTERED",
+        body={"values": [row]}
+    ).execute()
+    st.cache_data.clear()
+
+def deletar_lancamento(idx_linha_sheet: int):
+    # idx_linha_sheet: 1-based, linha 1 = header
+    svc = get_sheets_service()
+    body = {"requests": [{"deleteDimension": {"range": {
+        "sheetId": 0,
+        "dimension": "ROWS",
+        "startIndex": idx_linha_sheet,
+        "endIndex":   idx_linha_sheet + 1
+    }}}]}
+    svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
+    st.cache_data.clear()
+
+def garantir_cabecalho():
+    try:
+        svc = get_sheets_service()
+        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A1:H1").execute()
+        if not res.get("values"):
+            svc.values().update(
+                spreadsheetId=SHEET_ID,
+                range=f"{SHEET_TAB}!A1",
+                valueInputOption="RAW",
+                body={"values": [HEADERS]}
+            ).execute()
+    except:
+        pass
+
+garantir_cabecalho()
+
+# ── Aba lancamentos ────────────────────────────────────────────────────────────
+with aba_lanc:
+
+    df_lanc = ler_lancamentos()
+
+    # ── Formulario de novo lancamento ─────────────────────────────────────────
+    with st.expander("+ novo lancamento", expanded=False):
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            f_data  = st.date_input("data", value=date.today())
+            f_tipo  = st.selectbox("tipo", ["compra", "venda"])
+        with col2:
+            todos_ativos = sorted([t for cls in MINHA_CARTEIRA.values() for t in cls.keys()])
+            f_ativo = st.selectbox("ativo", todos_ativos)
+            f_classe = next((cls for cls, atv in MINHA_CARTEIRA.items()
+                             for t, v in atv.items() if t == f_ativo), "")
+            st.text_input("classe", value=f_classe, disabled=True)
+        with col3:
+            f_qtd   = st.number_input("quantidade", min_value=0.0, step=0.001, format="%.6f")
+            f_preco = st.number_input("preco unitario (R$)", min_value=0.0, step=0.01, format="%.2f")
+        with col4:
+            f_total = f_qtd * f_preco
+            st.metric("total", formatar_brl(f_total))
+            f_obs   = st.text_input("observacao (opcional)")
+
+        if st.button("salvar lancamento", type="primary"):
+            if f_qtd > 0 and f_preco > 0:
+                salvar_lancamento([
+                    f_data.strftime("%d/%m/%Y"),
+                    f_tipo, f_ativo, f_classe,
+                    f_qtd, f_preco, round(f_total, 2), f_obs
+                ])
+                st.success("lancamento salvo!")
+                st.rerun()
+            else:
+                st.warning("preencha quantidade e preco.")
+
+    st.markdown("---")
+
+    if df_lanc.empty:
+        st.info("nenhum lancamento registrado ainda.")
+    else:
+        # ── Tabela de lancamentos com exclusao ───────────────────────────────
+        st.subheader("historico")
+
+        col_del, col_tabela = st.columns([0.08, 0.92])
+        with col_tabela:
+            df_lanc_fmt = df_lanc.copy()
+            df_lanc_fmt["preco_unitario"] = df_lanc_fmt["preco_unitario"].apply(
+                lambda x: formatar_brl(x) if pd.notna(x) else "")
+            df_lanc_fmt["total"] = df_lanc_fmt["total"].apply(
+                lambda x: formatar_brl(x) if pd.notna(x) else "")
+            df_lanc_fmt["quantidade"] = df_lanc_fmt["quantidade"].apply(
+                lambda x: f"{x:g}".replace(".", ",") if pd.notna(x) else "")
+
+            cfg_lanc = {c: st.column_config.TextColumn(c, alignment="center") for c in HEADERS}
+            st.dataframe(df_lanc_fmt, use_container_width=True, hide_index=False, column_config=cfg_lanc)
+
+        st.markdown("---")
+
+        # exclusao por indice
+        with st.expander("excluir lancamento"):
+            idx_del = st.number_input(
+                "numero da linha (conforme tabela acima, começa em 0)",
+                min_value=0, max_value=max(0, len(df_lanc)-1), step=1
+            )
+            if st.button("excluir", type="secondary"):
+                deletar_lancamento(idx_del + 1)  # +1 pula o header
+                st.success("lancamento excluido!")
+                st.rerun()
+
+        st.markdown("---")
+
+        # ── Preco medio por ativo ────────────────────────────────────────────
+        st.subheader("preco medio por ativo")
+        compras = df_lanc[df_lanc["tipo"] == "compra"].copy()
+        if not compras.empty:
+            pm = compras.groupby("ativo").apply(
+                lambda g: pd.Series({
+                    "total investido": (g["quantidade"] * g["preco_unitario"]).sum(),
+                    "qtd total":        g["quantidade"].sum(),
+                    "preco medio":     (g["quantidade"] * g["preco_unitario"]).sum() / g["quantidade"].sum()
+                })
+            ).reset_index()
+            pm_fmt = pm.copy()
+            pm_fmt["total investido"] = pm_fmt["total investido"].apply(formatar_brl)
+            pm_fmt["qtd total"]       = pm_fmt["qtd total"].apply(lambda x: f"{x:g}".replace(".", ","))
+            pm_fmt["preco medio"]     = pm_fmt["preco medio"].apply(formatar_brl)
+            cfg_pm = {c: st.column_config.TextColumn(c, alignment="center") for c in pm_fmt.columns}
+            st.dataframe(pm_fmt, use_container_width=True, hide_index=True, column_config=cfg_pm)
+
+        st.markdown("---")
+
+        # ── Evolucao do patrimônio (por data de lancamento) ──────────────────
+        st.subheader("evolucao do patrimonio investido")
+        df_evo = df_lanc.copy()
+        df_evo["data_dt"] = pd.to_datetime(df_evo["data"], format="%d/%m/%Y", errors="coerce")
+        df_evo = df_evo.dropna(subset=["data_dt"]).sort_values("data_dt")
+        df_evo["sinal"]  = df_evo["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+        df_evo["valor"]  = df_evo["total"] * df_evo["sinal"]
+        df_evo["acum"]   = df_evo["valor"].cumsum()
+
+        fig_evo = go.Figure()
+        fig_evo.add_trace(go.Scatter(
+            x=df_evo["data_dt"], y=df_evo["acum"],
+            mode="lines+markers",
+            line=dict(color="#1E88E5", width=2),
+            marker=dict(size=5),
+            hovertemplate="%{x|%d/%m/%Y}<br>" + formatar_brl(0).replace("0", "%{y:,.2f}") + "<extra></extra>"
+        ))
+        fig_evo.update_layout(
+            height=300,
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            showlegend=False,
+            xaxis=dict(showgrid=False),
+            yaxis=dict(showgrid=True, gridcolor="#333")
+        )
+        st.plotly_chart(fig_evo, use_container_width=True)
