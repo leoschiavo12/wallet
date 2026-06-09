@@ -9,8 +9,14 @@ st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
 st.markdown("""
     <style>
+        /* centralizar headers e celulas da tabela */
+        .stDataFrame th { text-align: center !important; }
+        .stDataFrame td { text-align: center !important; }
+        .stDataFrame div [role="gridcell"] { justify-content: center !important; }
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
+        .stDataFrame div [role="columnheader"] { justify-content: center !important; }
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
+        [data-testid="stDataFrameResizable"] div[role="columnheader"] span { width: 100% !important; text-align: center !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -47,48 +53,52 @@ df_ativo = df.sort_values(by='total atual', ascending=False)
 aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "simular novos aportes"])
 
 with aba_dash:
-    st.metric("patrimonio total", f"R$ {total_geral:,.2f}")
-    st.markdown('---')
+    # linha superior: patrimonio + donut pequeno lado a lado
+    col_metric, col_donut = st.columns([1, 1])
 
-    col_donut, col_barras = st.columns([1, 2])
+    with col_metric:
+        st.metric("patrimonio total", f"R$ {total_geral:,.2f}")
 
     with col_donut:
         fig_donut = go.Figure(go.Pie(
             labels=df_resumo_classe['classe'].tolist(),
             values=df_resumo_classe['total atual'].tolist(),
-            hole=0.75,
+            hole=0.72,
             textinfo='percent+label',
             textposition='outside',
+            textfont=dict(size=11),
             marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)])
         ))
         fig_donut.update_layout(
-            margin=dict(t=40, b=40, l=40, r=40),
-            height=350,
+            margin=dict(t=30, b=30, l=30, r=30),
+            height=220,
             showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'
         )
         st.plotly_chart(fig_donut, use_container_width=True)
 
-    with col_barras:
-        fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
-        fig_ativo.add_trace(
-            go.Bar(x=df_ativo['ativo'], y=df_ativo['total atual'], marker_color='#1E88E5'),
-            secondary_y=False
-        )
-        fig_ativo.add_trace(
-            go.Scatter(x=df_ativo['ativo'], y=df_ativo['part. %'], mode='markers', marker=dict(color='rgba(0,0,0,0)')),
-            secondary_y=True
-        )
-        fig_ativo.update_layout(
-            height=350,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False
-        )
-        fig_ativo.update_yaxes(title_text="total (R$)", secondary_y=False, showgrid=True, gridcolor='#333', side='right')
-        fig_ativo.update_yaxes(title_text="participacao (%)", secondary_y=True, showgrid=False, side='left')
-        st.plotly_chart(fig_ativo, use_container_width=True)
+    st.markdown('---')
+
+    # grafico de barras em largura total
+    fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
+    fig_ativo.add_trace(
+        go.Bar(x=df_ativo['ativo'], y=df_ativo['total atual'], marker_color='#1E88E5'),
+        secondary_y=False
+    )
+    fig_ativo.add_trace(
+        go.Scatter(x=df_ativo['ativo'], y=df_ativo['part. %'], mode='markers', marker=dict(color='rgba(0,0,0,0)')),
+        secondary_y=True
+    )
+    fig_ativo.update_layout(
+        height=350,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        showlegend=False
+    )
+    fig_ativo.update_yaxes(title_text="total (R$)", secondary_y=False, showgrid=True, gridcolor='#333', side='right')
+    fig_ativo.update_yaxes(title_text="participacao (%)", secondary_y=True, showgrid=False, side='left')
+    st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
     config = {
