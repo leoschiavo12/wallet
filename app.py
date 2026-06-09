@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
+import math
 
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
@@ -26,6 +27,24 @@ def obter_precos_b3(tickers_lista):
         return {t.upper(): float(dados[f"{t.upper()}.SA"]['Close'].ffill().iloc[-1]) for t in tickers_lista}
     except:
         return {t.upper(): 100.0 for t in tickers_lista}
+
+def arredondar_teto(valor, multiplo):
+    return math.ceil(valor / multiplo) * multiplo
+
+def gerar_ticks_rs(y_max_rs, n_ticks=5):
+    bruto = y_max_rs / (n_ticks - 1)
+    magnitude = 10 ** math.floor(math.log10(bruto))
+    candidatos = [magnitude, 2*magnitude, 5*magnitude, 10*magnitude]
+    step = next(c for c in candidatos if c >= bruto)
+    teto = arredondar_teto(y_max_rs, step)
+    vals = [round(step * i) for i in range(n_ticks) if step * i <= teto + 1]
+    return teto, vals
+
+def gerar_ticks_pct(max_pct_ativo, step=5):
+    teto = arredondar_teto(max_pct_ativo * 1.1, step)
+    teto = max(teto, step)
+    vals = list(range(0, teto + 1, step))
+    return teto, vals
 
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
@@ -53,11 +72,11 @@ aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "simular n
 
 with aba_dash:
 
-    # linha 1: cabecalho com patrimonio total
+    # linha 1: cabecalho
     st.metric("patrimonio total", f"R$ {total_geral:,.2f}")
     st.markdown('---')
 
-    # linha 2: donut + grafico de barras
+    # linha 2: donut + barras
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
@@ -80,19 +99,19 @@ with aba_dash:
         st.plotly_chart(fig_donut, use_container_width=True)
 
     with col_barras:
-        # eixo esquerdo: part. % fixo 0-40%
-        y_max_pct = 40
+        max_pct = df_ativo['part. %'].max()
+        max_rs  = df_ativo['total atual'].max()
 
-        # eixo direito: R$ dinamico — 40% do patrimonio = topo da escala
-        y_max_rs = total_geral * y_max_pct / 100
+        y_max_pct, ticks_pct = gerar_ticks_pct(max_pct, step=5)
+        y_max_rs,  ticks_rs  = gerar_ticks_rs(max_rs * (y_max_pct / max_pct))
 
-        # sub-escalas tracejadas em 5, 15, 25, 35%
+        # sub-escalas tracejadas nos ticks intermediarios de %
         shapes = []
-        for p in [5, 15, 25, 35]:
+        for p in ticks_pct[1:-1]:
             shapes.append(dict(
                 type='line',
                 xref='paper', x0=0, x1=1,
-                yref='y2', y0=p, y1=p,
+                yref='y', y0=p, y1=p,
                 line=dict(color='rgba(255,255,255,0.10)', width=1, dash='dot')
             ))
 
@@ -120,14 +139,16 @@ with aba_dash:
         )
 
         fig_ativo.update_layout(
-            height=300,
+            height=350,
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False,
-            shapes=shapes
+            shapes=shapes,
+            xaxis=dict(
+                tickangle=45
+            )
         )
 
-        # eixo esquerdo: part. % fixo 0-40%
         fig_ativo.update_yaxes(
             title_text="part. %",
             secondary_y=False,
@@ -135,25 +156,18 @@ with aba_dash:
             gridcolor='#333',
             side='left',
             range=[0, y_max_pct],
-            tickvals=[0, 10, 20, 30, 40],
-            ticktext=['0%', '10%', '20%', '30%', '40%']
+            tickvals=ticks_pct,
+            ticktext=[f'{v}%' for v in ticks_pct]
         )
 
-        # eixo direito: R$ dinamico, proporcional ao patrimonio
         fig_ativo.update_yaxes(
             title_text="total (R$)",
             secondary_y=True,
             showgrid=False,
             side='right',
             range=[0, y_max_rs],
-            tickvals=[total_geral * p / 100 for p in [0, 10, 20, 30, 40]],
-            ticktext=[
-                'R$ 0',
-                f'R$ {total_geral*0.10:,.0f}',
-                f'R$ {total_geral*0.20:,.0f}',
-                f'R$ {total_geral*0.30:,.0f}',
-                f'R$ {total_geral*0.40:,.0f}'
-            ]
+            tickvals=ticks_rs,
+            ticktext=[f'R$ {v:,.0f}' for v in ticks_rs]
         )
 
         st.plotly_chart(fig_ativo, use_container_width=True)
