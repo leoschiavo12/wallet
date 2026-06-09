@@ -173,18 +173,12 @@ with aba_dash:
 
         y_max_pct, ticks_pct = gerar_ticks_pct(max_pct, step=5)
 
-        # ticks % visiveis: sem o tick que ultrapassa o maximo real
-        ticks_pct_show = [v for v in ticks_pct if v < max_pct * 1.15]
+        # ticks % visiveis: apenas os menores que o maximo real
+        ticks_pct_show = [v for v in ticks_pct if v <= max_pct]
 
-        # ticks R$ redondos posicionados proporcionalmente no eixo %
-        _, ticks_rs_round = gerar_ticks_rs(max_rs * 1.15)
-        pares_rs = [
-            (rs / total_geral * 100, rs)
-            for rs in ticks_rs_round
-            if rs / total_geral * 100 <= max(ticks_pct_show) * 1.05
-        ]
-        if not pares_rs:
-            pares_rs = [(0, 0)]
+        # eixo direito: mesmos pontos do eixo %, convertidos para R$
+        # tick_rs = tick_pct / 100 * total_geral  (escala perfeita)
+        ticks_rs_labels = [f"R$ {v/100*total_geral:,.0f}".replace(',', '.') for v in ticks_pct_show]
 
         shapes = []
         for p in ticks_pct_show[1:]:
@@ -245,15 +239,16 @@ with aba_dash:
             ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct_show]
         )
 
-        # eixo direito: R$ como anotacoes no lado direito (mesmo range do eixo %)
+        # eixo direito: mesmo range e mesmos pontos do eixo %
+        # labels convertidos para R$ — escala perfeitamente alinhada
         fig_ativo.update_layout(
             yaxis2=dict(
                 overlaying='y',
                 side='right',
                 showgrid=False,
                 range=[0, y_max_pct * 1.2],
-                tickvals=[p[0] for p in pares_rs if p[1] > 0],
-                ticktext=[abreviar_rs(p[1]) for p in pares_rs if p[1] > 0],
+                tickvals=ticks_pct_show,
+                ticktext=ticks_rs_labels,
                 title_text="total (R$)"
             )
         )
