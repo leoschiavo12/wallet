@@ -189,14 +189,18 @@ with aba_dash:
             xaxis=dict(showticklabels=False)
         )
 
+        # remover tick maximo para nao aparecer linha sobrando no topo
+        ticks_pct_show = ticks_pct[:-1]
+        ticks_rs_show  = ticks_rs[:-1]
+
         fig_ativo.update_yaxes(
             title_text="part. %",
             secondary_y=False,
             showgrid=True, gridcolor='#333',
             side='left',
-            range=[0, y_max_pct * 1.5],
-            tickvals=ticks_pct,
-            ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct]
+            range=[0, y_max_pct * 1.35],
+            tickvals=ticks_pct_show,
+            ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct_show]
         )
 
         fig_ativo.update_yaxes(
@@ -204,9 +208,9 @@ with aba_dash:
             secondary_y=True,
             showgrid=False,
             side='right',
-            range=[0, y_max_rs * 1.5],
-            tickvals=ticks_rs,
-            ticktext=[abreviar_rs(v) for v in ticks_rs]
+            range=[0, y_max_rs * 1.35],
+            tickvals=ticks_rs_show,
+            ticktext=[abreviar_rs(v) for v in ticks_rs_show]
         )
 
         st.plotly_chart(fig_ativo, use_container_width=True)
