@@ -131,16 +131,6 @@ aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "simular n
 with aba_dash:
     st.metric("patrimonio total", formatar_brl(total_geral))
 
-    avisos = []
-    for cls, ativos in MINHA_CARTEIRA.items():
-        for nome, v in ativos.items():
-            if isinstance(v, tuple):
-                prc_atual  = preco_td_de_secrets(nome, v[1])
-                data_atual = data_td_de_secrets(nome)
-                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual}")
-    if avisos:
-        st.caption("preco manual (atualize em Settings > Secrets): " + " · ".join(avisos))
-
     st.markdown('---')
 
     col_donut, col_barras = st.columns([1, 2])
@@ -223,26 +213,42 @@ with aba_dash:
             secondary_y=True
         )
         fig_ativo.update_layout(
-            height=350, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False, shapes=shapes, xaxis=dict(showticklabels=False)
+            height=400,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            showlegend=False,
+            shapes=shapes,
+            xaxis=dict(showticklabels=False),
+            bargap=0.15,
+            margin=dict(t=10, b=10, l=10, r=10)
         )
         fig_ativo.update_yaxes(
             title_text="part. %", secondary_y=False,
             showgrid=True, gridcolor='#333', side='left',
-            range=[0, y_max_pct * 1.35],
+            range=[0, y_max_pct * 1.2],
             tickvals=ticks_pct_show,
             ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct_show]
         )
         fig_ativo.update_yaxes(
             title_text="total (R$)", secondary_y=True,
             showgrid=False, side='right',
-            range=[0, y_max_rs * 1.35],
+            range=[0, y_max_rs * 1.2],
             tickvals=ticks_rs_show,
             ticktext=[abreviar_rs(v) for v in ticks_rs_show]
         )
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
+    avisos = []
+    for cls, ativos in MINHA_CARTEIRA.items():
+        for nome, v in ativos.items():
+            if isinstance(v, tuple):
+                prc_atual  = preco_td_de_secrets(nome, v[1])
+                data_atual = data_td_de_secrets(nome)
+                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual}")
+    if avisos:
+        st.caption("preco manual (atualize em Settings > Secrets): " + " · ".join(avisos))
+
     df_display = df.copy()
     df_display['preco_unit']  = df_display['preco_unit'].apply(formatar_brl)
     df_display['Total Atual'] = df_display['Total Atual'].apply(formatar_brl)
