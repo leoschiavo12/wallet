@@ -18,7 +18,7 @@ def obter_precos_b3(tickers_lista):
         return precos
     except: return {t.upper(): 100.0 for t in tickers_lista}
 
-# 3. Definição da Carteira e Cálculos (Executado antes de qualquer interface)
+# 3. Definição da Carteira e Cálculos
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
     'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
@@ -28,6 +28,7 @@ MINHA_CARTEIRA = {
 
 todos_b3 = [t for cls in ['ETF', 'FII'] for t in MINHA_CARTEIRA[cls].keys()]
 precos = obter_precos_b3(todos_b3)
+
 linhas = []
 for cls, ativos in MINHA_CARTEIRA.items():
     for t, q in ativos.items():
@@ -38,33 +39,49 @@ df = pd.DataFrame(linhas)
 total_geral = df['Total Atual'].sum()
 df['Part. %'] = (df['Total Atual'] / total_geral) * 100
 df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
+df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False)
 df_ativo = df.sort_values(by='Total Atual', ascending=False)
 
-# 4. Interface (Definição das abas)
+# 4. Interface
 aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "Simular Novos Aportes"])
 
 with aba_dash:
     c1, c2 = st.columns([1, 1.5])
     c1.metric("Patrimônio Total", f"R$ {total_geral:,.2f}")
-    
+
     # Gráfico de Rosca
-    fig_donut = px.pie(df_resumo_classe, values='Total Atual', names='Classe', hole=0.75, 
+    fig_donut = px.pie(df_resumo_classe, values='Total Atual', names='Classe', hole=0.75,
                        color_discrete_sequence=px.colors.sequential.Blues_r)
-    fig_donut.update_traces(textinfo='percent+label', textposition='outside', sort=False)
-    fig_donut.update_layout(margin=dict(t=10, b=10, l=10, r=10), height=200, showlegend=False)
+    fig_donut.update_traces(
+        textinfo='percent+label',
+        textposition='outside',
+        rotation=90,
+        direction='counterclockwise',
+        sort=False
+    )
+    fig_donut.update_layout(
+        margin=dict(t=60, b=60, l=60, r=60),
+        height=300,
+        showlegend=False
+    )
     c2.plotly_chart(fig_donut, use_container_width=True)
-    
+
     st.markdown('---')
-    
-    # Gráfico de Barras com Escalas Invertidas
+
+    # Gráfico de Barras
     fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
     fig_ativo.add_trace(go.Bar(x=df_ativo['Ativo'], y=df_ativo['Total Atual'], marker_color='#1E88E5'), secondary_y=False)
     fig_ativo.add_trace(go.Scatter(x=df_ativo['Ativo'], y=df_ativo['Part. %'], mode='markers', marker=dict(color='rgba(0,0,0,0)')), secondary_y=True)
-    
-    fig_ativo.update_layout(height=350, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', showlegend=False)
+
+    fig_ativo.update_layout(
+        height=350,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        showlegend=False
+    )
     fig_ativo.update_yaxes(title_text="Total (R$)", secondary_y=False, showgrid=True, gridcolor='#333', side='right')
     fig_ativo.update_yaxes(title_text="Participação (%)", secondary_y=True, showgrid=False, side='left')
-    
+
     st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
