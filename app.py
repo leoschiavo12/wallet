@@ -174,8 +174,9 @@ with aba_dash:
         y_max_pct, ticks_pct = gerar_ticks_pct(max_pct, step=5)
         y_max_rs,  ticks_rs  = gerar_ticks_rs(max_rs * (y_max_pct / max_pct))
 
-        ticks_pct_show = ticks_pct[:-1]
-        ticks_rs_show  = ticks_rs[:-1]
+        # mostrar apenas ticks abaixo do valor maximo real (sem linha sobrando no topo)
+        ticks_pct_show = [v for v in ticks_pct if v < max_pct * 1.15]
+        ticks_rs_show  = [v for v in ticks_rs  if v < max_rs  * 1.15]
 
         shapes = []
         for p in ticks_pct_show[1:]:
@@ -232,9 +233,9 @@ with aba_dash:
         fig_ativo.update_yaxes(
             title_text="total (R$)", secondary_y=True,
             showgrid=False, side='right',
-            range=[0, y_max_rs * 1.2],
-            tickvals=ticks_rs_show,
-            ticktext=[abreviar_rs(v) for v in ticks_rs_show]
+            range=[0, y_max_pct * 1.2],  # mesmo range do eixo primario (proporcional)
+            tickvals=ticks_pct_show,       # mesmos pontos do eixo %
+            ticktext=[abreviar_rs(round(v / 100 * total_geral)) for v in ticks_pct_show]
         )
         st.plotly_chart(fig_ativo, use_container_width=True)
 
