@@ -5,6 +5,11 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 import math
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import io
 
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
@@ -46,6 +51,52 @@ def gerar_ticks_pct(max_pct_ativo, step=5):
     vals = list(range(0, teto + 1, step))
     return teto, vals
 
+def render_donut(labels, values, colors, bg='#0e1117'):
+    total = sum(values)
+    fig, ax = plt.subplots(figsize=(4, 4), facecolor=bg)
+    ax.set_facecolor(bg)
+
+    # startangle=90, counterclockwise=True (matplotlib: sentido anti-horario por padrao)
+    wedges, texts, autotexts = ax.pie(
+        values,
+        labels=None,
+        autopct='%1.1f%%',
+        startangle=90,
+        counterclock=True,
+        colors=colors,
+        wedgeprops=dict(width=0.45, edgecolor=bg, linewidth=2),
+        pctdistance=0.75
+    )
+
+    for at in autotexts:
+        at.set_color('white')
+        at.set_fontsize(9)
+
+    # labels externos com linha
+    for i, (wedge, label) in enumerate(zip(wedges, labels)):
+        ang = (wedge.theta1 + wedge.theta2) / 2
+        ang_rad = math.radians(ang)
+        x = math.cos(ang_rad)
+        y = math.sin(ang_rad)
+        r_label = 1.25
+        ax.annotate(
+            f"{label}\n{values[i]/total*100:.1f}%",
+            xy=(0.55*x, 0.55*y),
+            xytext=(r_label*x, r_label*y),
+            ha='center', va='center',
+            color='white', fontsize=8,
+            arrowprops=dict(arrowstyle='-', color='#555', lw=0.8)
+        )
+
+    ax.set_xlim(-1.7, 1.7)
+    ax.set_ylim(-1.7, 1.7)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight', facecolor=bg, dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
     'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
@@ -65,8 +116,7 @@ for cls, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas)
 total_geral = df['total atual'].sum()
 df['part. %'] = (df['total atual'] / total_geral) * 100
-df_resumo_classe = df.groupby('classe')['Total Atual'.lower()].sum().reset_index() if False else \
-                   df.groupby('classe')['total atual'].sum().reset_index()
+df_resumo_classe = df.groupby('classe')['total atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values('total atual', ascending=False).reset_index(drop=True)
 df_ativo = df.sort_values(by='total atual', ascending=False)
 
@@ -80,32 +130,13 @@ with aba_dash:
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
-        # largest slice at top: centro do maior slice em 90 graus (topo)
-        # Plotly clockwise: rotation = ponto de inicio do 1o segmento (0=direita)
-        # Para centro em 90: inicio = 90 - sweep/2
-        sweep_maior = df_resumo_classe.iloc[0]['total atual'] / total_geral * 360
-        rotation_val = 90 - sweep_maior / 2
-
-        fig_donut = go.Figure(go.Pie(
+        cores = px.colors.sequential.Blues_r[:len(df_resumo_classe)]
+        buf = render_donut(
             labels=df_resumo_classe['classe'].tolist(),
             values=df_resumo_classe['total atual'].tolist(),
-            hole=0.72,
-            rotation=rotation_val,
-            direction='clockwise',
-            sort=False,
-            textinfo='percent+label',
-            textposition='outside',
-            textfont=dict(size=11),
-            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)])
-        ))
-        fig_donut.update_layout(
-            margin=dict(t=30, b=30, l=30, r=30),
-            height=300,
-            showlegend=False,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            colors=cores
         )
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.image(buf, use_container_width=True)
 
     with col_barras:
         max_pct = df_ativo['part. %'].max()
