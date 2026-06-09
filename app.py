@@ -87,6 +87,8 @@ df_resumo_classe = df.groupby('classe')['total atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values('total atual', ascending=False).reset_index(drop=True)
 df_ativo = df.sort_values(by='total atual', ascending=False)
 
+ALTURA = 340
+
 aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "simular novos aportes"])
 
 with aba_dash:
@@ -94,7 +96,6 @@ with aba_dash:
     st.metric("patrimonio total", formatar_brl(total_geral))
     st.markdown('---')
 
-    # linha unica com donut e barras alinhados
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
@@ -114,14 +115,14 @@ with aba_dash:
             hole=0.72,
             textinfo='label',
             textposition='outside',
-            textfont=dict(size=11),
+            textfont=dict(size=10),
             hovertemplate='%{customdata}<extra></extra>',
             customdata=hover_donut,
             marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)])
         ))
         fig_donut.update_layout(
-            margin=dict(t=60, b=60, l=80, r=80),
-            height=380,
+            margin=dict(t=10, b=10, l=10, r=10),
+            height=ALTURA,
             showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'
@@ -143,7 +144,6 @@ with aba_dash:
                 line=dict(color='rgba(255,255,255,0.08)', width=1, dash='dot')
             ))
 
-        # hover card: nome + % + R$
         hover_barras = [
             f"<b>{row['ativo']}</b><br>{str(round(row['part. %'], 2)).replace('.', ',')}%<br>{formatar_brl(row['total atual'])}"
             for _, row in df_ativo.iterrows()
@@ -156,7 +156,6 @@ with aba_dash:
                 x=df_ativo['ativo'],
                 y=df_ativo['part. %'],
                 marker_color='#1E88E5',
-                # ticker do ativo vertical em cima da barra
                 text=df_ativo['ativo'],
                 textposition='outside',
                 textangle=-90,
@@ -180,11 +179,12 @@ with aba_dash:
         )
 
         fig_ativo.update_layout(
-            height=380,
+            height=ALTURA,
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False,
             shapes=shapes,
+            margin=dict(t=10, b=10, l=10, r=10),
             xaxis=dict(showticklabels=False)
         )
 
@@ -193,7 +193,7 @@ with aba_dash:
             secondary_y=False,
             showgrid=True, gridcolor='#333',
             side='left',
-            range=[0, y_max_pct * 1.45],
+            range=[0, y_max_pct * 1.5],
             tickvals=ticks_pct,
             ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct]
         )
@@ -203,7 +203,7 @@ with aba_dash:
             secondary_y=True,
             showgrid=False,
             side='right',
-            range=[0, y_max_rs * 1.45],
+            range=[0, y_max_rs * 1.5],
             tickvals=ticks_rs,
             ticktext=[abreviar_rs(v) for v in ticks_rs]
         )
