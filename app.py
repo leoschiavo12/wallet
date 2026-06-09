@@ -5,10 +5,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# 1. Configuração da Página
-st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="📊")
+# 1. Configuracao da Pagina
+st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
-# 2. Funções de Dados
+# 2. Funcoes de Dados
 def obter_precos_b3(tickers_lista):
     tk_formatados = [f"{t.upper()}.SA" for t in tickers_lista]
     try:
@@ -18,7 +18,7 @@ def obter_precos_b3(tickers_lista):
     except:
         return {t.upper(): 100.0 for t in tickers_lista}
 
-# 3. Definição da Carteira e Cálculos
+# 3. Definicao da Carteira e Calculos
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
     'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
@@ -46,15 +46,13 @@ df_ativo = df.sort_values(by='Total Atual', ascending=False)
 aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "Simular Novos Aportes"])
 
 with aba_dash:
-    st.metric("Patrimônio Total", f"R$ {total_geral:,.2f}")
+    st.metric("Patrimonio Total", f"R$ {total_geral:,.2f}")
 
     st.markdown('---')
 
-    # Layout: donut à esquerda, barras à direita
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
-        # go.Pie para controle total de rotation e direction
         fig_donut = go.Figure(go.Pie(
             labels=df_resumo_classe['Classe'],
             values=df_resumo_classe['Total Atual'],
@@ -92,7 +90,7 @@ with aba_dash:
             showlegend=False
         )
         fig_ativo.update_yaxes(title_text="Total (R$)", secondary_y=False, showgrid=True, gridcolor='#333', side='right')
-        fig_ativo.update_yaxes(title_text="Participação (%)", secondary_y=True, showgrid=False, side='left')
+        fig_ativo.update_yaxes(title_text="Participacao (%)", secondary_y=True, showgrid=False, side='left')
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
