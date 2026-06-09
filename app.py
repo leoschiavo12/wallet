@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# 1. Configuracao e CSS para a Tabela
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
 st.markdown("""
@@ -15,7 +14,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 2. Funcoes de Busca
 def obter_precos_b3(tickers_lista):
     tk_formatados = [f"{t.upper()}.SA" for t in tickers_lista]
     try:
@@ -24,7 +22,6 @@ def obter_precos_b3(tickers_lista):
     except:
         return {t.upper(): 100.0 for t in tickers_lista}
 
-# 3. Dados
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
     'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
@@ -39,27 +36,26 @@ linhas = []
 for cls, ativos in MINHA_CARTEIRA.items():
     for t, q in ativos.items():
         prc = precos.get(t.upper(), 385000 if t == 'BTC' else 490.64)
-        linhas.append({'Ativo': t, 'Classe': cls, 'Preco': prc, 'Qtd': q, 'Total Atual': q * prc})
+        linhas.append({'ativo': t, 'classe': cls, 'preco_unit': prc, 'qtd': q, 'total atual': q * prc})
 
 df = pd.DataFrame(linhas)
-total_geral = df['Total Atual'].sum()
-df['Part. %'] = (df['Total Atual'] / total_geral) * 100
-df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
-df_ativo = df.sort_values(by='Total Atual', ascending=False)
+total_geral = df['total atual'].sum()
+df['part. %'] = (df['total atual'] / total_geral) * 100
+df_resumo_classe = df.groupby('classe')['total atual'].sum().reset_index()
+df_ativo = df.sort_values(by='total atual', ascending=False)
 
-# 4. Interface
-aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "Simular Novos Aportes"])
+aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "simular novos aportes"])
 
 with aba_dash:
-    st.metric("Patrimonio Total", f"R$ {total_geral:,.2f}")
+    st.metric("patrimonio total", f"R$ {total_geral:,.2f}")
     st.markdown('---')
 
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
         fig_donut = go.Figure(go.Pie(
-            labels=df_resumo_classe['Classe'].tolist(),
-            values=df_resumo_classe['Total Atual'].tolist(),
+            labels=df_resumo_classe['classe'].tolist(),
+            values=df_resumo_classe['total atual'].tolist(),
             hole=0.75,
             textinfo='percent+label',
             textposition='outside',
@@ -77,11 +73,11 @@ with aba_dash:
     with col_barras:
         fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
         fig_ativo.add_trace(
-            go.Bar(x=df_ativo['Ativo'], y=df_ativo['Total Atual'], marker_color='#1E88E5'),
+            go.Bar(x=df_ativo['ativo'], y=df_ativo['total atual'], marker_color='#1E88E5'),
             secondary_y=False
         )
         fig_ativo.add_trace(
-            go.Scatter(x=df_ativo['Ativo'], y=df_ativo['Part. %'], mode='markers', marker=dict(color='rgba(0,0,0,0)')),
+            go.Scatter(x=df_ativo['ativo'], y=df_ativo['part. %'], mode='markers', marker=dict(color='rgba(0,0,0,0)')),
             secondary_y=True
         )
         fig_ativo.update_layout(
@@ -90,17 +86,17 @@ with aba_dash:
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False
         )
-        fig_ativo.update_yaxes(title_text="Total (R$)", secondary_y=False, showgrid=True, gridcolor='#333', side='right')
-        fig_ativo.update_yaxes(title_text="Participacao (%)", secondary_y=True, showgrid=False, side='left')
+        fig_ativo.update_yaxes(title_text="total (R$)", secondary_y=False, showgrid=True, gridcolor='#333', side='right')
+        fig_ativo.update_yaxes(title_text="participacao (%)", secondary_y=True, showgrid=False, side='left')
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
     config = {
-        'Ativo': st.column_config.TextColumn("Ativo", alignment="center"),
-        'Classe': st.column_config.TextColumn("Classe", alignment="center"),
-        'Preco': st.column_config.NumberColumn("Preco", format="R$ %.2f", alignment="center"),
-        'Qtd': st.column_config.NumberColumn("Qtd", alignment="center"),
-        'Total Atual': st.column_config.NumberColumn("Total Atual", format="R$ %.2f", alignment="center"),
-        'Part. %': st.column_config.NumberColumn("Part. %", format="%.2f%%", alignment="center")
+        'ativo': st.column_config.TextColumn("ativo", alignment="center"),
+        'classe': st.column_config.TextColumn("classe", alignment="center"),
+        'preco_unit': st.column_config.NumberColumn("preco unitario", format="R$ %.2f", alignment="center"),
+        'qtd': st.column_config.NumberColumn("qtd", alignment="center"),
+        'total atual': st.column_config.NumberColumn("total atual", format="R$ %.2f", alignment="center"),
+        'part. %': st.column_config.NumberColumn("part. %", format="%.2f%%", alignment="center")
     }
     st.dataframe(df, use_container_width=True, hide_index=True, column_config=config)
