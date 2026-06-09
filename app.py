@@ -199,7 +199,7 @@ with aba_dash:
             for _, row in df_ativo.iterrows()
         ]
 
-        fig_ativo = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_ativo = go.Figure()
         fig_ativo.add_trace(
             go.Bar(
                 x=df_ativo['Ativo'], y=df_ativo['Part. %'],
@@ -210,17 +210,9 @@ with aba_dash:
                 cliponaxis=False,
                 hovertemplate='%{customdata}<extra></extra>',
                 customdata=hover_barras
-            ),
-            secondary_y=False
+            )
         )
-        fig_ativo.add_trace(
-            go.Scatter(
-                x=df_ativo['Ativo'], y=df_ativo['Total Atual'],
-                mode='markers', marker=dict(color='rgba(0,0,0,0)'),
-                hoverinfo='skip'
-            ),
-            secondary_y=True
-        )
+
         fig_ativo.update_layout(
             height=400,
             plot_bgcolor='rgba(0,0,0,0)',
@@ -231,19 +223,26 @@ with aba_dash:
             bargap=0.15,
             margin=dict(t=10, b=10, l=10, r=10)
         )
+        # eixo esquerdo: part. %
         fig_ativo.update_yaxes(
-            title_text="part. %", secondary_y=False,
+            title_text="part. %",
             showgrid=True, gridcolor='#333', side='left',
             range=[0, y_max_pct * 1.2],
             tickvals=ticks_pct_show,
             ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct_show]
         )
-        fig_ativo.update_yaxes(
-            title_text="total (R$)", secondary_y=True,
-            showgrid=False, side='right',
-            range=[0, y_max_pct * 1.2],
-            tickvals=[p[0] for p in pares_rs if p[1] > 0],
-            ticktext=[abreviar_rs(p[1]) for p in pares_rs if p[1] > 0]
+
+        # eixo direito: R$ como anotacoes no lado direito (mesmo range do eixo %)
+        fig_ativo.update_layout(
+            yaxis2=dict(
+                overlaying='y',
+                side='right',
+                showgrid=False,
+                range=[0, y_max_pct * 1.2],
+                tickvals=[p[0] for p in pares_rs if p[1] > 0],
+                ticktext=[abreviar_rs(p[1]) for p in pares_rs if p[1] > 0],
+                title_text="total (R$)"
+            )
         )
         st.plotly_chart(fig_ativo, use_container_width=True)
 
