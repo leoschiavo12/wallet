@@ -8,7 +8,6 @@ import math
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import io
 
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
@@ -51,20 +50,25 @@ def gerar_ticks_pct(max_pct_ativo, step=5):
     vals = list(range(0, teto + 1, step))
     return teto, vals
 
-def render_donut(labels, values, colors, bg='#0e1117'):
-    total = sum(values)
-    fig, ax = plt.subplots(figsize=(4, 4), facecolor=bg)
-    ax.set_facecolor(bg)
+def hex_to_rgb(hex_str):
+    hex_str = hex_str.lstrip('#')
+    return tuple(int(hex_str[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
-    # startangle=90, counterclockwise=True (matplotlib: sentido anti-horario por padrao)
-    wedges, texts, autotexts = ax.pie(
+def render_donut(labels, values, hex_colors, bg='#0e1117'):
+    cores_rgb = [hex_to_rgb(c) for c in hex_colors]
+    bg_rgb = hex_to_rgb(bg)
+
+    fig, ax = plt.subplots(figsize=(4, 4), facecolor=bg_rgb)
+    ax.set_facecolor(bg_rgb)
+
+    wedges, _, autotexts = ax.pie(
         values,
         labels=None,
         autopct='%1.1f%%',
         startangle=90,
         counterclock=True,
-        colors=colors,
-        wedgeprops=dict(width=0.45, edgecolor=bg, linewidth=2),
+        colors=cores_rgb,
+        wedgeprops=dict(width=0.45, edgecolor=bg_rgb, linewidth=2),
         pctdistance=0.75
     )
 
@@ -72,27 +76,26 @@ def render_donut(labels, values, colors, bg='#0e1117'):
         at.set_color('white')
         at.set_fontsize(9)
 
-    # labels externos com linha
-    for i, (wedge, label) in enumerate(zip(wedges, labels)):
+    total = sum(values)
+    for wedge, label, val in zip(wedges, labels, values):
         ang = (wedge.theta1 + wedge.theta2) / 2
         ang_rad = math.radians(ang)
         x = math.cos(ang_rad)
         y = math.sin(ang_rad)
-        r_label = 1.25
         ax.annotate(
-            f"{label}\n{values[i]/total*100:.1f}%",
+            f"{label}\n{val/total*100:.1f}%",
             xy=(0.55*x, 0.55*y),
-            xytext=(r_label*x, r_label*y),
+            xytext=(1.25*x, 1.25*y),
             ha='center', va='center',
             color='white', fontsize=8,
-            arrowprops=dict(arrowstyle='-', color='#555', lw=0.8)
+            arrowprops=dict(arrowstyle='-', color='#555555', lw=0.8)
         )
 
     ax.set_xlim(-1.7, 1.7)
     ax.set_ylim(-1.7, 1.7)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', facecolor=bg, dpi=130)
+    fig.savefig(buf, format='png', bbox_inches='tight', facecolor=bg_rgb, dpi=130)
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -120,6 +123,9 @@ df_resumo_classe = df.groupby('classe')['total atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values('total atual', ascending=False).reset_index(drop=True)
 df_ativo = df.sort_values(by='total atual', ascending=False)
 
+# paleta de azuis em hex para usar no matplotlib
+CORES_HEX = ['#084594', '#2171b5', '#4292c6', '#6baed6', '#9ecae1', '#c6dbef']
+
 aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "simular novos aportes"])
 
 with aba_dash:
@@ -130,11 +136,11 @@ with aba_dash:
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
-        cores = px.colors.sequential.Blues_r[:len(df_resumo_classe)]
+        n = len(df_resumo_classe)
         buf = render_donut(
             labels=df_resumo_classe['classe'].tolist(),
             values=df_resumo_classe['total atual'].tolist(),
-            colors=cores
+            hex_colors=CORES_HEX[:n]
         )
         st.image(buf, use_container_width=True)
 
