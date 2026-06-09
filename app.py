@@ -122,7 +122,7 @@ with aba_dash:
             domain=dict(x=[0.1, 0.9], y=[0.1, 0.9])
         ))
         fig_donut.update_layout(
-            margin=dict(t=40, b=40, l=40, r=40),
+            margin=dict(t=20, b=40, l=50, r=20),
             height=ALTURA,
             showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)',
@@ -185,7 +185,7 @@ with aba_dash:
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False,
             shapes=shapes,
-            margin=dict(t=10, b=10, l=10, r=10),
+            margin=dict(t=20, b=40, l=50, r=20),
             xaxis=dict(showticklabels=False)
         )
 
