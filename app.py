@@ -65,25 +65,34 @@ for cls, ativos in MINHA_CARTEIRA.items():
 df = pd.DataFrame(linhas)
 total_geral = df['total atual'].sum()
 df['part. %'] = (df['total atual'] / total_geral) * 100
-df_resumo_classe = df.groupby('classe')['total atual'].sum().reset_index()
+df_resumo_classe = df.groupby('classe')['Total Atual'.lower()].sum().reset_index() if False else \
+                   df.groupby('classe')['total atual'].sum().reset_index()
+df_resumo_classe = df_resumo_classe.sort_values('total atual', ascending=False).reset_index(drop=True)
 df_ativo = df.sort_values(by='total atual', ascending=False)
 
 aba_dash, aba_detalhe, aba_aportes = st.tabs(["dashboard", "detalhe", "simular novos aportes"])
 
 with aba_dash:
 
-    # linha 1: cabecalho
     st.metric("patrimonio total", f"R$ {total_geral:,.2f}")
     st.markdown('---')
 
-    # linha 2: donut + barras
     col_donut, col_barras = st.columns([1, 2])
 
     with col_donut:
+        # largest slice at top: centro do maior slice em 90 graus (topo)
+        # Plotly clockwise: rotation = ponto de inicio do 1o segmento (0=direita)
+        # Para centro em 90: inicio = 90 - sweep/2
+        sweep_maior = df_resumo_classe.iloc[0]['total atual'] / total_geral * 360
+        rotation_val = 90 - sweep_maior / 2
+
         fig_donut = go.Figure(go.Pie(
             labels=df_resumo_classe['classe'].tolist(),
             values=df_resumo_classe['total atual'].tolist(),
             hole=0.72,
+            rotation=rotation_val,
+            direction='clockwise',
+            sort=False,
             textinfo='percent+label',
             textposition='outside',
             textfont=dict(size=11),
@@ -105,7 +114,6 @@ with aba_dash:
         y_max_pct, ticks_pct = gerar_ticks_pct(max_pct, step=5)
         y_max_rs,  ticks_rs  = gerar_ticks_rs(max_rs * (y_max_pct / max_pct))
 
-        # sub-escalas tracejadas nos ticks intermediarios de %
         shapes = []
         for p in ticks_pct[1:-1]:
             shapes.append(dict(
@@ -144,9 +152,7 @@ with aba_dash:
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False,
             shapes=shapes,
-            xaxis=dict(
-                tickangle=45
-            )
+            xaxis=dict(tickangle=45)
         )
 
         fig_ativo.update_yaxes(
