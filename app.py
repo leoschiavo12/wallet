@@ -118,10 +118,11 @@ with aba_dash:
             textfont=dict(size=10),
             hovertemplate='%{customdata}<extra></extra>',
             customdata=hover_donut,
-            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)])
+            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)]),
+            domain=dict(x=[0.1, 0.9], y=[0.1, 0.9])
         ))
         fig_donut.update_layout(
-            margin=dict(t=10, b=10, l=10, r=10),
+            margin=dict(t=40, b=40, l=40, r=40),
             height=ALTURA,
             showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)',
