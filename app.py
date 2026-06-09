@@ -112,17 +112,17 @@ with aba_dash:
         fig_donut = go.Figure(go.Pie(
             labels=labels_donut,
             values=df_resumo_classe['total atual'].tolist(),
-            hole=0.72,
+            hole=0.65,
             textinfo='label',
             textposition='outside',
             textfont=dict(size=10),
             hovertemplate='%{customdata}<extra></extra>',
             customdata=hover_donut,
             marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)]),
-            domain=dict(x=[0.1, 0.9], y=[0.1, 0.9])
+            domain=dict(x=[0.05, 0.95], y=[0.05, 0.95])
         ))
         fig_donut.update_layout(
-            margin=dict(t=20, b=40, l=50, r=20),
+            margin=dict(t=60, b=60, l=70, r=70),
             height=ALTURA,
             showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)',
@@ -179,19 +179,18 @@ with aba_dash:
             secondary_y=True
         )
 
+        ticks_pct_show = ticks_pct[:-1]
+        ticks_rs_show  = ticks_rs[:-1]
+
         fig_ativo.update_layout(
             height=ALTURA,
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False,
             shapes=shapes,
-            margin=dict(t=20, b=40, l=50, r=20),
+            margin=dict(t=60, b=60, l=70, r=70),
             xaxis=dict(showticklabels=False)
         )
-
-        # remover tick maximo para nao aparecer linha sobrando no topo
-        ticks_pct_show = ticks_pct[:-1]
-        ticks_rs_show  = ticks_rs[:-1]
 
         fig_ativo.update_yaxes(
             title_text="part. %",
@@ -214,6 +213,7 @@ with aba_dash:
         )
 
         st.plotly_chart(fig_ativo, use_container_width=True)
+
 
 with aba_detalhe:
     df_display = df.copy()
