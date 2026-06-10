@@ -294,9 +294,9 @@ def get_sheets_service():
 
 SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
 SHEET_TAB = "lancamentos"
-HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
+HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total", "observacao"]
 
-@st.cache_data(ttl=0)
+@st.cache_data(ttl=30)
 def ler_lancamentos():
     try:
         svc  = get_sheets_service()
@@ -304,41 +304,10 @@ def ler_lancamentos():
         rows = res.get("values", [])
         if len(rows) <= 1:
             return pd.DataFrame(columns=HEADERS)
-        # truncar para len(HEADERS) colunas e preencher faltantes
-        # (planilha pode ter colunas extras legadas como observacao)
-        n = len(HEADERS)
-        padded = [(r + [''] * n)[:n] for r in rows[1:]]
-        df_l = pd.DataFrame(padded, columns=HEADERS)
-        # normalizar numeros que podem vir em diferentes formatos do Sheets:
-        # "1234.56" (EN), "1234,56" (PT virgula decimal), "1.234,56" (PT ponto milhar)
-        def normalizar_numero(s):
-            s = str(s).strip()
-            if s in ('', 'nan', 'None'):
-                return None
-            s = s.replace('R$', '').replace(' ', '')
-            # virgula sem ponto: decimal PT-BR ("9,21" → 9.21)
-            if ',' in s and '.' not in s:
-                s = s.replace(',', '.')
-            # ambos: detectar qual e decimal pelo ultimo
-            elif ',' in s and '.' in s:
-                if s.rindex(',') > s.rindex('.'):
-                    s = s.replace('.', '').replace(',', '.')
-                else:
-                    s = s.replace(',', '')
-            # multiplos pontos: todos sao milhar, ultimo e decimal
-            elif s.count('.') > 1:
-                parts = s.split('.')
-                s = ''.join(parts[:-1]) + '.' + parts[-1]
-            try:
-                return float(s)
-            except:
-                return None
-
-        for col in ["quantidade", "preco_unitario", "total"]:
-            df_l[col] = df_l[col].apply(normalizar_numero)
-            df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
-
-
+        df_l = pd.DataFrame(rows[1:], columns=HEADERS)
+        df_l["quantidade"]    = pd.to_numeric(df_l["quantidade"],    errors="coerce")
+        df_l["preco_unitario"]= pd.to_numeric(df_l["preco_unitario"],errors="coerce")
+        df_l["total"]         = pd.to_numeric(df_l["total"],         errors="coerce")
         return df_l
     except Exception as e:
         st.error(f"Erro ao ler planilha: {e}")
@@ -387,69 +356,17 @@ with aba_lanc:
 
     df_lanc = ler_lancamentos()
 
-
-    if not df_lanc.empty:
-        df_lanc["data_dt"] = pd.to_datetime(df_lanc["data"], format="%d/%m/%Y", errors="coerce")
-        df_lanc["sinal"]   = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-        df_lanc["valor"]   = df_lanc["total"] * df_lanc["sinal"]
-
-        meses_pt = {
-            1: 'janeiro', 2: 'fevereiro', 3: 'marco', 4: 'abril',
-            5: 'maio', 6: 'junho', 7: 'julho', 8: 'agosto',
-            9: 'setembro', 10: 'outubro', 11: 'novembro', 12: 'dezembro'
-        }
-        hoje      = pd.Timestamp.today()
-        mes_atual = hoje.month
-        ano_atual = hoje.year
-
-        # ── Resumo do mes corrente ────────────────────────────────────────────
-        df_mes = df_lanc[
-            (df_lanc["data_dt"].dt.month == mes_atual) &
-            (df_lanc["data_dt"].dt.year  == ano_atual)
-        ].copy()
-        df_mes["sinal_m"] = df_mes["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-        aporte_mes = (df_mes["total"] * df_mes["sinal_m"]).sum()
-
-        # media dos ultimos 6 meses (excluindo mes atual)
-        meses = []
-        for i in range(1, 7):
-            ref = hoje - pd.DateOffset(months=i)
-            df_ref = df_lanc[
-                (df_lanc["data_dt"].dt.month == ref.month) &
-                (df_lanc["data_dt"].dt.year  == ref.year)
-            ].copy()
-            df_ref["sinal_r"] = df_ref["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-            val = (df_ref["total"] * df_ref["sinal_r"]).sum()
-            meses.append(val)
-        media_6m = sum(meses) / 6
-
-        nome_mes = meses_pt[mes_atual]
-
-        col_r1, col_r2, col_r3 = st.columns([1.4, 1, 0.7])
-        col_r1.metric(f"total aportado em {nome_mes}", formatar_brl(aporte_mes))
-        col_r2.metric("media mensal (6m)", formatar_brl(media_6m))
-        with col_r3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("+ novo aporte", type="primary", use_container_width=True):
-                st.session_state["abrir_form_aporte"] = True
-        st.markdown("---")
-
-    # ── Formulario de novo lancamento ────────────────────────────────────────
-    with st.expander("+ novo aporte", expanded=st.session_state.get("abrir_form_aporte", False)):
+    # ── Formulario de novo lancamento ─────────────────────────────────────────
+    with st.expander("+ novo lancamento", expanded=False):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             f_data  = st.date_input("data", value=date.today())
             f_tipo  = st.selectbox("tipo", ["compra", "venda"])
         with col2:
-            todos_ativos = sorted(set(
-                [t for cls in MINHA_CARTEIRA.values() for t in cls.keys()] +
-                ["Tesouro SELIC 2031", "Renda+ 2050"]
-            ))
-            f_ativo  = st.selectbox("ativo", todos_ativos)
-            f_classe = next(
-                (cls for cls, atv in MINHA_CARTEIRA.items() for t in atv.keys() if t == f_ativo),
-                "Tesouro Direto" if "Tesouro" in f_ativo or "Renda" in f_ativo else "Outro"
-            )
+            todos_ativos = sorted([t for cls in MINHA_CARTEIRA.values() for t in cls.keys()])
+            f_ativo = st.selectbox("ativo", todos_ativos)
+            f_classe = next((cls for cls, atv in MINHA_CARTEIRA.items()
+                             for t, v in atv.items() if t == f_ativo), "")
             st.text_input("classe", value=f_classe, disabled=True)
         with col3:
             f_qtd   = st.number_input("quantidade", min_value=0.0, step=0.001, format="%.6f")
@@ -457,16 +374,15 @@ with aba_lanc:
         with col4:
             f_total = f_qtd * f_preco
             st.metric("total", formatar_brl(f_total))
-
+            f_obs   = st.text_input("observacao (opcional)")
 
         if st.button("salvar lancamento", type="primary"):
             if f_qtd > 0 and f_preco > 0:
                 salvar_lancamento([
                     f_data.strftime("%d/%m/%Y"),
                     f_tipo, f_ativo, f_classe,
-                    f_qtd, f_preco, round(f_total, 2)
+                    f_qtd, f_preco, round(f_total, 2), f_obs
                 ])
-                st.session_state["abrir_form_aporte"] = False
                 st.success("lancamento salvo!")
                 st.rerun()
             else:
@@ -477,44 +393,32 @@ with aba_lanc:
     if df_lanc.empty:
         st.info("nenhum lancamento registrado ainda.")
     else:
-        # ── Historico: mais novo no topo, indice decrescente a partir de 1 ──
+        # ── Tabela de lancamentos com exclusao ───────────────────────────────
         st.subheader("historico")
 
-        df_hist = df_lanc.copy()
-        df_hist = df_hist.sort_values("data_dt", ascending=False).reset_index(drop=True)
-        n = len(df_hist)
-        df_hist.insert(0, "#", range(n, 0, -1))  # indice decrescente, sem 0
+        col_del, col_tabela = st.columns([0.08, 0.92])
+        with col_tabela:
+            df_lanc_fmt = df_lanc.copy()
+            df_lanc_fmt["preco_unitario"] = df_lanc_fmt["preco_unitario"].apply(
+                lambda x: formatar_brl(x) if pd.notna(x) else "")
+            df_lanc_fmt["total"] = df_lanc_fmt["total"].apply(
+                lambda x: formatar_brl(x) if pd.notna(x) else "")
+            df_lanc_fmt["quantidade"] = df_lanc_fmt["quantidade"].apply(
+                lambda x: f"{x:g}".replace(".", ",") if pd.notna(x) else "")
 
-        df_hist_fmt = df_hist.copy()
-        df_hist_fmt["preco_unitario"] = df_hist_fmt["preco_unitario"].apply(
-            lambda x: formatar_brl(x) if pd.notna(x) else "")
-        df_hist_fmt["total"] = df_hist_fmt["total"].apply(
-            lambda x: formatar_brl(x) if pd.notna(x) else "")
-        df_hist_fmt["quantidade"] = df_hist_fmt["quantidade"].apply(
-            lambda x: f"{x:g}".replace(".", ",") if pd.notna(x) else "")
-        df_hist_fmt["valor"]   = df_hist_fmt["valor"].apply(
-            lambda x: formatar_brl(x) if pd.notna(x) else "")
-
-        cols_show = ["#", "data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
-        cfg_hist  = {c: st.column_config.TextColumn(c, alignment="center") for c in cols_show}
-        st.dataframe(
-            df_hist_fmt[cols_show],
-            use_container_width=True, hide_index=True, column_config=cfg_hist
-        )
+            cfg_lanc = {c: st.column_config.TextColumn(c, alignment="center") for c in HEADERS}
+            st.dataframe(df_lanc_fmt, use_container_width=True, hide_index=False, column_config=cfg_lanc)
 
         st.markdown("---")
 
-        # ── Exclusao por indice ───────────────────────────────────────────────
+        # exclusao por indice
         with st.expander("excluir lancamento"):
             idx_del = st.number_input(
-                "numero # do lancamento (conforme tabela acima)",
-                min_value=1, max_value=n, step=1, value=n
+                "numero da linha (conforme tabela acima, começa em 0)",
+                min_value=0, max_value=max(0, len(df_lanc)-1), step=1
             )
             if st.button("excluir", type="secondary"):
-                # converter # decrescente para posicao na sheet (crescente)
-                # # = n → linha mais antiga = sheet linha 2; # = 1 → linha mais recente
-                pos_sheet = (n - idx_del) + 1  # 1-based, pula header
-                deletar_lancamento(pos_sheet)
+                deletar_lancamento(idx_del + 1)  # +1 pula o header
                 st.success("lancamento excluido!")
                 st.rerun()
 
@@ -524,24 +428,21 @@ with aba_lanc:
         st.subheader("preco medio por ativo")
         compras = df_lanc[df_lanc["tipo"] == "compra"].copy()
         if not compras.empty:
+            # calcular saldo por ativo (compras - vendas)
+            df_lanc["sinal"] = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
             saldo_ativo = df_lanc.groupby("ativo").apply(
                 lambda g: (g["quantidade"] * g["sinal"]).sum()
             ).reset_index()
             saldo_ativo.columns = ["ativo", "saldo"]
-            # apenas ativos com saldo positivo (ainda na carteira)
-            ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0.001]["ativo"].tolist()
+            ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0]["ativo"].tolist()
 
-            def calc_pm(g):
-                c = g[g["tipo"] == "compra"]
-                qtd_c = c["quantidade"].sum()
-                tot_c = (c["quantidade"] * c["preco_unitario"]).sum()
-                return pd.Series({
-                    "total investido": tot_c,
-                    "qtd comprada":    qtd_c,
-                    "preco medio":     tot_c / qtd_c if qtd_c > 0 else 0
+            pm = compras[compras["ativo"].isin(ativos_ativos)].groupby("ativo").apply(
+                lambda g: pd.Series({
+                    "total investido": (g["quantidade"] * g["preco_unitario"]).sum(),
+                    "qtd comprada":     g["quantidade"].sum(),
+                    "preco medio":     (g["quantidade"] * g["preco_unitario"]).sum() / g["quantidade"].sum()
                 })
-
-            pm = df_lanc[df_lanc["ativo"].isin(ativos_ativos)].groupby("ativo").apply(calc_pm).reset_index()
+            ).reset_index()
             pm_fmt = pm.copy()
             pm_fmt["total investido"] = pm_fmt["total investido"].apply(formatar_brl)
             pm_fmt["qtd comprada"]    = pm_fmt["qtd comprada"].apply(lambda x: f"{x:g}".replace(".", ","))
@@ -551,13 +452,14 @@ with aba_lanc:
 
         st.markdown("---")
 
-        # ── Evolucao do patrimonio investido ─────────────────────────────────
+        # ── Evolucao do patrimônio (por data de lancamento) ──────────────────
         st.subheader("evolucao do patrimonio investido")
-        df_evo = df_lanc.sort_values("data_dt").copy()
-        # sinal: compra=+1, venda=-1 (vendas reduzem o patrimonio investido)
-        df_evo["sinal_evo"] = df_evo["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-        df_evo["valor_evo"] = df_evo["total"] * df_evo["sinal_evo"]
-        df_evo["acum"] = df_evo["valor_evo"].cumsum()
+        df_evo = df_lanc.copy()
+        df_evo["data_dt"] = pd.to_datetime(df_evo["data"], format="%d/%m/%Y", errors="coerce")
+        df_evo = df_evo.dropna(subset=["data_dt"]).sort_values("data_dt")
+        df_evo["sinal"]  = df_evo["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+        df_evo["valor"]  = df_evo["total"] * df_evo["sinal"]
+        df_evo["acum"]   = df_evo["valor"].cumsum()
 
         fig_evo = go.Figure()
         fig_evo.add_trace(go.Scatter(
@@ -565,7 +467,7 @@ with aba_lanc:
             mode="lines+markers",
             line=dict(color="#1E88E5", width=2),
             marker=dict(size=5),
-            hovertemplate="%{x|%d/%m/%Y}<br>R$ %{y:,.2f}<extra></extra>"
+            hovertemplate="%{x|%d/%m/%Y}<br>" + formatar_brl(0).replace("0", "%{y:,.2f}") + "<extra></extra>"
         ))
         fig_evo.update_layout(
             height=300,
