@@ -304,7 +304,11 @@ def ler_lancamentos():
         rows = res.get("values", [])
         if len(rows) <= 1:
             return pd.DataFrame(columns=HEADERS)
-        df_l = pd.DataFrame(rows[1:], columns=HEADERS)
+        # padded: garantir que cada linha tem exatamente len(HEADERS) colunas
+        # Sheets omite celulas vazias no final da linha
+        padded = [r + [''] * (len(HEADERS) - len(r)) for r in rows[1:]]
+        df_l = pd.DataFrame(padded, columns=HEADERS)
+        df_l["total_raw"] = df_l["total"].astype(str)
         # normalizar numeros que podem vir em diferentes formatos do Sheets:
         # "1234.56" (EN), "1234,56" (PT virgula decimal), "1.234,56" (PT ponto milhar)
         def normalizar_numero(s):
@@ -334,11 +338,12 @@ def ler_lancamentos():
             df_l[col] = df_l[col].apply(normalizar_numero)
             df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
 
-        # debug: mostrar linhas com NaN apos conversao
-        nans = df_l[df_l["total"].isna()]
-        if not nans.empty:
-            st.warning(f"DEBUG — {len(nans)} linhas com total=NaN:")
-            st.dataframe(nans[["data","ativo","total"]].head(10))
+        # guardar debug em session_state para exibir fora do cache
+        nans_mask = df_l["total"].isna()
+        if nans_mask.any():
+            import json
+            debug_info = df_l[nans_mask][["data","ativo","total_raw"]].head(10).to_dict(orient="records")
+            df_l.attrs["debug_nans"] = debug_info
         return df_l
     except Exception as e:
         st.error(f"Erro ao ler planilha: {e}")
@@ -386,6 +391,11 @@ garantir_cabecalho()
 with aba_lanc:
 
     df_lanc = ler_lancamentos()
+
+    # mostrar debug de NaN se houver
+    if hasattr(df_lanc, 'attrs') and df_lanc.attrs.get("debug_nans"):
+        st.warning("DEBUG — linhas com total=NaN (valor bruto do Sheets):")
+        st.json(df_lanc.attrs["debug_nans"])
 
     if not df_lanc.empty:
         df_lanc["data_dt"] = pd.to_datetime(df_lanc["data"], format="%d/%m/%Y", errors="coerce")
