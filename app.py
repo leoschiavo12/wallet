@@ -411,7 +411,12 @@ with aba_lanc:
         df_lanc["sinal"]   = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
         df_lanc["valor"]   = df_lanc["total"] * df_lanc["sinal"]
 
-        hoje      = pd.Timestamp.today()
+        meses_pt = {
+        1: 'janeiro', 2: 'fevereiro', 3: 'marco', 4: 'abril',
+        5: 'maio', 6: 'junho', 7: 'julho', 8: 'agosto',
+        9: 'setembro', 10: 'outubro', 11: 'novembro', 12: 'dezembro'
+    }
+    hoje      = pd.Timestamp.today()
         mes_atual = hoje.month
         ano_atual = hoje.year
 
@@ -433,14 +438,18 @@ with aba_lanc:
             meses.append(val)
         media_6m = sum(meses) / 6
 
-        col_r1, col_r2, col_r3 = st.columns(3)
-        col_r1.metric("aportes no mes", formatar_brl(aporte_mes))
+        nome_mes = meses_pt[mes_atual]
+        col_r1, col_r2, col_r3 = st.columns([1.4, 1, 0.7])
+        col_r1.metric(f"total aportado em {nome_mes}", formatar_brl(aporte_mes))
         col_r2.metric("media mensal (6m)", formatar_brl(media_6m))
-        col_r3.metric("total de lancamentos", len(df_lanc))
+        with col_r3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("+ novo aporte", type="primary", use_container_width=True):
+                st.session_state["abrir_form_aporte"] = True
         st.markdown("---")
 
     # ── Formulario de novo lancamento ────────────────────────────────────────
-    with st.expander("+ novo aporte", expanded=False):
+    with st.expander("+ novo aporte", expanded=st.session_state.get("abrir_form_aporte", False)):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             f_data  = st.date_input("data", value=date.today())
@@ -471,6 +480,7 @@ with aba_lanc:
                     f_tipo, f_ativo, f_classe,
                     f_qtd, f_preco, round(f_total, 2)
                 ])
+                st.session_state["abrir_form_aporte"] = False
                 st.success("lancamento salvo!")
                 st.rerun()
             else:
@@ -532,15 +542,20 @@ with aba_lanc:
                 lambda g: (g["quantidade"] * g["sinal"]).sum()
             ).reset_index()
             saldo_ativo.columns = ["ativo", "saldo"]
-            ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0]["ativo"].tolist()
+            # apenas ativos com saldo positivo (ainda na carteira)
+            ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0.001]["ativo"].tolist()
 
-            pm = compras[compras["ativo"].isin(ativos_ativos)].groupby("ativo").apply(
-                lambda g: pd.Series({
-                    "total investido": (g["quantidade"] * g["preco_unitario"]).sum(),
-                    "qtd comprada":    g["quantidade"].sum(),
-                    "preco medio":    (g["quantidade"] * g["preco_unitario"]).sum() / g["quantidade"].sum()
+            def calc_pm(g):
+                c = g[g["tipo"] == "compra"]
+                qtd_c = c["quantidade"].sum()
+                tot_c = (c["quantidade"] * c["preco_unitario"]).sum()
+                return pd.Series({
+                    "total investido": tot_c,
+                    "qtd comprada":    qtd_c,
+                    "preco medio":     tot_c / qtd_c if qtd_c > 0 else 0
                 })
-            ).reset_index()
+
+            pm = df_lanc[df_lanc["ativo"].isin(ativos_ativos)].groupby("ativo").apply(calc_pm).reset_index()
             pm_fmt = pm.copy()
             pm_fmt["total investido"] = pm_fmt["total investido"].apply(formatar_brl)
             pm_fmt["qtd comprada"]    = pm_fmt["qtd comprada"].apply(lambda x: f"{x:g}".replace(".", ","))
@@ -553,7 +568,10 @@ with aba_lanc:
         # ── Evolucao do patrimonio investido ─────────────────────────────────
         st.subheader("evolucao do patrimonio investido")
         df_evo = df_lanc.sort_values("data_dt").copy()
-        df_evo["acum"] = df_evo["valor"].cumsum()
+        # sinal: compra=+1, venda=-1 (vendas reduzem o patrimonio investido)
+        df_evo["sinal_evo"] = df_evo["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+        df_evo["valor_evo"] = df_evo["total"] * df_evo["sinal_evo"]
+        df_evo["acum"] = df_evo["valor_evo"].cumsum()
 
         fig_evo = go.Figure()
         fig_evo.add_trace(go.Scatter(
