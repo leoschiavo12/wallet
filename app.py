@@ -445,7 +445,7 @@ with aba_lanc:
             ).reset_index()
             pm_fmt = pm.copy()
             pm_fmt["total investido"] = pm_fmt["total investido"].apply(formatar_brl)
-            pm_fmt["qtd total"]       = pm_fmt["qtd total"].apply(lambda x: f"{x:g}".replace(".", ","))
+            pm_fmt["qtd comprada"]    = pm_fmt["qtd comprada"].apply(lambda x: f"{x:g}".replace(".", ","))
             pm_fmt["preco medio"]     = pm_fmt["preco medio"].apply(formatar_brl)
             cfg_pm = {c: st.column_config.TextColumn(c, alignment="center") for c in pm_fmt.columns}
             st.dataframe(pm_fmt, use_container_width=True, hide_index=True, column_config=cfg_pm)
