@@ -296,7 +296,7 @@ SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
 SHEET_TAB = "lancamentos"
 HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=0)
 def ler_lancamentos():
     try:
         svc  = get_sheets_service()
