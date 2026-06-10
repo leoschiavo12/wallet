@@ -305,12 +305,33 @@ def ler_lancamentos():
         if len(rows) <= 1:
             return pd.DataFrame(columns=HEADERS)
         df_l = pd.DataFrame(rows[1:], columns=HEADERS)
-        # limpar separadores PT-BR antes de converter (ex: "1.234,56" → 1234.56)
+        # normalizar numeros que podem vir em diferentes formatos do Sheets:
+        # "1234.56" (EN), "1234,56" (PT virgula decimal), "1.234,56" (PT ponto milhar)
+        def normalizar_numero(s):
+            s = str(s).strip()
+            if s in ('', 'nan', 'None'):
+                return None
+            # remover espacos e simbolos monetarios
+            s = s.replace('R$', '').replace(' ', '')
+            # detectar formato: se tem virgula E ponto, o ultimo separador e o decimal
+            if ',' in s and '.' in s:
+                # ex: "1.234,56" → ponto=milhar, virgula=decimal
+                if s.rindex(',') > s.rindex('.'):
+                    s = s.replace('.', '').replace(',', '.')
+                else:
+                    # ex: "1,234.56" → virgula=milhar, ponto=decimal
+                    s = s.replace(',', '')
+            elif ',' in s:
+                # so virgula: decimal PT-BR ex "9,21"
+                s = s.replace(',', '.')
+            # so ponto ou sem separador: formato EN, ja ok
+            try:
+                return float(s)
+            except:
+                return None
+
         for col in ["quantidade", "preco_unitario", "total"]:
-            df_l[col] = df_l[col].astype(str).str.replace(r'[^\d,\.\-]', '', regex=True)
-            # se tiver virgula como decimal (PT-BR): trocar . por nada e , por .
-            mask = df_l[col].str.contains(',', na=False)
-            df_l.loc[mask, col] = df_l.loc[mask, col].str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+            df_l[col] = df_l[col].apply(normalizar_numero)
             df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
         return df_l
     except Exception as e:
