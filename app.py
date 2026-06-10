@@ -305,9 +305,13 @@ def ler_lancamentos():
         if len(rows) <= 1:
             return pd.DataFrame(columns=HEADERS)
         df_l = pd.DataFrame(rows[1:], columns=HEADERS)
-        df_l["quantidade"]    = pd.to_numeric(df_l["quantidade"],    errors="coerce")
-        df_l["preco_unitario"]= pd.to_numeric(df_l["preco_unitario"],errors="coerce")
-        df_l["total"]         = pd.to_numeric(df_l["total"],         errors="coerce")
+        # limpar separadores PT-BR antes de converter (ex: "1.234,56" → 1234.56)
+        for col in ["quantidade", "preco_unitario", "total"]:
+            df_l[col] = df_l[col].astype(str).str.replace(r'[^\d,\.\-]', '', regex=True)
+            # se tiver virgula como decimal (PT-BR): trocar . por nada e , por .
+            mask = df_l[col].str.contains(',', na=False)
+            df_l.loc[mask, col] = df_l.loc[mask, col].str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+            df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
         return df_l
     except Exception as e:
         st.error(f"Erro ao ler planilha: {e}")
