@@ -424,17 +424,20 @@ with aba_lanc:
         df_mes = df_lanc[
             (df_lanc["data_dt"].dt.month == mes_atual) &
             (df_lanc["data_dt"].dt.year  == ano_atual)
-        ]
-        aporte_mes = df_mes["valor"].sum()
+        ].copy()
+        df_mes["sinal_m"] = df_mes["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+        aporte_mes = (df_mes["total"] * df_mes["sinal_m"]).sum()
 
         # media dos ultimos 6 meses (excluindo mes atual)
         meses = []
         for i in range(1, 7):
             ref = hoje - pd.DateOffset(months=i)
-            val = df_lanc[
+            df_ref = df_lanc[
                 (df_lanc["data_dt"].dt.month == ref.month) &
                 (df_lanc["data_dt"].dt.year  == ref.year)
-            ]["valor"].sum()
+            ].copy()
+            df_ref["sinal_r"] = df_ref["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+            val = (df_ref["total"] * df_ref["sinal_r"]).sum()
             meses.append(val)
         media_6m = sum(meses) / 6
 
