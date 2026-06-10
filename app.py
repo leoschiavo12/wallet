@@ -428,10 +428,18 @@ with aba_lanc:
         st.subheader("preco medio por ativo")
         compras = df_lanc[df_lanc["tipo"] == "compra"].copy()
         if not compras.empty:
-            pm = compras.groupby("ativo").apply(
+            # calcular saldo por ativo (compras - vendas)
+            df_lanc["sinal"] = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+            saldo_ativo = df_lanc.groupby("ativo").apply(
+                lambda g: (g["quantidade"] * g["sinal"]).sum()
+            ).reset_index()
+            saldo_ativo.columns = ["ativo", "saldo"]
+            ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0]["ativo"].tolist()
+
+            pm = compras[compras["ativo"].isin(ativos_ativos)].groupby("ativo").apply(
                 lambda g: pd.Series({
                     "total investido": (g["quantidade"] * g["preco_unitario"]).sum(),
-                    "qtd total":        g["quantidade"].sum(),
+                    "qtd comprada":     g["quantidade"].sum(),
                     "preco medio":     (g["quantidade"] * g["preco_unitario"]).sum() / g["quantidade"].sum()
                 })
             ).reset_index()
