@@ -412,11 +412,11 @@ with aba_lanc:
         df_lanc["valor"]   = df_lanc["total"] * df_lanc["sinal"]
 
         meses_pt = {
-        1: 'janeiro', 2: 'fevereiro', 3: 'marco', 4: 'abril',
-        5: 'maio', 6: 'junho', 7: 'julho', 8: 'agosto',
-        9: 'setembro', 10: 'outubro', 11: 'novembro', 12: 'dezembro'
-    }
-    hoje      = pd.Timestamp.today()
+            1: 'janeiro', 2: 'fevereiro', 3: 'marco', 4: 'abril',
+            5: 'maio', 6: 'junho', 7: 'julho', 8: 'agosto',
+            9: 'setembro', 10: 'outubro', 11: 'novembro', 12: 'dezembro'
+        }
+        hoje      = pd.Timestamp.today()
         mes_atual = hoje.month
         ano_atual = hoje.year
 
