@@ -316,37 +316,19 @@ def ler_lancamentos():
             if s in ('', 'nan', 'None'):
                 return None
             s = s.replace('R$', '').replace(' ', '')
-
-            if ',' in s and '.' in s:
-                # ambos separadores presentes
-                last_comma = s.rindex(',')
-                last_dot   = s.rindex('.')
-                if last_comma > last_dot:
-                    # "1.234,56" → PT-BR: ponto=milhar, virgula=decimal
+            # virgula sem ponto: decimal PT-BR ("9,21" → 9.21)
+            if ',' in s and '.' not in s:
+                s = s.replace(',', '.')
+            # ambos: detectar qual e decimal pelo ultimo
+            elif ',' in s and '.' in s:
+                if s.rindex(',') > s.rindex('.'):
                     s = s.replace('.', '').replace(',', '.')
                 else:
-                    # "1,234.56" → EN: virgula=milhar, ponto=decimal
                     s = s.replace(',', '')
-            elif ',' in s:
-                # so virgula: "9,21" → PT-BR decimal
-                s = s.replace(',', '.')
+            # multiplos pontos: todos sao milhar, ultimo e decimal
             elif s.count('.') > 1:
-                # multiplos pontos: Sheets formatou 4 decimais como milhar inteiro
-                # ex: "4.805.151" → valor real e 480.5151 (dividir por 10000)
-                # ex: "3.386.24"  → valor real e 338.624  (dividir por 1000)
                 parts = s.split('.')
-                last_part = parts[-1]
-                if len(last_part) == 3:
-                    # ex: "4.805.151" → ultimo bloco tem 3 digitos → /10000
-                    digits = ''.join(parts)
-                    s = str(float(digits) / 10000)
-                elif len(last_part) == 2:
-                    # ex: "3.386.24" → ultimo bloco tem 2 digitos → /1000
-                    digits = ''.join(parts)
-                    s = str(float(digits) / 1000)
-                else:
-                    s = ''.join(parts[:-1]) + '.' + last_part
-
+                s = ''.join(parts[:-1]) + '.' + parts[-1]
             try:
                 return float(s)
             except:
@@ -442,10 +424,6 @@ with aba_lanc:
         media_6m = sum(meses) / 6
 
         nome_mes = meses_pt[mes_atual]
-
-        # DEBUG TEMPORARIO
-        st.write("DEBUG tipos junho:", df_mes[["data","tipo","total","sinal_m"]].to_dict(orient="records"))
-        st.write("DEBUG aporte_mes:", aporte_mes)
 
         col_r1, col_r2, col_r3 = st.columns([1.4, 1, 0.7])
         col_r1.metric(f"total aportado em {nome_mes}", formatar_brl(aporte_mes))
