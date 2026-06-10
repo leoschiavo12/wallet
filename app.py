@@ -294,7 +294,7 @@ def get_sheets_service():
 
 SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
 SHEET_TAB = "lancamentos"
-HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total", "observacao"]
+HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
 
 @st.cache_data(ttl=30)
 def ler_lancamentos():
@@ -308,27 +308,44 @@ def ler_lancamentos():
         # Sheets omite celulas vazias no final da linha
         padded = [r + [''] * (len(HEADERS) - len(r)) for r in rows[1:]]
         df_l = pd.DataFrame(padded, columns=HEADERS)
-        df_l["total_raw"] = df_l["total"].astype(str)
         # normalizar numeros que podem vir em diferentes formatos do Sheets:
         # "1234.56" (EN), "1234,56" (PT virgula decimal), "1.234,56" (PT ponto milhar)
         def normalizar_numero(s):
             s = str(s).strip()
             if s in ('', 'nan', 'None'):
                 return None
-            # remover espacos e simbolos monetarios
             s = s.replace('R$', '').replace(' ', '')
-            # detectar formato: se tem virgula E ponto, o ultimo separador e o decimal
+
             if ',' in s and '.' in s:
-                # ex: "1.234,56" → ponto=milhar, virgula=decimal
-                if s.rindex(',') > s.rindex('.'):
+                # ambos separadores presentes
+                last_comma = s.rindex(',')
+                last_dot   = s.rindex('.')
+                if last_comma > last_dot:
+                    # "1.234,56" → PT-BR: ponto=milhar, virgula=decimal
                     s = s.replace('.', '').replace(',', '.')
                 else:
-                    # ex: "1,234.56" → virgula=milhar, ponto=decimal
+                    # "1,234.56" → EN: virgula=milhar, ponto=decimal
                     s = s.replace(',', '')
             elif ',' in s:
-                # so virgula: decimal PT-BR ex "9,21"
+                # so virgula: "9,21" → PT-BR decimal
                 s = s.replace(',', '.')
-            # so ponto ou sem separador: formato EN, ja ok
+            elif s.count('.') > 1:
+                # multiplos pontos: Sheets formatou 4 decimais como milhar inteiro
+                # ex: "4.805.151" → valor real e 480.5151 (dividir por 10000)
+                # ex: "3.386.24"  → valor real e 338.624  (dividir por 1000)
+                parts = s.split('.')
+                last_part = parts[-1]
+                if len(last_part) == 3:
+                    # ex: "4.805.151" → ultimo bloco tem 3 digitos → /10000
+                    digits = ''.join(parts)
+                    s = str(float(digits) / 10000)
+                elif len(last_part) == 2:
+                    # ex: "3.386.24" → ultimo bloco tem 2 digitos → /1000
+                    digits = ''.join(parts)
+                    s = str(float(digits) / 1000)
+                else:
+                    s = ''.join(parts[:-1]) + '.' + last_part
+
             try:
                 return float(s)
             except:
@@ -338,12 +355,7 @@ def ler_lancamentos():
             df_l[col] = df_l[col].apply(normalizar_numero)
             df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
 
-        # guardar debug em session_state para exibir fora do cache
-        nans_mask = df_l["total"].isna()
-        if nans_mask.any():
-            import json
-            debug_info = df_l[nans_mask][["data","ativo","total_raw"]].head(10).to_dict(orient="records")
-            df_l.attrs["debug_nans"] = debug_info
+
         return df_l
     except Exception as e:
         st.error(f"Erro ao ler planilha: {e}")
@@ -392,10 +404,6 @@ with aba_lanc:
 
     df_lanc = ler_lancamentos()
 
-    # mostrar debug de NaN se houver
-    if hasattr(df_lanc, 'attrs') and df_lanc.attrs.get("debug_nans"):
-        st.warning("DEBUG — linhas com total=NaN (valor bruto do Sheets):")
-        st.json(df_lanc.attrs["debug_nans"])
 
     if not df_lanc.empty:
         df_lanc["data_dt"] = pd.to_datetime(df_lanc["data"], format="%d/%m/%Y", errors="coerce")
@@ -431,7 +439,7 @@ with aba_lanc:
         st.markdown("---")
 
     # ── Formulario de novo lancamento ────────────────────────────────────────
-    with st.expander("+ novo lancamento", expanded=False):
+    with st.expander("+ novo aporte", expanded=False):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             f_data  = st.date_input("data", value=date.today())
@@ -453,14 +461,14 @@ with aba_lanc:
         with col4:
             f_total = f_qtd * f_preco
             st.metric("total", formatar_brl(f_total))
-            f_obs   = st.text_input("observacao (opcional)")
+
 
         if st.button("salvar lancamento", type="primary"):
             if f_qtd > 0 and f_preco > 0:
                 salvar_lancamento([
                     f_data.strftime("%d/%m/%Y"),
                     f_tipo, f_ativo, f_classe,
-                    f_qtd, f_preco, round(f_total, 2), f_obs
+                    f_qtd, f_preco, round(f_total, 2)
                 ])
                 st.success("lancamento salvo!")
                 st.rerun()
@@ -490,7 +498,7 @@ with aba_lanc:
         df_hist_fmt["valor"]   = df_hist_fmt["valor"].apply(
             lambda x: formatar_brl(x) if pd.notna(x) else "")
 
-        cols_show = ["#", "data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total", "observacao"]
+        cols_show = ["#", "data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
         cfg_hist  = {c: st.column_config.TextColumn(c, alignment="center") for c in cols_show}
         st.dataframe(
             df_hist_fmt[cols_show],
