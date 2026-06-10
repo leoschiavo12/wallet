@@ -442,6 +442,11 @@ with aba_lanc:
         media_6m = sum(meses) / 6
 
         nome_mes = meses_pt[mes_atual]
+
+        # DEBUG TEMPORARIO
+        st.write("DEBUG tipos junho:", df_mes[["data","tipo","total","sinal_m"]].to_dict(orient="records"))
+        st.write("DEBUG aporte_mes:", aporte_mes)
+
         col_r1, col_r2, col_r3 = st.columns([1.4, 1, 0.7])
         col_r1.metric(f"total aportado em {nome_mes}", formatar_brl(aporte_mes))
         col_r2.metric("media mensal (6m)", formatar_brl(media_6m))
