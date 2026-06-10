@@ -304,9 +304,10 @@ def ler_lancamentos():
         rows = res.get("values", [])
         if len(rows) <= 1:
             return pd.DataFrame(columns=HEADERS)
-        # padded: garantir que cada linha tem exatamente len(HEADERS) colunas
-        # Sheets omite celulas vazias no final da linha
-        padded = [r + [''] * (len(HEADERS) - len(r)) for r in rows[1:]]
+        # truncar para len(HEADERS) colunas e preencher faltantes
+        # (planilha pode ter colunas extras legadas como observacao)
+        n = len(HEADERS)
+        padded = [(r + [''] * n)[:n] for r in rows[1:]]
         df_l = pd.DataFrame(padded, columns=HEADERS)
         # normalizar numeros que podem vir em diferentes formatos do Sheets:
         # "1234.56" (EN), "1234,56" (PT virgula decimal), "1.234,56" (PT ponto milhar)
