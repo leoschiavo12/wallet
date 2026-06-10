@@ -356,17 +356,55 @@ with aba_lanc:
 
     df_lanc = ler_lancamentos()
 
-    # ── Formulario de novo lancamento ─────────────────────────────────────────
+    if not df_lanc.empty:
+        df_lanc["data_dt"] = pd.to_datetime(df_lanc["data"], format="%d/%m/%Y", errors="coerce")
+        df_lanc["sinal"]   = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+        df_lanc["valor"]   = df_lanc["total"] * df_lanc["sinal"]
+
+        hoje      = pd.Timestamp.today()
+        mes_atual = hoje.month
+        ano_atual = hoje.year
+
+        # ── Resumo do mes corrente ────────────────────────────────────────────
+        df_mes = df_lanc[
+            (df_lanc["data_dt"].dt.month == mes_atual) &
+            (df_lanc["data_dt"].dt.year  == ano_atual)
+        ]
+        aporte_mes = df_mes["valor"].sum()
+
+        # media dos ultimos 6 meses (excluindo mes atual)
+        meses = []
+        for i in range(1, 7):
+            ref = hoje - pd.DateOffset(months=i)
+            val = df_lanc[
+                (df_lanc["data_dt"].dt.month == ref.month) &
+                (df_lanc["data_dt"].dt.year  == ref.year)
+            ]["valor"].sum()
+            meses.append(val)
+        media_6m = sum(meses) / 6
+
+        col_r1, col_r2, col_r3 = st.columns(3)
+        col_r1.metric("aportes no mes", formatar_brl(aporte_mes))
+        col_r2.metric("media mensal (6m)", formatar_brl(media_6m))
+        col_r3.metric("total de lancamentos", len(df_lanc))
+        st.markdown("---")
+
+    # ── Formulario de novo lancamento ────────────────────────────────────────
     with st.expander("+ novo lancamento", expanded=False):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             f_data  = st.date_input("data", value=date.today())
             f_tipo  = st.selectbox("tipo", ["compra", "venda"])
         with col2:
-            todos_ativos = sorted([t for cls in MINHA_CARTEIRA.values() for t in cls.keys()])
-            f_ativo = st.selectbox("ativo", todos_ativos)
-            f_classe = next((cls for cls, atv in MINHA_CARTEIRA.items()
-                             for t, v in atv.items() if t == f_ativo), "")
+            todos_ativos = sorted(set(
+                [t for cls in MINHA_CARTEIRA.values() for t in cls.keys()] +
+                ["Tesouro SELIC 2031", "Renda+ 2050"]
+            ))
+            f_ativo  = st.selectbox("ativo", todos_ativos)
+            f_classe = next(
+                (cls for cls, atv in MINHA_CARTEIRA.items() for t in atv.keys() if t == f_ativo),
+                "Tesouro Direto" if "Tesouro" in f_ativo or "Renda" in f_ativo else "Outro"
+            )
             st.text_input("classe", value=f_classe, disabled=True)
         with col3:
             f_qtd   = st.number_input("quantidade", min_value=0.0, step=0.001, format="%.6f")
@@ -393,32 +431,44 @@ with aba_lanc:
     if df_lanc.empty:
         st.info("nenhum lancamento registrado ainda.")
     else:
-        # ── Tabela de lancamentos com exclusao ───────────────────────────────
+        # ── Historico: mais novo no topo, indice decrescente a partir de 1 ──
         st.subheader("historico")
 
-        col_del, col_tabela = st.columns([0.08, 0.92])
-        with col_tabela:
-            df_lanc_fmt = df_lanc.copy()
-            df_lanc_fmt["preco_unitario"] = df_lanc_fmt["preco_unitario"].apply(
-                lambda x: formatar_brl(x) if pd.notna(x) else "")
-            df_lanc_fmt["total"] = df_lanc_fmt["total"].apply(
-                lambda x: formatar_brl(x) if pd.notna(x) else "")
-            df_lanc_fmt["quantidade"] = df_lanc_fmt["quantidade"].apply(
-                lambda x: f"{x:g}".replace(".", ",") if pd.notna(x) else "")
+        df_hist = df_lanc.copy()
+        df_hist = df_hist.sort_values("data_dt", ascending=False).reset_index(drop=True)
+        n = len(df_hist)
+        df_hist.insert(0, "#", range(n, 0, -1))  # indice decrescente, sem 0
 
-            cfg_lanc = {c: st.column_config.TextColumn(c, alignment="center") for c in HEADERS}
-            st.dataframe(df_lanc_fmt, use_container_width=True, hide_index=False, column_config=cfg_lanc)
+        df_hist_fmt = df_hist.copy()
+        df_hist_fmt["preco_unitario"] = df_hist_fmt["preco_unitario"].apply(
+            lambda x: formatar_brl(x) if pd.notna(x) else "")
+        df_hist_fmt["total"] = df_hist_fmt["total"].apply(
+            lambda x: formatar_brl(x) if pd.notna(x) else "")
+        df_hist_fmt["quantidade"] = df_hist_fmt["quantidade"].apply(
+            lambda x: f"{x:g}".replace(".", ",") if pd.notna(x) else "")
+        df_hist_fmt["valor"]   = df_hist_fmt["valor"].apply(
+            lambda x: formatar_brl(x) if pd.notna(x) else "")
+
+        cols_show = ["#", "data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total", "observacao"]
+        cfg_hist  = {c: st.column_config.TextColumn(c, alignment="center") for c in cols_show}
+        st.dataframe(
+            df_hist_fmt[cols_show],
+            use_container_width=True, hide_index=True, column_config=cfg_hist
+        )
 
         st.markdown("---")
 
-        # exclusao por indice
+        # ── Exclusao por indice ───────────────────────────────────────────────
         with st.expander("excluir lancamento"):
             idx_del = st.number_input(
-                "numero da linha (conforme tabela acima, começa em 0)",
-                min_value=0, max_value=max(0, len(df_lanc)-1), step=1
+                "numero # do lancamento (conforme tabela acima)",
+                min_value=1, max_value=n, step=1, value=n
             )
             if st.button("excluir", type="secondary"):
-                deletar_lancamento(idx_del + 1)  # +1 pula o header
+                # converter # decrescente para posicao na sheet (crescente)
+                # # = n → linha mais antiga = sheet linha 2; # = 1 → linha mais recente
+                pos_sheet = (n - idx_del) + 1  # 1-based, pula header
+                deletar_lancamento(pos_sheet)
                 st.success("lancamento excluido!")
                 st.rerun()
 
@@ -428,8 +478,6 @@ with aba_lanc:
         st.subheader("preco medio por ativo")
         compras = df_lanc[df_lanc["tipo"] == "compra"].copy()
         if not compras.empty:
-            # calcular saldo por ativo (compras - vendas)
-            df_lanc["sinal"] = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
             saldo_ativo = df_lanc.groupby("ativo").apply(
                 lambda g: (g["quantidade"] * g["sinal"]).sum()
             ).reset_index()
@@ -439,8 +487,8 @@ with aba_lanc:
             pm = compras[compras["ativo"].isin(ativos_ativos)].groupby("ativo").apply(
                 lambda g: pd.Series({
                     "total investido": (g["quantidade"] * g["preco_unitario"]).sum(),
-                    "qtd comprada":     g["quantidade"].sum(),
-                    "preco medio":     (g["quantidade"] * g["preco_unitario"]).sum() / g["quantidade"].sum()
+                    "qtd comprada":    g["quantidade"].sum(),
+                    "preco medio":    (g["quantidade"] * g["preco_unitario"]).sum() / g["quantidade"].sum()
                 })
             ).reset_index()
             pm_fmt = pm.copy()
@@ -452,14 +500,10 @@ with aba_lanc:
 
         st.markdown("---")
 
-        # ── Evolucao do patrimônio (por data de lancamento) ──────────────────
+        # ── Evolucao do patrimonio investido ─────────────────────────────────
         st.subheader("evolucao do patrimonio investido")
-        df_evo = df_lanc.copy()
-        df_evo["data_dt"] = pd.to_datetime(df_evo["data"], format="%d/%m/%Y", errors="coerce")
-        df_evo = df_evo.dropna(subset=["data_dt"]).sort_values("data_dt")
-        df_evo["sinal"]  = df_evo["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-        df_evo["valor"]  = df_evo["total"] * df_evo["sinal"]
-        df_evo["acum"]   = df_evo["valor"].cumsum()
+        df_evo = df_lanc.sort_values("data_dt").copy()
+        df_evo["acum"] = df_evo["valor"].cumsum()
 
         fig_evo = go.Figure()
         fig_evo.add_trace(go.Scatter(
@@ -467,7 +511,7 @@ with aba_lanc:
             mode="lines+markers",
             line=dict(color="#1E88E5", width=2),
             marker=dict(size=5),
-            hovertemplate="%{x|%d/%m/%Y}<br>" + formatar_brl(0).replace("0", "%{y:,.2f}") + "<extra></extra>"
+            hovertemplate="%{x|%d/%m/%Y}<br>R$ %{y:,.2f}<extra></extra>"
         ))
         fig_evo.update_layout(
             height=300,
