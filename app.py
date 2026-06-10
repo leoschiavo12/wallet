@@ -553,11 +553,6 @@ with aba_lanc:
 
         # ── Evolucao do patrimonio investido ─────────────────────────────────
         st.subheader("evolucao do patrimonio investido")
-
-        # DEBUG
-        vendas_debug = df_lanc[df_lanc["tipo"]=="venda"][["data","ativo","total","sinal"]].copy()
-        st.write("DEBUG vendas:", vendas_debug.to_dict(orient="records"))
-
         df_evo = df_lanc.sort_values("data_dt").copy()
         df_evo["sinal_evo"] = df_evo["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
         df_evo["total"]     = pd.to_numeric(df_evo["total"], errors="coerce").fillna(0)
