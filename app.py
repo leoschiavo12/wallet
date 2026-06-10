@@ -333,6 +333,12 @@ def ler_lancamentos():
         for col in ["quantidade", "preco_unitario", "total"]:
             df_l[col] = df_l[col].apply(normalizar_numero)
             df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
+
+        # debug: mostrar linhas com NaN apos conversao
+        nans = df_l[df_l["total"].isna()]
+        if not nans.empty:
+            st.warning(f"DEBUG — {len(nans)} linhas com total=NaN:")
+            st.dataframe(nans[["data","ativo","total"]].head(10))
         return df_l
     except Exception as e:
         st.error(f"Erro ao ler planilha: {e}")
