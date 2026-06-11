@@ -178,6 +178,19 @@ aba_dash, aba_detalhe, aba_lanc, aba_aportes = st.tabs(["dashboard", "detalhe", 
 with aba_dash:
     st.metric("patrimonio total", formatar_brl(total_geral))
 
+    # aviso preco TD
+    for cls, ativos in MINHA_CARTEIRA.items():
+        for nome, v in ativos.items():
+            if isinstance(v, tuple):
+                if st.session_state.get('preco_renda_auto'):
+                    prc_td  = st.session_state['preco_renda_auto']
+                    data_td = st.session_state['data_renda_auto']
+                    st.caption(f"preco TD: **{nome}**: {formatar_brl(prc_td)} · {data_td} (automatico)")
+                elif st.session_state.get('preco_renda_erro'):
+                    st.caption(f"preco TD: **{nome}**: {formatar_brl(v[1])} (fallback — erro API: {st.session_state['preco_renda_erro']})")
+                else:
+                    st.caption(f"preco TD: **{nome}**: {formatar_brl(preco_td_de_secrets(nome, v[1]))} (secrets)")
+
     st.markdown('---')
 
     col_donut, col_barras = st.columns([1, 2])
