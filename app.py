@@ -151,10 +151,14 @@ for cls, ativos in MINHA_CARTEIRA.items():
             # tentar preco automatico via Tesouro Transparente
             if 'Renda' in t:
                 resultado_api = obter_preco_renda_mais_cached()
-                prc = resultado_api[0] if resultado_api else preco_td_de_secrets(t, v[1])
-                if resultado_api:
+                if resultado_api and resultado_api[0]:
+                    prc = resultado_api[0]
                     st.session_state['preco_renda_auto'] = resultado_api[0]
                     st.session_state['data_renda_auto']  = resultado_api[1]
+                    st.session_state['preco_renda_erro'] = None
+                else:
+                    prc = preco_td_de_secrets(t, v[1])
+                    st.session_state['preco_renda_erro'] = str(resultado_api) if resultado_api else 'retornou None'
             else:
                 prc = preco_td_de_secrets(t, v[1])
         else:
@@ -312,6 +316,8 @@ with aba_detalhe:
                     avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual} (manual)")
     if avisos:
         st.caption("preco TD: " + " · ".join(avisos))
+    if st.session_state.get('preco_renda_erro'):
+        st.caption(f"DEBUG API erro: {st.session_state['preco_renda_erro']}")
 
     df_display = df.copy()
     df_display['preco_unit']  = df_display['preco_unit'].apply(formatar_brl)
