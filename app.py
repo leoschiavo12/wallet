@@ -554,11 +554,10 @@ with aba_lanc:
                             ])
                             st.session_state["abrir_form_aporte"] = False
                             st.success("lançamento salvo!")
-                            st.rerun()
                         else:
                             st.warning("preencha quantidade e preço.")
                 with cb:
-                    if st.button("cancelar"):
+                    if st.button("✕ cancelar"):
                         st.session_state["abrir_form_aporte"] = False
 
     cabecalho_lancamentos()
