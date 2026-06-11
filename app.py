@@ -183,16 +183,14 @@ for cls, ativos in MINHA_CARTEIRA.items():
         if isinstance(v, tuple):
             q = v[0]
             if 'Renda' in t:
-                # buscar preco so se ainda nao estiver no session_state
-                if 'preco_renda_auto' not in st.session_state:
-                    resultado_api = obter_preco_renda_mais_cached()
-                    if resultado_api and resultado_api[0]:
-                        st.session_state['preco_renda_auto'] = resultado_api[0]
-                        st.session_state['data_renda_auto']  = resultado_api[1]
-                    else:
-                        st.session_state['preco_renda_auto'] = None
-                        st.session_state['preco_renda_erro'] = resultado_api[1] if resultado_api else ''
-                prc = st.session_state.get('preco_renda_auto') or preco_td_de_secrets(t, v[1])
+                resultado_api = obter_preco_renda_mais_cached()
+                if resultado_api and resultado_api[0]:
+                    prc = resultado_api[0]
+                    st.session_state['preco_renda_auto'] = resultado_api[0]
+                    st.session_state['data_renda_auto']  = resultado_api[1]
+                else:
+                    prc = preco_td_de_secrets(t, v[1])
+                    st.session_state['preco_renda_erro'] = resultado_api[1] if resultado_api else ''
             else:
                 prc = preco_td_de_secrets(t, v[1])
         else:
@@ -486,62 +484,84 @@ with aba_lanc:
         media_6m = sum(meses) / 6
 
         nome_mes = meses_pt[mes_atual]
+        # guardar no session_state para o fragment acessar
+        st.session_state['_nome_mes']   = nome_mes
+        st.session_state['_aporte_mes'] = formatar_brl(aporte_mes)
+        st.session_state['_media_6m']   = formatar_brl(media_6m)
 
-        col_r1, col_r2, col_r3 = st.columns([1.4, 1, 0.7])
-        col_r1.metric(f"total aportado em {nome_mes}", formatar_brl(aporte_mes))
-        col_r2.metric("media mensal (6m)", formatar_brl(media_6m))
-        with col_r3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            aberto = st.session_state.get("abrir_form_aporte", False)
-            label  = "✕ fechar" if aberto else "+ novo aporte"
-            if st.button(label, type="primary", use_container_width=True):
-                st.session_state["abrir_form_aporte"] = not aberto
-                st.rerun()
-        st.markdown("---")
+    # lista unificada de ativos para o formulario
+    _opcoes = []
+    for t in sorted(MINHA_CARTEIRA.get('ETF', {}).keys()):
+        _opcoes.append((t, 'ETF'))
+    for t in sorted(MINHA_CARTEIRA.get('FII', {}).keys()):
+        _opcoes.append((t, 'FII'))
+    _opcoes.append(('BTC', 'Cripto'))
+    _opcoes.append(('Renda+ 2050', 'Tesouro Direto'))
+    _nomes = [t for t, _ in _opcoes]
 
-    # ── Formulario de novo lancamento (fragment = nao reroda o script inteiro) ──
     @st.fragment
-    def formulario_aporte():
-        with st.container(border=True):
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                f_data = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
-                f_tipo = st.selectbox("tipo", ["compra", "venda"])
-            with col2:
-                todas_classes = sorted(set(MINHA_CARTEIRA.keys()))
-                f_classe_sel = st.selectbox("classe", todas_classes)
-                ativos_da_classe = sorted(MINHA_CARTEIRA.get(f_classe_sel, {}).keys())
-                if f_classe_sel == "Tesouro Direto":
-                    ativos_da_classe = sorted(set(ativos_da_classe + ["Tesouro SELIC 2031", "Renda+ 2050"]))
-                f_ativo = st.selectbox("ativo", ativos_da_classe)
-            with col3:
-                f_qtd_str   = st.text_input("quantidade", value="", placeholder="ex: 10 ou 0,05")
-                f_preco_str = st.text_input("preço unitário (R$)", value="", placeholder="ex: 490,02")
-                try:
-                    f_qtd   = float(f_qtd_str.replace(',', '.')) if f_qtd_str else 0.0
-                    f_preco = float(f_preco_str.replace(',', '.')) if f_preco_str else 0.0
-                except:
-                    f_qtd, f_preco = 0.0, 0.0
-            with col4:
-                f_total = f_qtd * f_preco
-                st.metric("total", formatar_brl(f_total))
+    def cabecalho_lancamentos():
+        from datetime import date as _date
+        aberto = st.session_state.get("abrir_form_aporte", False)
 
-            if st.button("salvar lançamento", type="primary"):
-                if f_qtd > 0 and f_preco > 0:
-                    salvar_lancamento([
-                        f_data.strftime("%d/%m/%Y"),
-                        f_tipo, f_ativo, f_classe_sel,
-                        f_qtd, f_preco, round(f_total, 2)
-                    ])
-                    st.session_state["abrir_form_aporte"] = False
-                    st.success("lançamento salvo!")
-                    st.rerun()
-                else:
-                    st.warning("preencha quantidade e preço.")
+        if not aberto:
+            c1, c2, c3 = st.columns([1.4, 1, 0.7])
+            c1.metric(f"total aportado em {st.session_state.get('_nome_mes','')}", st.session_state.get('_aporte_mes',''))
+            c2.metric("média mensal (6m)", st.session_state.get('_media_6m',''))
+            with c3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("+ novo aporte", type="primary", use_container_width=True):
+                    st.session_state["abrir_form_aporte"] = True
+        else:
+            with st.container(border=True):
+                c1, c2, c3, c4, c5, c6 = st.columns([1.1, 0.7, 1.5, 0.9, 1.1, 0.9])
+                with c1:
+                    f_data = st.date_input("data", value=_date.today(),
+                                           format="DD/MM/YYYY", max_value=_date.today(),
+                                           label_visibility="collapsed")
+                with c2:
+                    f_tipo = st.selectbox("tipo", ["compra", "venda"], label_visibility="collapsed")
+                with c3:
+                    idx = st.selectbox("ativo", range(len(_nomes)),
+                                       format_func=lambda i: _nomes[i],
+                                       label_visibility="collapsed")
+                    f_ativo  = _opcoes[idx][0]
+                    f_classe = _opcoes[idx][1]
+                with c4:
+                    f_qtd_str = st.text_input("qtd", placeholder="quantidade",
+                                              label_visibility="collapsed")
+                with c5:
+                    f_preco_str = st.text_input("preco", placeholder="preço unitário",
+                                                label_visibility="collapsed")
+                with c6:
+                    try:
+                        f_qtd   = float(f_qtd_str.replace(',','.')) if f_qtd_str else 0.0
+                        f_preco = float(f_preco_str.replace(',','.')) if f_preco_str else 0.0
+                    except:
+                        f_qtd, f_preco = 0.0, 0.0
+                    f_total = f_qtd * f_preco
+                    st.markdown(f"<div style='padding-top:6px;font-size:13px'>{formatar_brl(f_total)}</div>",
+                                unsafe_allow_html=True)
 
-    if st.session_state.get("abrir_form_aporte", False):
-        formulario_aporte()
+                ca, cb = st.columns([1, 5])
+                with ca:
+                    if st.button("salvar", type="primary", use_container_width=True):
+                        if f_qtd > 0 and f_preco > 0:
+                            salvar_lancamento([
+                                f_data.strftime("%d/%m/%Y"),
+                                f_tipo, f_ativo, f_classe,
+                                f_qtd, f_preco, round(f_total, 2)
+                            ])
+                            st.session_state["abrir_form_aporte"] = False
+                            st.success("lançamento salvo!")
+                            st.rerun()
+                        else:
+                            st.warning("preencha quantidade e preço.")
+                with cb:
+                    if st.button("cancelar"):
+                        st.session_state["abrir_form_aporte"] = False
 
+    cabecalho_lancamentos()
     st.markdown("---")
 
     if df_lanc.empty:
