@@ -499,8 +499,9 @@ with aba_lanc:
                 st.rerun()
         st.markdown("---")
 
-    # ── Formulario de novo lancamento ────────────────────────────────────────
-    if st.session_state.get("abrir_form_aporte", False):
+    # ── Formulario de novo lancamento (fragment = nao reroda o script inteiro) ──
+    @st.fragment
+    def formulario_aporte():
         with st.container(border=True):
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -509,7 +510,6 @@ with aba_lanc:
             with col2:
                 todas_classes = sorted(set(MINHA_CARTEIRA.keys()))
                 f_classe_sel = st.selectbox("classe", todas_classes)
-                # ativos filtrados pela classe selecionada
                 ativos_da_classe = sorted(MINHA_CARTEIRA.get(f_classe_sel, {}).keys())
                 if f_classe_sel == "Tesouro Direto":
                     ativos_da_classe = sorted(set(ativos_da_classe + ["Tesouro SELIC 2031", "Renda+ 2050"]))
@@ -538,6 +538,9 @@ with aba_lanc:
                     st.rerun()
                 else:
                     st.warning("preencha quantidade e preço.")
+
+    if st.session_state.get("abrir_form_aporte", False):
+        formulario_aporte()
 
     st.markdown("---")
 
