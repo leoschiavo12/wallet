@@ -53,27 +53,15 @@ def obter_preco_btc_brl():
 def obter_preco_renda_mais():
     try:
         import urllib.parse
-        # primeiro: buscar titulos mais recentes para descobrir nome exato do Renda+
-        params_debug = {
+        params = {
             'resource_id': '796d2059-14e9-44e3-80c9-2d9e30b405c1',
-            'limit': 20,
-            'sort': 'Data Base desc',
-            'fields': 'Tipo Titulo,Data Vencimento,Data Base,PU Venda Manha'
+            'limit': 5
         }
-        url = 'https://www.tesourotransparente.gov.br/ckan/api/3/action/datastore_search?' + urllib.parse.urlencode(params_debug)
+        url = 'https://www.tesourotransparente.gov.br/ckan/api/3/action/datastore_search?' + urllib.parse.urlencode(params)
         resp = requests.get(url, timeout=10)
         data = resp.json()
-        records = data['result']['records']
-        # procurar qualquer titulo com 'renda' ou '2050'
-        titulos = list(set(r['Tipo Titulo'] for r in records))
-        renda = [r for r in records if 'enda' in str(r.get('Tipo Titulo','')).lower() or '2050' in str(r.get('Data Vencimento',''))]
-        if renda:
-            pu = renda[0]['PU Venda Manha']
-            dt = renda[0]['Data Base']
-            if isinstance(pu, str):
-                pu = float(pu.replace('.', '').replace(',', '.'))
-            return float(pu), str(dt)[:10]
-        return None, f'titulos recentes: {titulos}'
+        # retornar estrutura raw para debug
+        return None, str(data)[:300]
     except Exception as e:
         return None, str(e)
 
