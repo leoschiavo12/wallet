@@ -50,6 +50,35 @@ def obter_preco_btc_brl():
         pass
     return 0.0
 
+def obter_preco_renda_mais():
+    try:
+        # Buscar pacote para obter URL do CSV
+        pkg_url = "https://www.tesourotransparente.gov.br/ckan/api/3/action/package_show?id=taxas-dos-titulos-ofertados-pelo-tesouro-direto"
+        pkg = requests.get(pkg_url, timeout=10).json()
+        resources = pkg['result']['resources']
+
+        # Pegar o CSV de precos (primeiro recurso CSV)
+        csv_url = next(r['url'] for r in resources if r['format'].upper() == 'CSV')
+
+        # Ler CSV e filtrar Renda+ 2050
+        df_td = pd.read_csv(csv_url, sep=';', decimal=',', encoding='latin1')
+        mask = (
+            df_td['Tipo Titulo'].str.contains('Renda', case=False, na=False) &
+            df_td['Data Vencimento'].str.contains('2050', na=False)
+        )
+        df_renda = df_td[mask].copy()
+        if df_renda.empty:
+            return None
+
+        # Ordenar pela data mais recente e pegar preco de venda
+        df_renda['Data Base'] = pd.to_datetime(df_renda['Data Base'], format='%d/%m/%Y', errors='coerce')
+        df_renda = df_renda.sort_values('Data Base', ascending=False)
+        preco = float(df_renda.iloc[0]['PU Venda Manha'])
+        data  = df_renda.iloc[0]['Data Base'].strftime('%d/%m/%Y')
+        return preco, data
+    except Exception as e:
+        return None
+
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
 
@@ -97,7 +126,11 @@ def data_td_de_secrets(nome):
     try:
         return st.secrets["tesouro_direto_data"][nome]
     except:
-        return "nao definida" 
+        return "nao definida"
+
+@st.cache_data(ttl=3600)
+def obter_preco_renda_mais_cached():
+    return obter_preco_renda_mais()
 
 MINHA_CARTEIRA = {
     'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
@@ -115,8 +148,16 @@ linhas = []
 for cls, ativos in MINHA_CARTEIRA.items():
     for t, v in ativos.items():
         if isinstance(v, tuple):
-            q        = v[0]
-            prc      = preco_td_de_secrets(t, v[1])
+            q = v[0]
+            # tentar preco automatico via Tesouro Transparente
+            if 'Renda' in t:
+                resultado_api = obter_preco_renda_mais_cached()
+                prc = resultado_api[0] if resultado_api else preco_td_de_secrets(t, v[1])
+                if resultado_api:
+                    st.session_state['preco_renda_auto'] = resultado_api[0]
+                    st.session_state['data_renda_auto']  = resultado_api[1]
+            else:
+                prc = preco_td_de_secrets(t, v[1])
         else:
             q   = v
             prc = precos.get(t.upper(), 0.0)
@@ -262,11 +303,16 @@ with aba_detalhe:
     for cls, ativos in MINHA_CARTEIRA.items():
         for nome, v in ativos.items():
             if isinstance(v, tuple):
-                prc_atual  = preco_td_de_secrets(nome, v[1])
-                data_atual = data_td_de_secrets(nome)
-                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual}")
+                if 'Renda' in nome and 'preco_renda_auto' in st.session_state:
+                    prc_atual  = st.session_state['preco_renda_auto']
+                    data_atual = st.session_state['data_renda_auto']
+                    avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual} (automatico)")
+                else:
+                    prc_atual  = preco_td_de_secrets(nome, v[1])
+                    data_atual = data_td_de_secrets(nome)
+                    avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual} (manual)")
     if avisos:
-        st.caption("preco manual (atualize em Settings > Secrets): " + " · ".join(avisos))
+        st.caption("preco TD: " + " · ".join(avisos))
 
     df_display = df.copy()
     df_display['preco_unit']  = df_display['preco_unit'].apply(formatar_brl)
