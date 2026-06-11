@@ -512,6 +512,7 @@ with aba_lanc:
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("+ novo aporte", type="primary", use_container_width=True):
                     st.session_state["abrir_form_aporte"] = True
+                    st.rerun(scope="fragment")
         else:
             with st.container(border=True):
                 c1, c2, c3, c4, c5, c6 = st.columns([1.1, 0.7, 1.5, 0.9, 1.1, 0.9])
@@ -559,6 +560,7 @@ with aba_lanc:
                 with cb:
                     if st.button("✕ cancelar"):
                         st.session_state["abrir_form_aporte"] = False
+                        st.rerun(scope="fragment")
 
     cabecalho_lancamentos()
     st.markdown("---")
