@@ -44,13 +44,12 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
     import pandas as pd
     from datetime import date
     hoje    = date.today()
-    # mês de referência = mês anterior
+    # mes de referencia = mes anterior (pagamento)
     if hoje.month == 1:
         mes_ref, ano_ref = 12, hoje.year - 1
     else:
         mes_ref, ano_ref = hoje.month - 1, hoje.year
 
-    # reconstruir df de lançamentos
     df_lanc = pd.DataFrame(df_lancamentos_json)
     if df_lanc.empty:
         return 0.0, {}
@@ -59,37 +58,51 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
 
     total    = 0.0
     detalhes = {}
+    ALIAS    = {'GALG11': 'GARE11'}
 
-    fiis = [t for t in df_lanc[df_lanc['Classe'] == 'FII']['Ativo'].unique()]
+    fiis = list(df_lanc[df_lanc['Classe'] == 'FII']['Ativo'].unique())
 
     for fii in fiis:
+        fii_norm = ALIAS.get(fii, fii)
         try:
-            tk   = yf.Ticker(f"{fii}.SA")
+            tk = yf.Ticker(f"{fii_norm}.SA")
+            # actions traz data ex-dividend (quando o yfinance registra o dividendo)
+            # que tipicamente e o mes anterior ao pagamento
             divs = tk.dividends
-            if divs.empty:
+            if divs is None or divs.empty:
                 continue
-
-            # filtrar dividendos do mes de referencia
             divs.index = divs.index.tz_localize(None) if divs.index.tzinfo else divs.index
-            mask = (divs.index.month == mes_ref) & (divs.index.year == ano_ref)
-            divs_mes = divs[mask]
-            if divs_mes.empty:
+
+            # filtrar dividendos cujo pagamento ocorreu no mes_ref
+            # yfinance registra a data ex-dividend — pagamento tipicamente e
+            # no mesmo mes ou mes seguinte ao ex-dividend
+            # estrategia: pegar entradas de mes_ref e mes_ref-1 e verificar ambas
+            mes_ant = mes_ref - 1 if mes_ref > 1 else 12
+            ano_ant = ano_ref if mes_ref > 1 else ano_ref - 1
+            mask = (
+                ((divs.index.month == mes_ref) & (divs.index.year == ano_ref)) |
+                ((divs.index.month == mes_ant) & (divs.index.year == ano_ant))
+            )
+            divs_ex = divs[mask]
+            if divs_ex.empty:
                 continue
 
-            # para cada pagamento, calcular qtd na data com (data do dividendo)
-            for data_div, val_cota in divs_mes.items():
-                # qtd na data = soma de compras - vendas até a data do dividendo
+            alias_inv = {v: k for k, v in ALIAS.items()}
+            nomes = [fii, fii_norm] + ([alias_inv[fii_norm]] if fii_norm in alias_inv else [])
+
+            for data_ex, val_cota in divs_ex.items():
+                # quantidade na data ex-dividend
                 ops = df_lanc[
-                    (df_lanc['Ativo'] == fii) &
-                    (df_lanc['data_dt'] <= data_div)
+                    (df_lanc['Ativo'].isin(nomes)) &
+                    (df_lanc['data_dt'] <= data_ex)
                 ]
                 qtd_na_data = (ops['quantidade'] * ops['sinal']).sum()
                 if qtd_na_data > 0:
                     val_total = float(val_cota) * qtd_na_data
-                    if fii not in detalhes:
-                        detalhes[fii] = {'por_cota': 0.0, 'total': 0.0, 'qtd': qtd_na_data}
-                    detalhes[fii]['por_cota'] += float(val_cota)
-                    detalhes[fii]['total']    += val_total
+                    if fii_norm not in detalhes:
+                        detalhes[fii_norm] = {'por_cota': 0.0, 'total': 0.0, 'qtd': qtd_na_data}
+                    detalhes[fii_norm]['por_cota'] += float(val_cota)
+                    detalhes[fii_norm]['total']    += val_total
                     total += val_total
         except:
             continue
