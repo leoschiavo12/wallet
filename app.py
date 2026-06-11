@@ -485,13 +485,18 @@ with aba_lanc:
 
         nome_mes = meses_pt[mes_atual]
 
-        col_r1, col_r2 = st.columns(2)
+        col_r1, col_r2, col_r3 = st.columns([1.4, 1, 0.7])
         col_r1.metric(f"total aportado em {nome_mes}", formatar_brl(aporte_mes))
         col_r2.metric("media mensal (6m)", formatar_brl(media_6m))
+        with col_r3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("+ novo aporte", type="primary", use_container_width=True):
+                st.session_state["abrir_form_aporte"] = not st.session_state.get("abrir_form_aporte", False)
         st.markdown("---")
 
     # ── Formulario de novo lancamento ────────────────────────────────────────
-    with st.expander("+ novo aporte", expanded=st.session_state.get("abrir_form_aporte", False)):
+    if st.session_state.get("abrir_form_aporte", False):
+        with st.container(border=True):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             f_data  = st.date_input("data", value=date.today())
