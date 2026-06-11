@@ -497,41 +497,40 @@ with aba_lanc:
     # ── Formulario de novo lancamento ────────────────────────────────────────
     if st.session_state.get("abrir_form_aporte", False):
         with st.container(border=True):
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            f_data  = st.date_input("data", value=date.today())
-            f_tipo  = st.selectbox("tipo", ["compra", "venda"])
-        with col2:
-            todos_ativos = sorted(set(
-                [t for cls in MINHA_CARTEIRA.values() for t in cls.keys()] +
-                ["Tesouro SELIC 2031", "Renda+ 2050"]
-            ))
-            f_ativo  = st.selectbox("ativo", todos_ativos)
-            f_classe = next(
-                (cls for cls, atv in MINHA_CARTEIRA.items() for t in atv.keys() if t == f_ativo),
-                "Tesouro Direto" if "Tesouro" in f_ativo or "Renda" in f_ativo else "Outro"
-            )
-            st.text_input("classe", value=f_classe, disabled=True)
-        with col3:
-            f_qtd   = st.number_input("quantidade", min_value=0.0, step=0.001, format="%.6f")
-            f_preco = st.number_input("preco unitario (R$)", min_value=0.0, step=0.01, format="%.2f")
-        with col4:
-            f_total = f_qtd * f_preco
-            st.metric("total", formatar_brl(f_total))
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                f_data  = st.date_input("data", value=date.today())
+                f_tipo  = st.selectbox("tipo", ["compra", "venda"])
+            with col2:
+                todos_ativos = sorted(set(
+                    [t for cls in MINHA_CARTEIRA.values() for t in cls.keys()] +
+                    ["Tesouro SELIC 2031", "Renda+ 2050"]
+                ))
+                f_ativo  = st.selectbox("ativo", todos_ativos)
+                f_classe = next(
+                    (cls for cls, atv in MINHA_CARTEIRA.items() for t in atv.keys() if t == f_ativo),
+                    "Tesouro Direto" if "Tesouro" in f_ativo or "Renda" in f_ativo else "Outro"
+                )
+                st.text_input("classe", value=f_classe, disabled=True)
+            with col3:
+                f_qtd   = st.number_input("quantidade", min_value=0.0, step=0.001, format="%.6f")
+                f_preco = st.number_input("preco unitario (R$)", min_value=0.0, step=0.01, format="%.2f")
+            with col4:
+                f_total = f_qtd * f_preco
+                st.metric("total", formatar_brl(f_total))
 
-
-        if st.button("salvar lancamento", type="primary"):
-            if f_qtd > 0 and f_preco > 0:
-                salvar_lancamento([
-                    f_data.strftime("%d/%m/%Y"),
-                    f_tipo, f_ativo, f_classe,
-                    f_qtd, f_preco, round(f_total, 2)
-                ])
-                st.session_state["abrir_form_aporte"] = False
-                st.success("lancamento salvo!")
-                st.rerun()
-            else:
-                st.warning("preencha quantidade e preco.")
+            if st.button("salvar lancamento", type="primary"):
+                if f_qtd > 0 and f_preco > 0:
+                    salvar_lancamento([
+                        f_data.strftime("%d/%m/%Y"),
+                        f_tipo, f_ativo, f_classe,
+                        f_qtd, f_preco, round(f_total, 2)
+                    ])
+                    st.session_state["abrir_form_aporte"] = False
+                    st.success("lancamento salvo!")
+                    st.rerun()
+                else:
+                    st.warning("preencha quantidade e preco.")
 
     st.markdown("---")
 
