@@ -75,8 +75,8 @@ def obter_preco_renda_mais():
             pu = float(pu)
         data = df_renda.iloc[0]['Data Base'].strftime('%d/%m/%Y')
         return pu, data
-    except Exception:
-        return None
+    except Exception as e:
+        return None, str(e)
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
@@ -151,14 +151,15 @@ for cls, ativos in MINHA_CARTEIRA.items():
             # tentar preco automatico via Tesouro Transparente
             if 'Renda' in t:
                 resultado_api = obter_preco_renda_mais_cached()
-                if resultado_api and resultado_api[0]:
+                if resultado_api and len(resultado_api) == 2 and resultado_api[0] and not isinstance(resultado_api[0], str):
                     prc = resultado_api[0]
                     st.session_state['preco_renda_auto'] = resultado_api[0]
                     st.session_state['data_renda_auto']  = resultado_api[1]
                     st.session_state['preco_renda_erro'] = None
                 else:
                     prc = preco_td_de_secrets(t, v[1])
-                    st.session_state['preco_renda_erro'] = str(resultado_api) if resultado_api else 'retornou None'
+                    erro = resultado_api[1] if resultado_api and len(resultado_api) > 1 else 'retornou None'
+                    st.session_state['preco_renda_erro'] = erro
             else:
                 prc = preco_td_de_secrets(t, v[1])
         else:
