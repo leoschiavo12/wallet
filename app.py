@@ -66,8 +66,8 @@ def obter_preco_renda_mais():
     try:
         from io import StringIO
         url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
-        # baixar apenas os ultimos 200KB — Renda+ 2069 so existe desde 2023, fica no final
-        hdrs = {'Range': 'bytes=-200000'}
+        # cada linha tem ~100 bytes, 50KB garante os ultimos ~500 registros
+        hdrs = {'Range': 'bytes=-50000'}
         resp = requests.get(url, headers=hdrs, timeout=15)
         if resp.status_code not in (200, 206):
             return None, f'status {resp.status_code}'
