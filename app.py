@@ -63,8 +63,23 @@ def obter_preco_btc_brl():
     return 0.0
 
 def obter_preco_renda_mais():
-    # sem API disponivel — retorna None para usar fallback das secrets
-    return None, 'API indisponivel'
+    try:
+        token = st.secrets["brapi"]["token"]
+        url = f"https://brapi.dev/api/v2/treasury?search=Renda%2B+2050&token={token}"
+        resp = requests.get(url, timeout=10)
+        data = resp.json()
+        titulos = data.get('treasuries', [])
+        if not titulos:
+            return None, 'nenhum titulo encontrado na brapi'
+        # pegar o mais recente
+        t = titulos[0]
+        pu   = float(t.get('sellPrice') or t.get('price') or 0)
+        data_str = t.get('date', '')[:10]
+        if pu > 0:
+            return pu, data_str
+        return None, f'campo price vazio: {t}'
+    except Exception as e:
+        return None, str(e)
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
