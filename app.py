@@ -63,23 +63,42 @@ def obter_preco_btc_brl():
     return 0.0
 
 def obter_preco_renda_mais():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9',
+        'Referer': 'https://www.google.com.br/'
+    }
+    # tentativa 1: Status Invest
     try:
-        token = st.secrets["brapi"]["token"]
-        url  = "https://brapi.dev/api/v2/treasury?search=Renda%2B+2050"
-        hdrs = {"Authorization": f"Bearer {token}"}
-        resp = requests.get(url, headers=hdrs, timeout=10)
-        data = resp.json()
-        titulos = data.get('treasuries', [])
-        if not titulos:
-            return None, f'nenhum titulo — resposta: {str(data)[:200]}'
-        t    = titulos[0]
-        pu   = float(t.get('sellPrice') or t.get('price') or 0)
-        data_str = str(t.get('date', ''))[:10]
-        if pu > 0:
-            return pu, data_str
-        return None, f'price zerado: {t}'
-    except Exception as e:
-        return None, str(e)
+        url  = 'https://statusinvest.com.br/tesouro/tesouro-renda-mais-2050'
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            import re
+            # buscar preco no HTML
+            match = re.search(r'"price"\s*:\s*([\d,\.]+)', resp.text)
+            if not match:
+                match = re.search(r'value["\s]+?>([\d]+,[\d]{2})<', resp.text)
+            if match:
+                pu = float(match.group(1).replace('.','').replace(',','.'))
+                from datetime import date
+                return pu, date.today().strftime('%d/%m/%Y')
+    except Exception:
+        pass
+    # tentativa 2: Investidor10
+    try:
+        url  = 'https://investidor10.com.br/tesouro/tesouro-renda-mais-2050/'
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            import re
+            match = re.search(r'R\$\s*([\d\.]+,[\d]{2})', resp.text)
+            if match:
+                pu = float(match.group(1).replace('.','').replace(',','.'))
+                from datetime import date
+                return pu, date.today().strftime('%d/%m/%Y')
+    except Exception:
+        pass
+    return None, 'webscraping falhou em todos os sites'
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
@@ -151,18 +170,15 @@ for cls, ativos in MINHA_CARTEIRA.items():
     for t, v in ativos.items():
         if isinstance(v, tuple):
             q = v[0]
-            # tentar preco automatico via Tesouro Transparente
             if 'Renda' in t:
                 resultado_api = obter_preco_renda_mais_cached()
-                if resultado_api and len(resultado_api) == 2 and resultado_api[0] and not isinstance(resultado_api[0], str):
+                if resultado_api and resultado_api[0]:
                     prc = resultado_api[0]
                     st.session_state['preco_renda_auto'] = resultado_api[0]
                     st.session_state['data_renda_auto']  = resultado_api[1]
-                    st.session_state['preco_renda_erro'] = None
                 else:
                     prc = preco_td_de_secrets(t, v[1])
-                    erro = resultado_api[1] if resultado_api and len(resultado_api) > 1 else 'retornou None'
-                    st.session_state['preco_renda_erro'] = erro
+                    st.session_state['preco_renda_erro'] = resultado_api[1] if resultado_api else 'None'
             else:
                 prc = preco_td_de_secrets(t, v[1])
         else:
@@ -190,10 +206,11 @@ with aba_dash:
                     prc_td  = st.session_state['preco_renda_auto']
                     data_td = st.session_state['data_renda_auto']
                     st.caption(f"preco TD: **{nome}**: {formatar_brl(prc_td)} · {data_td} (automatico)")
-                elif st.session_state.get('preco_renda_erro'):
-                    st.caption(f"preco TD: **{nome}**: {formatar_brl(v[1])} (fallback — erro API: {st.session_state['preco_renda_erro']})")
                 else:
-                    st.caption(f"preco TD: **{nome}**: {formatar_brl(preco_td_de_secrets(nome, v[1]))} (secrets)")
+                    prc_td  = preco_td_de_secrets(nome, v[1])
+                    data_td = data_td_de_secrets(nome)
+                    erro    = st.session_state.get('preco_renda_erro', '')
+                    st.caption(f"preco TD: **{nome}**: {formatar_brl(prc_td)} · {data_td} — {erro}")
 
     st.markdown('---')
 
