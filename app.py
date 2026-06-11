@@ -69,36 +69,19 @@ def obter_preco_renda_mais():
         'Accept-Language': 'pt-BR,pt;q=0.9',
         'Referer': 'https://www.google.com.br/'
     }
-    # tentativa 1: Status Invest
     try:
-        url  = 'https://statusinvest.com.br/tesouro/tesouro-renda-mais-2050'
+        import re
+        url  = 'https://statusinvest.com.br/tesouro/tesouro-renda-aposentadoria-extra-2050'
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code == 200:
-            import re
-            # buscar preco no HTML
-            match = re.search(r'"price"\s*:\s*([\d,\.]+)', resp.text)
-            if not match:
-                match = re.search(r'value["\s]+?>([\d]+,[\d]{2})<', resp.text)
+            # padrao: "VALOR DE **VENDA**\n\nValor Unitário R$ **472,92**"
+            match = re.search(r'VALOR DE \*\*VENDA\*\*.*?R\$\s*\*\*([\d\.]+,[\d]{2})\*\*', resp.text, re.DOTALL)
             if match:
-                pu = float(match.group(1).replace('.','').replace(',','.'))
-                from datetime import date
+                pu = float(match.group(1).replace('.', '').replace(',', '.'))
                 return pu, date.today().strftime('%d/%m/%Y')
     except Exception:
         pass
-    # tentativa 2: Investidor10
-    try:
-        url  = 'https://investidor10.com.br/tesouro/tesouro-renda-mais-2050/'
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            import re
-            match = re.search(r'R\$\s*([\d\.]+,[\d]{2})', resp.text)
-            if match:
-                pu = float(match.group(1).replace('.','').replace(',','.'))
-                from datetime import date
-                return pu, date.today().strftime('%d/%m/%Y')
-    except Exception:
-        pass
-    return None, 'webscraping falhou em todos os sites'
+    return None, 'webscraping falhou'
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
