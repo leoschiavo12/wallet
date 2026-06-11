@@ -52,15 +52,7 @@ def obter_preco_btc_brl():
 
 def obter_preco_renda_mais():
     try:
-        # Buscar pacote para obter URL do CSV
-        pkg_url = "https://www.tesourotransparente.gov.br/ckan/api/3/action/package_show?id=taxas-dos-titulos-ofertados-pelo-tesouro-direto"
-        pkg = requests.get(pkg_url, timeout=10).json()
-        resources = pkg['result']['resources']
-
-        # Pegar o CSV de precos (primeiro recurso CSV)
-        csv_url = next(r['url'] for r in resources if r['format'].upper() == 'CSV')
-
-        # Ler CSV e filtrar Renda+ 2050
+        csv_url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
         df_td = pd.read_csv(csv_url, sep=';', decimal=',', encoding='latin1')
         mask = (
             df_td['Tipo Titulo'].str.contains('Renda', case=False, na=False) &
@@ -69,14 +61,17 @@ def obter_preco_renda_mais():
         df_renda = df_td[mask].copy()
         if df_renda.empty:
             return None
-
-        # Ordenar pela data mais recente e pegar preco de venda
         df_renda['Data Base'] = pd.to_datetime(df_renda['Data Base'], format='%d/%m/%Y', errors='coerce')
         df_renda = df_renda.sort_values('Data Base', ascending=False)
-        preco = float(df_renda.iloc[0]['PU Venda Manha'])
-        data  = df_renda.iloc[0]['Data Base'].strftime('%d/%m/%Y')
-        return preco, data
-    except Exception as e:
+        # PU Venda Manha pode ser string com virgula decimal
+        pu = df_renda.iloc[0]['PU Venda Manha']
+        if isinstance(pu, str):
+            pu = float(pu.replace('.', '').replace(',', '.'))
+        else:
+            pu = float(pu)
+        data = df_renda.iloc[0]['Data Base'].strftime('%d/%m/%Y')
+        return pu, data
+    except Exception:
         return None
 
 def arredondar_teto(valor, multiplo):
