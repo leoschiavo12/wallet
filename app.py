@@ -63,22 +63,15 @@ def obter_preco_btc_brl():
     return 0.0
 
 def obter_preco_renda_mais():
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9',
-        'Referer': 'https://www.google.com.br/'
-    }
     try:
-        import re
-        url  = 'https://statusinvest.com.br/tesouro/tesouro-renda-aposentadoria-extra-2050'
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            # debug: extrair trecho ao redor de "venda" e numeros
-            idx = resp.text.lower().find('venda')
-            trecho = resp.text[idx:idx+300] if idx > 0 else resp.text[:500]
-            return None, f'STATUS200 trecho: {repr(trecho[:200])}'
-        return None, f'status {resp.status_code}'
+        resp = requests.get("https://api.radaropcoes.com/bonds.json", timeout=10)
+        titulos = resp.json()['response']['TrsrBdTradgList']
+        for bond in titulos:
+            nm = bond['TrsrBd']['nm']
+            if 'Renda' in nm and '2050' in nm:
+                pu = float(bond['TrsrBd']['untrRedVal'])  # preco de resgate/venda
+                return pu, date.today().strftime('%d/%m/%Y')
+        return None, 'titulo Renda+ 2050 nao encontrado'
     except Exception as e:
         return None, str(e)
 
@@ -322,18 +315,11 @@ with aba_detalhe:
     for cls, ativos in MINHA_CARTEIRA.items():
         for nome, v in ativos.items():
             if isinstance(v, tuple):
-                if 'Renda' in nome and 'preco_renda_auto' in st.session_state:
-                    prc_atual  = st.session_state['preco_renda_auto']
-                    data_atual = st.session_state['data_renda_auto']
-                    avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual} (automatico)")
-                else:
-                    prc_atual  = preco_td_de_secrets(nome, v[1])
-                    data_atual = data_td_de_secrets(nome)
-                    avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual} (manual)")
+                prc_atual  = preco_td_de_secrets(nome, v[1])
+                data_atual = data_td_de_secrets(nome)
+                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual}")
     if avisos:
-        st.caption("preco TD: " + " · ".join(avisos))
-    if st.session_state.get('preco_renda_erro'):
-        st.caption(f"DEBUG API erro: {st.session_state['preco_renda_erro']}")
+        st.caption("preco TD (atualize em Settings > Secrets): " + " · ".join(avisos))
 
     df_display = df.copy()
     df_display['preco_unit']  = df_display['preco_unit'].apply(formatar_brl)
