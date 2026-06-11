@@ -22,8 +22,20 @@ st.markdown("""
 def obter_precos_b3(tickers_lista):
     tk_formatados = [f"{t.upper()}.SA" for t in tickers_lista]
     try:
-        dados = yf.download(tk_formatados, period="5d", group_by='ticker', progress=False, auto_adjust=True, timeout=7)
-        return {t.upper(): float(dados[f"{t.upper()}.SA"]['Close'].ffill().iloc[-1]) for t in tickers_lista}
+        dados = yf.download(tk_formatados, period="5d", progress=False, auto_adjust=True, timeout=7)
+        precos = {}
+        for t in tickers_lista:
+            try:
+                tk = f"{t.upper()}.SA"
+                # suportar tanto MultiIndex (varios tickers) quanto Index simples (1 ticker)
+                if isinstance(dados.columns, pd.MultiIndex):
+                    serie = dados['Close'][tk].ffill()
+                else:
+                    serie = dados['Close'].ffill()
+                precos[t.upper()] = float(serie.dropna().iloc[-1])
+            except:
+                precos[t.upper()] = 100.0
+        return precos
     except:
         return {t.upper(): 100.0 for t in tickers_lista}
 
@@ -51,19 +63,8 @@ def obter_preco_btc_brl():
     return 0.0
 
 def obter_preco_renda_mais():
-    try:
-        import urllib.parse
-        params = {
-            'resource_id': '796d2059-14e9-44e3-80c9-2d9e30b405c1',
-            'limit': 5
-        }
-        url = 'https://www.tesourotransparente.gov.br/ckan/api/3/action/datastore_search?' + urllib.parse.urlencode(params)
-        resp = requests.get(url, timeout=10)
-        data = resp.json()
-        # retornar estrutura raw para debug
-        return None, str(data)[:300]
-    except Exception as e:
-        return None, str(e)
+    # sem API disponivel — retorna None para usar fallback das secrets
+    return None, 'API indisponivel'
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
