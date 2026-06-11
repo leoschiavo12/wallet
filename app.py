@@ -490,8 +490,11 @@ with aba_lanc:
         col_r2.metric("media mensal (6m)", formatar_brl(media_6m))
         with col_r3:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("+ novo aporte", type="primary", use_container_width=True):
-                st.session_state["abrir_form_aporte"] = not st.session_state.get("abrir_form_aporte", False)
+            aberto = st.session_state.get("abrir_form_aporte", False)
+            label  = "✕ fechar" if aberto else "+ novo aporte"
+            if st.button(label, type="primary", use_container_width=True):
+                st.session_state["abrir_form_aporte"] = not aberto
+                st.rerun()
         st.markdown("---")
 
     # ── Formulario de novo lancamento ────────────────────────────────────────
@@ -499,38 +502,40 @@ with aba_lanc:
         with st.container(border=True):
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                f_data  = st.date_input("data", value=date.today())
-                f_tipo  = st.selectbox("tipo", ["compra", "venda"])
+                f_data = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
+                f_tipo = st.selectbox("tipo", ["compra", "venda"])
             with col2:
-                todos_ativos = sorted(set(
-                    [t for cls in MINHA_CARTEIRA.values() for t in cls.keys()] +
-                    ["Tesouro SELIC 2031", "Renda+ 2050"]
-                ))
-                f_ativo  = st.selectbox("ativo", todos_ativos)
-                f_classe = next(
-                    (cls for cls, atv in MINHA_CARTEIRA.items() for t in atv.keys() if t == f_ativo),
-                    "Tesouro Direto" if "Tesouro" in f_ativo or "Renda" in f_ativo else "Outro"
-                )
-                st.text_input("classe", value=f_classe, disabled=True)
+                todas_classes = sorted(set(MINHA_CARTEIRA.keys()))
+                f_classe_sel = st.selectbox("classe", todas_classes)
+                # ativos filtrados pela classe selecionada
+                ativos_da_classe = sorted(MINHA_CARTEIRA.get(f_classe_sel, {}).keys())
+                if f_classe_sel == "Tesouro Direto":
+                    ativos_da_classe = sorted(set(ativos_da_classe + ["Tesouro SELIC 2031", "Renda+ 2050"]))
+                f_ativo = st.selectbox("ativo", ativos_da_classe)
             with col3:
-                f_qtd   = st.number_input("quantidade", min_value=0.0, step=0.001, format="%.6f")
-                f_preco = st.number_input("preco unitario (R$)", min_value=0.0, step=0.01, format="%.2f")
+                f_qtd_str   = st.text_input("quantidade", value="", placeholder="ex: 10 ou 0,05")
+                f_preco_str = st.text_input("preço unitário (R$)", value="", placeholder="ex: 490,02")
+                try:
+                    f_qtd   = float(f_qtd_str.replace(',', '.')) if f_qtd_str else 0.0
+                    f_preco = float(f_preco_str.replace(',', '.')) if f_preco_str else 0.0
+                except:
+                    f_qtd, f_preco = 0.0, 0.0
             with col4:
                 f_total = f_qtd * f_preco
                 st.metric("total", formatar_brl(f_total))
 
-            if st.button("salvar lancamento", type="primary"):
+            if st.button("salvar lançamento", type="primary"):
                 if f_qtd > 0 and f_preco > 0:
                     salvar_lancamento([
                         f_data.strftime("%d/%m/%Y"),
-                        f_tipo, f_ativo, f_classe,
+                        f_tipo, f_ativo, f_classe_sel,
                         f_qtd, f_preco, round(f_total, 2)
                     ])
                     st.session_state["abrir_form_aporte"] = False
-                    st.success("lancamento salvo!")
+                    st.success("lançamento salvo!")
                     st.rerun()
                 else:
-                    st.warning("preencha quantidade e preco.")
+                    st.warning("preencha quantidade e preço.")
 
     st.markdown("---")
 
