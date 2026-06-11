@@ -53,17 +53,21 @@ def obter_preco_btc_brl():
 def obter_preco_renda_mais():
     try:
         csv_url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
-        df_td = pd.read_csv(csv_url, sep=';', decimal=',', encoding='latin1')
-        mask = (
-            df_td['Tipo Titulo'].str.contains('Renda', case=False, na=False) &
-            df_td['Data Vencimento'].str.contains('2050', na=False)
-        )
-        df_renda = df_td[mask].copy()
+        # ler em chunks para nao estourar memoria com CSV de 14MB
+        chunks = pd.read_csv(csv_url, sep=';', decimal=',', encoding='latin1', chunksize=5000)
+        df_renda = pd.DataFrame()
+        for chunk in chunks:
+            mask = (
+                chunk['Tipo Titulo'].str.contains('Renda', case=False, na=False) &
+                chunk['Data Vencimento'].str.contains('2050', na=False)
+            )
+            df_renda = pd.concat([df_renda, chunk[mask]])
+
         if df_renda.empty:
             return None
+
         df_renda['Data Base'] = pd.to_datetime(df_renda['Data Base'], format='%d/%m/%Y', errors='coerce')
         df_renda = df_renda.sort_values('Data Base', ascending=False)
-        # PU Venda Manha pode ser string com virgula decimal
         pu = df_renda.iloc[0]['PU Venda Manha']
         if isinstance(pu, str):
             pu = float(pu.replace('.', '').replace(',', '.'))
