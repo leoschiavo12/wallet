@@ -205,7 +205,7 @@ df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
 df_ativo = df.sort_values(by='Total Atual', ascending=False)
 
-aba_dash, aba_detalhe, aba_lanc, aba_aportes = st.tabs(["dashboard", "detalhe", "lancamentos", "simular novos aportes"])
+aba_dash, aba_detalhe, aba_lanc, aba_aportes = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes"])
 
 with aba_dash:
     st.metric("patrimonio total", formatar_brl(total_geral))
@@ -334,21 +334,15 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    df_display = df.copy()
-    df_display['preco_unit']  = df_display['preco_unit'].apply(formatar_brl)
-    df_display['Total Atual'] = df_display['Total Atual'].apply(formatar_brl)
-    df_display['Part. %']     = df_display['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
-    df_display['Qtd']         = df_display['Qtd'].apply(lambda x: f"{x:g}".replace('.', ','))
-
     config = {
         'Ativo':       st.column_config.TextColumn("ativo",          alignment="center"),
         'Classe':      st.column_config.TextColumn("classe",         alignment="center"),
-        'preco_unit':  st.column_config.TextColumn("preco unidade",  alignment="center"),
-        'Qtd':         st.column_config.TextColumn("qtd",            alignment="center"),
-        'Total Atual': st.column_config.TextColumn("total atual",    alignment="center"),
-        'Part. %':     st.column_config.TextColumn("part. %",        alignment="center"),
+        'preco_unit':  st.column_config.NumberColumn("preco unidade", format="R$ %.2f", alignment="center"),
+        'Qtd':         st.column_config.NumberColumn("qtd",           format="%.6g",    alignment="center"),
+        'Total Atual': st.column_config.NumberColumn("total atual",   format="R$ %.2f", alignment="center"),
+        'Part. %':     st.column_config.NumberColumn("part. %",       format="%.2f%%",  alignment="center"),
     }
-    st.dataframe(df_display, use_container_width=True, hide_index=True, column_config=config)
+    st.dataframe(df, use_container_width=True, hide_index=True, column_config=config)
 
 # ── Google Sheets helpers ─────────────────────────────────────────────────────
 def get_sheets_service():
@@ -491,13 +485,9 @@ with aba_lanc:
 
         nome_mes = meses_pt[mes_atual]
 
-        col_r1, col_r2, col_r3 = st.columns([1.4, 1, 0.7])
+        col_r1, col_r2 = st.columns(2)
         col_r1.metric(f"total aportado em {nome_mes}", formatar_brl(aporte_mes))
         col_r2.metric("media mensal (6m)", formatar_brl(media_6m))
-        with col_r3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("+ novo aporte", type="primary", use_container_width=True):
-                st.session_state["abrir_form_aporte"] = True
         st.markdown("---")
 
     # ── Formulario de novo lancamento ────────────────────────────────────────
