@@ -434,13 +434,15 @@ with aba_detalhe:
 
     if div_detalhe:
         df_div = pd.DataFrame([
-            {'ativo': t, 'qtd': v['qtd'],
+            {'ativo': t, 'qtd na data': round(v['qtd'], 2),
              'div/cota': formatar_brl(v['por_cota']),
-             'total': formatar_brl(v['total'])}
+             'total calc.': formatar_brl(v['total'])}
             for t, v in sorted(div_detalhe.items(), key=lambda x: -x[1]['total'])
         ])
         cfg_div = {c: st.column_config.TextColumn(c, alignment="center") for c in df_div.columns}
         st.dataframe(df_div, use_container_width=True, hide_index=True, column_config=cfg_div)
+    else:
+        st.caption("nenhum dividendo encontrado para o mês de referência")
 
     st.markdown("---")
 
