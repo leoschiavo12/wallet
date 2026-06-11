@@ -66,23 +66,43 @@ def obter_preco_renda_mais():
     try:
         from io import StringIO
         url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
-        # cada linha tem ~100 bytes, 50KB garante os ultimos ~500 registros
-        hdrs = {'Range': 'bytes=-50000'}
-        resp = requests.get(url, headers=hdrs, timeout=15)
+
+        # descobrir tamanho do arquivo
+        head = requests.head(url, timeout=10)
+        tamanho = int(head.headers.get('Content-Length', 0))
+        if tamanho == 0:
+            # fallback: baixar tudo (sem Range)
+            resp = requests.get(url, timeout=30)
+        else:
+            # Renda+ Aposentadoria Extra existe desde mar/2023
+            # ~800 dias * 100 bytes = ~80KB de dados desse titulo
+            # baixar os ultimos 500KB para garantir
+            inicio = max(0, tamanho - 500000)
+            hdrs = {'Range': f'bytes={inicio}-'}
+            resp = requests.get(url, headers=hdrs, timeout=15)
+
         if resp.status_code not in (200, 206):
             return None, f'status {resp.status_code}'
+
         texto = resp.content.decode('latin1')
         linhas = texto.split('\n')
-        # filtrar linhas do titulo certo
         renda = [l for l in linhas if 'Renda' in l and '2069' in l and len(l) > 10]
         if not renda:
-            return None, 'titulo nao encontrado nos ultimos 200KB'
-        # pegar a ultima linha (mais recente) e extrair PU Venda Manha (coluna 7)
-        ultima = renda[-1].split(';')
-        if len(ultima) < 7:
-            return None, f'formato inesperado: {ultima}'
-        pu_str = ultima[6].strip()  # PU Venda Manha
-        dt_str = ultima[2].strip()  # Data Base
+            return None, f'titulo nao encontrado — {len(linhas)} linhas baixadas'
+
+        # ordenar por data (coluna 2) e pegar a mais recente
+        def extrair_data(linha):
+            try:
+                partes = linha.split(';')
+                d, m, a = partes[2].strip().split('/')
+                return (int(a), int(m), int(d))
+            except:
+                return (0, 0, 0)
+
+        renda_ord = sorted(renda, key=extrair_data, reverse=True)
+        ultima = renda_ord[0].split(';')
+        pu_str = ultima[6].strip()
+        dt_str = ultima[2].strip()
         pu = float(pu_str.replace('.', '').replace(',', '.'))
         return pu, dt_str
     except Exception as e:
