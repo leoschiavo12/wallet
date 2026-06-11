@@ -210,21 +210,6 @@ aba_dash, aba_detalhe, aba_lanc, aba_aportes = st.tabs(["dashboard", "detalhe", 
 with aba_dash:
     st.metric("patrimonio total", formatar_brl(total_geral))
 
-    # aviso preco TD
-    for cls, ativos in MINHA_CARTEIRA.items():
-        for nome, v in ativos.items():
-            if isinstance(v, tuple):
-                if st.session_state.get('preco_renda_auto'):
-                    prc_td  = st.session_state['preco_renda_auto']
-                    data_td = st.session_state['data_renda_auto']
-                    st.caption(f"preco TD: **{nome}**: {formatar_brl(prc_td)} · {data_td} (automatico)")
-                else:
-                    prc_td  = preco_td_de_secrets(nome, v[1])
-                    data_td = data_td_de_secrets(nome)
-                    erro    = st.session_state.get('preco_renda_erro', '')
-                    msg     = f"atualizado em {data_td}" if data_td != "nao definida" else "atualize em Settings > Secrets"
-                    st.caption(f"preco TD: **{nome}**: {formatar_brl(prc_td)} · {msg}{' — ' + erro if erro else ''}")
-
     st.markdown('---')
 
     col_donut, col_barras = st.columns([1, 2])
@@ -349,16 +334,6 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    avisos = []
-    for cls, ativos in MINHA_CARTEIRA.items():
-        for nome, v in ativos.items():
-            if isinstance(v, tuple):
-                prc_atual  = preco_td_de_secrets(nome, v[1])
-                data_atual = data_td_de_secrets(nome)
-                avisos.append(f"**{nome}**: {formatar_brl(prc_atual)} · atualizado em {data_atual}")
-    if avisos:
-        st.caption("preco TD (atualize em Settings > Secrets): " + " · ".join(avisos))
-
     df_display = df.copy()
     df_display['preco_unit']  = df_display['preco_unit'].apply(formatar_brl)
     df_display['Total Atual'] = df_display['Total Atual'].apply(formatar_brl)
