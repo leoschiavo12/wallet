@@ -52,32 +52,12 @@ def obter_preco_btc_brl():
 
 def obter_preco_renda_mais():
     try:
-        # Tesouro Renda+ 2050 via Yahoo Finance
         dados = yf.download("BRENDS2050.SA", period="5d", progress=False, auto_adjust=True, timeout=7)
         if not dados.empty:
             preco = float(dados['Close'].ffill().iloc[-1])
             data  = dados.index[-1].strftime('%d/%m/%Y')
             return preco, data
-    except Exception:
-        pass
-    # fallback: API Tesouro Transparente (lenta, ultimo recurso)
-    try:
-        csv_url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
-        df_td = pd.read_csv(csv_url, sep=';', decimal=',', encoding='latin1')
-        mask = (
-            df_td['Tipo Titulo'].str.contains('Renda', case=False, na=False) &
-            df_td['Data Vencimento'].str.contains('2050', na=False)
-        )
-        df_renda = df_td[mask].copy()
-        if df_renda.empty:
-            return None, 'titulo nao encontrado'
-        df_renda['Data Base'] = pd.to_datetime(df_renda['Data Base'], format='%d/%m/%Y', errors='coerce')
-        df_renda = df_renda.sort_values('Data Base', ascending=False)
-        pu = df_renda.iloc[0]['PU Venda Manha']
-        if isinstance(pu, str):
-            pu = float(pu.replace('.', '').replace(',', '.'))
-        data = df_renda.iloc[0]['Data Base'].strftime('%d/%m/%Y')
-        return float(pu), data
+        return None, 'ticker BRENDS2050.SA nao encontrado'
     except Exception as e:
         return None, str(e)
 
@@ -130,7 +110,7 @@ def data_td_de_secrets(nome):
     except:
         return "nao definida"
 
-@st.cache_data(ttl=0)
+@st.cache_data(ttl=3600)
 def obter_preco_renda_mais_cached():
     return obter_preco_renda_mais()
 
