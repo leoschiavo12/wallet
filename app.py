@@ -39,6 +39,38 @@ def obter_precos_b3(tickers_lista):
     except:
         return {t.upper(): 100.0 for t in tickers_lista}
 
+@st.cache_data(ttl=3600)
+def obter_dividendos_ultimo_mes(tickers_fii):
+    from datetime import date
+    hoje   = date.today()
+    mes    = hoje.month
+    ano    = hoje.year
+    total  = 0.0
+    detalhes = {}
+    for t, qtd in tickers_fii.items():
+        try:
+            tk   = yf.Ticker(f"{t}.SA")
+            divs = tk.dividends
+            if divs.empty:
+                continue
+            # filtrar dividendos do mes atual
+            mask = (divs.index.month == mes) & (divs.index.year == ano)
+            divs_mes = divs[mask]
+            if divs_mes.empty:
+                # tentar mes anterior (alguns pagam no inicio do mes seguinte)
+                mes_ant = mes - 1 if mes > 1 else 12
+                ano_ant = ano if mes > 1 else ano - 1
+                mask = (divs.index.month == mes_ant) & (divs.index.year == ano_ant)
+                divs_mes = divs[mask]
+            if not divs_mes.empty:
+                val_cota = float(divs_mes.sum())
+                val_total = val_cota * qtd
+                detalhes[t] = {'por_cota': val_cota, 'total': val_total, 'qtd': qtd}
+                total += val_total
+        except:
+            continue
+    return total, detalhes
+
 def obter_preco_btc_brl():
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=brl"
@@ -334,6 +366,31 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
+    # dividendos do ultimo mes
+    fiis_carteira = {t: int(v) for t, v in MINHA_CARTEIRA.get('FII', {}).items()}
+    div_total, div_detalhe = obter_dividendos_ultimo_mes(fiis_carteira)
+
+    from datetime import date as _d
+    hoje_d = _d.today()
+    mes_ref = hoje_d.month
+    ano_ref = hoje_d.year
+    meses_pt2 = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
+                 7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
+
+    st.metric(f"dividendos FIIs — {meses_pt2[mes_ref]}/{ano_ref}", formatar_brl(div_total))
+
+    if div_detalhe:
+        df_div = pd.DataFrame([
+            {'ativo': t, 'qtd': v['qtd'],
+             'div/cota': formatar_brl(v['por_cota']),
+             'total': formatar_brl(v['total'])}
+            for t, v in sorted(div_detalhe.items(), key=lambda x: -x[1]['total'])
+        ])
+        cfg_div = {c: st.column_config.TextColumn(c, alignment="center") for c in df_div.columns}
+        st.dataframe(df_div, use_container_width=True, hide_index=True, column_config=cfg_div)
+
+    st.markdown("---")
+
     config = {
         'Ativo':       st.column_config.TextColumn("ativo",          alignment="center"),
         'Classe':      st.column_config.TextColumn("classe",         alignment="center"),
