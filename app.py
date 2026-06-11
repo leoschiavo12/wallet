@@ -64,14 +64,27 @@ def obter_preco_btc_brl():
 
 def obter_preco_renda_mais():
     try:
-        resp = requests.get("https://api.radaropcoes.com/bonds.json", timeout=10)
-        titulos = resp.json()['response']['TrsrBdTradgList']
-        for bond in titulos:
-            nm = bond['TrsrBd']['nm']
-            if 'Renda' in nm and '2050' in nm:
-                pu = float(bond['TrsrBd']['untrRedVal'])  # preco de resgate/venda
-                return pu, date.today().strftime('%d/%m/%Y')
-        return None, 'titulo Renda+ 2050 nao encontrado'
+        from io import StringIO
+        url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
+        # baixar apenas os ultimos 200KB — Renda+ 2069 so existe desde 2023, fica no final
+        hdrs = {'Range': 'bytes=-200000'}
+        resp = requests.get(url, headers=hdrs, timeout=15)
+        if resp.status_code not in (200, 206):
+            return None, f'status {resp.status_code}'
+        texto = resp.content.decode('latin1')
+        linhas = texto.split('\n')
+        # filtrar linhas do titulo certo
+        renda = [l for l in linhas if 'Renda' in l and '2069' in l and len(l) > 10]
+        if not renda:
+            return None, 'titulo nao encontrado nos ultimos 200KB'
+        # pegar a ultima linha (mais recente) e extrair PU Venda Manha (coluna 7)
+        ultima = renda[-1].split(';')
+        if len(ultima) < 7:
+            return None, f'formato inesperado: {ultima}'
+        pu_str = ultima[6].strip()  # PU Venda Manha
+        dt_str = ultima[2].strip()  # Data Base
+        pu = float(pu_str.replace('.', '').replace(',', '.'))
+        return pu, dt_str
     except Exception as e:
         return None, str(e)
 
@@ -153,7 +166,7 @@ for cls, ativos in MINHA_CARTEIRA.items():
                     st.session_state['data_renda_auto']  = resultado_api[1]
                 else:
                     prc = preco_td_de_secrets(t, v[1])
-                    st.session_state['preco_renda_erro'] = resultado_api[1] if resultado_api else 'None'
+                    st.session_state['preco_renda_erro'] = resultado_api[1] if resultado_api else ''
             else:
                 prc = preco_td_de_secrets(t, v[1])
         else:
@@ -185,7 +198,8 @@ with aba_dash:
                     prc_td  = preco_td_de_secrets(nome, v[1])
                     data_td = data_td_de_secrets(nome)
                     erro    = st.session_state.get('preco_renda_erro', '')
-                    st.caption(f"preco TD: **{nome}**: {formatar_brl(prc_td)} · {data_td} — {erro}")
+                    msg     = f"atualizado em {data_td}" if data_td != "nao definida" else "atualize em Settings > Secrets"
+                    st.caption(f"preco TD: **{nome}**: {formatar_brl(prc_td)} · {msg}{' — ' + erro if erro else ''}")
 
     st.markdown('---')
 
