@@ -183,14 +183,16 @@ for cls, ativos in MINHA_CARTEIRA.items():
         if isinstance(v, tuple):
             q = v[0]
             if 'Renda' in t:
-                resultado_api = obter_preco_renda_mais_cached()
-                if resultado_api and resultado_api[0]:
-                    prc = resultado_api[0]
-                    st.session_state['preco_renda_auto'] = resultado_api[0]
-                    st.session_state['data_renda_auto']  = resultado_api[1]
-                else:
-                    prc = preco_td_de_secrets(t, v[1])
-                    st.session_state['preco_renda_erro'] = resultado_api[1] if resultado_api else ''
+                # buscar preco so se ainda nao estiver no session_state
+                if 'preco_renda_auto' not in st.session_state:
+                    resultado_api = obter_preco_renda_mais_cached()
+                    if resultado_api and resultado_api[0]:
+                        st.session_state['preco_renda_auto'] = resultado_api[0]
+                        st.session_state['data_renda_auto']  = resultado_api[1]
+                    else:
+                        st.session_state['preco_renda_auto'] = None
+                        st.session_state['preco_renda_erro'] = resultado_api[1] if resultado_api else ''
+                prc = st.session_state.get('preco_renda_auto') or preco_td_de_secrets(t, v[1])
             else:
                 prc = preco_td_de_secrets(t, v[1])
         else:
