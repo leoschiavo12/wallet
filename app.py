@@ -67,38 +67,48 @@ def obter_preco_renda_mais():
         from io import StringIO
         url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
 
-        # descobrir tamanho do arquivo
+        # descobrir tamanho e baixar ultimos 500KB
         head = requests.head(url, timeout=10)
         tamanho = int(head.headers.get('Content-Length', 0))
-        if tamanho == 0:
-            # fallback: baixar tudo (sem Range)
-            resp = requests.get(url, timeout=30)
-        else:
-            # Renda+ Aposentadoria Extra existe desde mar/2023
-            # ~800 dias * 100 bytes = ~80KB de dados desse titulo
-            # baixar os ultimos 500KB para garantir
+        if tamanho > 0:
             inicio = max(0, tamanho - 500000)
-            hdrs = {'Range': f'bytes={inicio}-'}
-            resp = requests.get(url, headers=hdrs, timeout=15)
+            resp = requests.get(url, headers={'Range': f'bytes={inicio}-'}, timeout=15)
+        else:
+            resp = requests.get(url, timeout=30)
 
         if resp.status_code not in (200, 206):
             return None, f'status {resp.status_code}'
 
         texto = resp.content.decode('latin1')
         linhas = texto.split('\n')
-        renda = [l for l in linhas if 'Renda' in l and '2069' in l and len(l) > 10]
-        if not renda:
-            return None, f'titulo nao encontrado — {len(linhas)} linhas baixadas'
 
-        # debug: mostrar todas as datas encontradas
-        datas = []
-        for l in renda:
-            try:
-                datas.append(l.split(';')[2].strip())
-            except:
-                pass
-        datas_sorted = sorted(set(datas))
-        return None, f'{len(renda)} registros encontrados, datas: {datas_sorted[-5:]}'
+        # montar cabecalho e filtrar linhas relevantes
+        cabecalho = 'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha'
+        renda = [l for l in linhas if 'Renda' in l and '2069' in l and len(l) > 10]
+
+        if not renda:
+            return None, f'nao encontrado — {len(linhas)} linhas no trecho'
+
+        # parsear com pandas para filtrar corretamente
+        csv_str = cabecalho + '\n' + '\n'.join(renda)
+        df = pd.read_csv(StringIO(csv_str), sep=';', decimal=',')
+        df['Data Base'] = pd.to_datetime(df['Data Base'], format='%d/%m/%Y', errors='coerce')
+
+        # filtrar: titulo contem Renda, vencimento contem 2069
+        mask = (
+            df['Tipo Titulo'].str.contains('Renda', case=False, na=False) &
+            df['Data Vencimento'].str.contains('2069', na=False)
+        )
+        df_f = df[mask].sort_values('Data Base', ascending=False)
+
+        if df_f.empty:
+            return None, f'nenhum registro apos filtro — datas: {df["Data Base"].dt.strftime("%d/%m/%Y").tolist()[-3:]}'
+
+        pu  = float(df_f.iloc[0]['PU Venda Manha'])
+        dt  = df_f.iloc[0]['Data Base'].strftime('%d/%m/%Y')
+        return pu, dt
+    except Exception as e:
+        return None, str(e)
     except Exception as e:
         return None, str(e)
 
@@ -151,7 +161,7 @@ def data_td_de_secrets(nome):
     except:
         return "nao definida"
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=0)
 def obter_preco_renda_mais_cached():
     return obter_preco_renda_mais()
 
