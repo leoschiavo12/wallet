@@ -52,36 +52,32 @@ def obter_preco_btc_brl():
 
 def obter_preco_renda_mais():
     try:
+        # Tesouro Renda+ 2050 via Yahoo Finance
+        dados = yf.download("BRENDS2050.SA", period="5d", progress=False, auto_adjust=True, timeout=7)
+        if not dados.empty:
+            preco = float(dados['Close'].ffill().iloc[-1])
+            data  = dados.index[-1].strftime('%d/%m/%Y')
+            return preco, data
+    except Exception:
+        pass
+    # fallback: API Tesouro Transparente (lenta, ultimo recurso)
+    try:
         csv_url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
-        # Buscar apenas os ultimos 500KB do CSV (ultima ~3000 linhas, suficiente para pegar hoje)
-        headers = {'Range': 'bytes=-500000'}
-        resp = requests.get(csv_url, headers=headers, timeout=15)
-        from io import StringIO
-        # decodificar e ignorar primeira linha incompleta
-        texto = resp.content.decode('latin1')
-        linhas = texto.split('\n')
-        # remover primeira linha (pode estar incompleta pelo Range)
-        csv_limpo = '\n'.join(linhas[1:])
-        df_td = pd.read_csv(StringIO(csv_limpo), sep=';', decimal=',',
-                            names=['Tipo Titulo','Data Vencimento','Data Base',
-                                   'Taxa Compra Manha','Taxa Venda Manha',
-                                   'PU Compra Manha','PU Venda Manha','PU Base Manha'])
+        df_td = pd.read_csv(csv_url, sep=';', decimal=',', encoding='latin1')
         mask = (
             df_td['Tipo Titulo'].str.contains('Renda', case=False, na=False) &
             df_td['Data Vencimento'].str.contains('2050', na=False)
         )
         df_renda = df_td[mask].copy()
         if df_renda.empty:
-            return None, 'titulo nao encontrado no trecho final do CSV'
+            return None, 'titulo nao encontrado'
         df_renda['Data Base'] = pd.to_datetime(df_renda['Data Base'], format='%d/%m/%Y', errors='coerce')
         df_renda = df_renda.sort_values('Data Base', ascending=False)
         pu = df_renda.iloc[0]['PU Venda Manha']
         if isinstance(pu, str):
             pu = float(pu.replace('.', '').replace(',', '.'))
-        else:
-            pu = float(pu)
         data = df_renda.iloc[0]['Data Base'].strftime('%d/%m/%Y')
-        return pu, data
+        return float(pu), data
     except Exception as e:
         return None, str(e)
 
