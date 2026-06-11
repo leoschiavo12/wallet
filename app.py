@@ -40,35 +40,60 @@ def obter_precos_b3(tickers_lista):
         return {t.upper(): 100.0 for t in tickers_lista}
 
 @st.cache_data(ttl=3600)
-def obter_dividendos_ultimo_mes(tickers_fii):
+def obter_dividendos_mes_anterior(df_lancamentos_json):
+    import pandas as pd
     from datetime import date
-    hoje   = date.today()
-    mes    = hoje.month
-    ano    = hoje.year
-    total  = 0.0
+    hoje    = date.today()
+    # mês de referência = mês anterior
+    if hoje.month == 1:
+        mes_ref, ano_ref = 12, hoje.year - 1
+    else:
+        mes_ref, ano_ref = hoje.month - 1, hoje.year
+
+    # reconstruir df de lançamentos
+    df_lanc = pd.DataFrame(df_lancamentos_json)
+    if df_lanc.empty:
+        return 0.0, {}
+    df_lanc['data_dt'] = pd.to_datetime(df_lanc['data'], format='%d/%m/%Y', errors='coerce')
+    df_lanc['sinal']   = df_lanc['tipo'].map({'compra': 1, 'venda': -1}).fillna(0)
+
+    total    = 0.0
     detalhes = {}
-    for t, qtd in tickers_fii.items():
+
+    fiis = [t for t in df_lanc[df_lanc['Classe'] == 'FII']['Ativo'].unique()]
+
+    for fii in fiis:
         try:
-            tk   = yf.Ticker(f"{t}.SA")
+            tk   = yf.Ticker(f"{fii}.SA")
             divs = tk.dividends
             if divs.empty:
                 continue
-            # filtrar dividendos do mes atual
-            mask = (divs.index.month == mes) & (divs.index.year == ano)
+
+            # filtrar dividendos do mes de referencia
+            divs.index = divs.index.tz_localize(None) if divs.index.tzinfo else divs.index
+            mask = (divs.index.month == mes_ref) & (divs.index.year == ano_ref)
             divs_mes = divs[mask]
             if divs_mes.empty:
-                # tentar mes anterior (alguns pagam no inicio do mes seguinte)
-                mes_ant = mes - 1 if mes > 1 else 12
-                ano_ant = ano if mes > 1 else ano - 1
-                mask = (divs.index.month == mes_ant) & (divs.index.year == ano_ant)
-                divs_mes = divs[mask]
-            if not divs_mes.empty:
-                val_cota = float(divs_mes.sum())
-                val_total = val_cota * qtd
-                detalhes[t] = {'por_cota': val_cota, 'total': val_total, 'qtd': qtd}
-                total += val_total
+                continue
+
+            # para cada pagamento, calcular qtd na data com (data do dividendo)
+            for data_div, val_cota in divs_mes.items():
+                # qtd na data = soma de compras - vendas até a data do dividendo
+                ops = df_lanc[
+                    (df_lanc['Ativo'] == fii) &
+                    (df_lanc['data_dt'] <= data_div)
+                ]
+                qtd_na_data = (ops['quantidade'] * ops['sinal']).sum()
+                if qtd_na_data > 0:
+                    val_total = float(val_cota) * qtd_na_data
+                    if fii not in detalhes:
+                        detalhes[fii] = {'por_cota': 0.0, 'total': 0.0, 'qtd': qtd_na_data}
+                    detalhes[fii]['por_cota'] += float(val_cota)
+                    detalhes[fii]['total']    += val_total
+                    total += val_total
         except:
             continue
+
     return total, detalhes
 
 def obter_preco_btc_brl():
@@ -367,15 +392,16 @@ with aba_dash:
 
 with aba_detalhe:
     # dividendos do ultimo mes
-    fiis_carteira = {t: int(v) for t, v in MINHA_CARTEIRA.get('FII', {}).items()}
-    div_total, div_detalhe = obter_dividendos_ultimo_mes(fiis_carteira)
-
     from datetime import date as _d
-    hoje_d = _d.today()
-    mes_ref = hoje_d.month
-    ano_ref = hoje_d.year
+    hoje_d  = _d.today()
+    mes_ref = hoje_d.month - 1 if hoje_d.month > 1 else 12
+    ano_ref = hoje_d.year if hoje_d.month > 1 else hoje_d.year - 1
     meses_pt2 = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
                  7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
+
+    # passar lancamentos como json para o cache funcionar corretamente
+    df_lanc_aba = ler_lancamentos()
+    div_total, div_detalhe = obter_dividendos_mes_anterior(df_lanc_aba.to_dict(orient='records') if not df_lanc_aba.empty else [])
 
     st.metric(f"dividendos FIIs — {meses_pt2[mes_ref]}/{ano_ref}", formatar_brl(div_total))
 
