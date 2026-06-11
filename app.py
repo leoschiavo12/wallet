@@ -74,14 +74,13 @@ def obter_preco_renda_mais():
         url  = 'https://statusinvest.com.br/tesouro/tesouro-renda-aposentadoria-extra-2050'
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code == 200:
-            # padrao: "VALOR DE **VENDA**\n\nValor Unitário R$ **472,92**"
-            match = re.search(r'VALOR DE \*\*VENDA\*\*.*?R\$\s*\*\*([\d\.]+,[\d]{2})\*\*', resp.text, re.DOTALL)
-            if match:
-                pu = float(match.group(1).replace('.', '').replace(',', '.'))
-                return pu, date.today().strftime('%d/%m/%Y')
-    except Exception:
-        pass
-    return None, 'webscraping falhou'
+            # debug: extrair trecho ao redor de "venda" e numeros
+            idx = resp.text.lower().find('venda')
+            trecho = resp.text[idx:idx+300] if idx > 0 else resp.text[:500]
+            return None, f'STATUS200 trecho: {repr(trecho[:200])}'
+        return None, f'status {resp.status_code}'
+    except Exception as e:
+        return None, str(e)
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
