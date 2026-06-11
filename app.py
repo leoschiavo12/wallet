@@ -51,20 +51,25 @@ def obter_preco_btc_brl():
     return 0.0
 
 def obter_preco_renda_mais():
-    import concurrent.futures
-    def _buscar():
-        dados = yf.download("BRENDS2050.SA", period="5d", progress=False, auto_adjust=True)
-        if not dados.empty:
-            preco = float(dados['Close'].ffill().iloc[-1])
-            data  = dados.index[-1].strftime('%d/%m/%Y')
-            return preco, data
-        return None, 'ticker nao encontrado'
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            fut = ex.submit(_buscar)
-            return fut.result(timeout=8)
-    except concurrent.futures.TimeoutError:
-        return None, 'timeout apos 8s'
+        # datastore_search: filtra direto no servidor, sem baixar CSV inteiro
+        url = (
+            "https://www.tesourotransparente.gov.br/ckan/api/3/action/datastore_search"
+            "?resource_id=796d2059-14e9-44e3-80c9-2d9e30b405c1"
+            "&filters={"Tipo%20Titulo":"Tesouro%20Renda+%202050"}"
+            "&limit=1"
+            "&sort=Data%20Base%20desc"
+        )
+        resp = requests.get(url, timeout=10)
+        data = resp.json()
+        records = data['result']['records']
+        if not records:
+            return None, 'nenhum registro encontrado'
+        pu  = records[0]['PU Venda Manha']
+        dt  = records[0]['Data Base']
+        if isinstance(pu, str):
+            pu = float(pu.replace('.', '').replace(',', '.'))
+        return float(pu), str(dt)[:10]
     except Exception as e:
         return None, str(e)
 
