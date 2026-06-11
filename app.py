@@ -262,6 +262,18 @@ df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
 df_ativo = df.sort_values(by='Total Atual', ascending=False)
 
+# ── Google Sheets helpers ─────────────────────────────────────────────────────
+def get_sheets_service():
+    creds = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    return build("sheets", "v4", credentials=creds).spreadsheets()
+
+SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
+SHEET_TAB = "lancamentos"
+HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
+
 aba_dash, aba_detalhe, aba_lanc, aba_aportes = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes"])
 
 with aba_dash:
@@ -400,8 +412,23 @@ with aba_detalhe:
                  7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
 
     # passar lancamentos como json para o cache funcionar corretamente
-    df_lanc_aba = ler_lancamentos()
-    div_total, div_detalhe = obter_dividendos_mes_anterior(df_lanc_aba.to_dict(orient='records') if not df_lanc_aba.empty else [])
+    try:
+        _svc  = get_sheets_service()
+        _res  = _svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
+        _rows = _res.get("values", [])
+        _hdrs = ["data","tipo","Ativo","Classe","quantidade","preco_unitario","total"]
+        if len(_rows) > 1:
+            _n = len(_hdrs)
+            _padded = [(r + [''] * _n)[:_n] for r in _rows[1:]]
+            _df_tmp = pd.DataFrame(_padded, columns=_hdrs)
+            for col in ["quantidade","total"]:
+                _df_tmp[col] = pd.to_numeric(_df_tmp[col], errors='coerce').fillna(0)
+            _lanc_json = _df_tmp.to_dict(orient='records')
+        else:
+            _lanc_json = []
+    except:
+        _lanc_json = []
+    div_total, div_detalhe = obter_dividendos_mes_anterior(_lanc_json)
 
     st.metric(f"dividendos FIIs — {meses_pt2[mes_ref]}/{ano_ref}", formatar_brl(div_total))
 
@@ -427,17 +454,7 @@ with aba_detalhe:
     }
     st.dataframe(df, use_container_width=True, hide_index=True, column_config=config)
 
-# ── Google Sheets helpers ─────────────────────────────────────────────────────
-def get_sheets_service():
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
-    )
-    return build("sheets", "v4", credentials=creds).spreadsheets()
-
-SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
-SHEET_TAB = "lancamentos"
-HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
+# ── Google Sheets helpers movidos para antes das abas ──
 
 @st.cache_data(ttl=0)
 def ler_lancamentos():
