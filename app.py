@@ -52,21 +52,21 @@ def obter_preco_btc_brl():
 
 def obter_preco_renda_mais():
     try:
-        # datastore_search: filtra direto no servidor, sem baixar CSV inteiro
-        url = (
-            "https://www.tesourotransparente.gov.br/ckan/api/3/action/datastore_search"
-            "?resource_id=796d2059-14e9-44e3-80c9-2d9e30b405c1"
-            "&filters={"Tipo%20Titulo":"Tesouro%20Renda+%202050"}"
-            "&limit=1"
-            "&sort=Data%20Base%20desc"
-        )
+        import urllib.parse
+        params = {
+            'resource_id': '796d2059-14e9-44e3-80c9-2d9e30b405c1',
+            'filters': '{"Tipo Titulo":"Tesouro RendA+ 2050"}',
+            'limit': 1,
+            'sort': 'Data Base desc'
+        }
+        url = 'https://www.tesourotransparente.gov.br/ckan/api/3/action/datastore_search?' + urllib.parse.urlencode(params)
         resp = requests.get(url, timeout=10)
         data = resp.json()
         records = data['result']['records']
         if not records:
             return None, 'nenhum registro encontrado'
-        pu  = records[0]['PU Venda Manha']
-        dt  = records[0]['Data Base']
+        pu = records[0]['PU Venda Manha']
+        dt = records[0]['Data Base']
         if isinstance(pu, str):
             pu = float(pu.replace('.', '').replace(',', '.'))
         return float(pu), str(dt)[:10]
