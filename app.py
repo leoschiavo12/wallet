@@ -65,19 +65,19 @@ def obter_preco_btc_brl():
 def obter_preco_renda_mais():
     try:
         token = st.secrets["brapi"]["token"]
-        url = f"https://brapi.dev/api/v2/treasury?search=Renda%2B+2050&token={token}"
-        resp = requests.get(url, timeout=10)
+        url  = "https://brapi.dev/api/v2/treasury?search=Renda%2B+2050"
+        hdrs = {"Authorization": f"Bearer {token}"}
+        resp = requests.get(url, headers=hdrs, timeout=10)
         data = resp.json()
         titulos = data.get('treasuries', [])
         if not titulos:
-            return None, 'nenhum titulo encontrado na brapi'
-        # pegar o mais recente
-        t = titulos[0]
+            return None, f'nenhum titulo — resposta: {str(data)[:200]}'
+        t    = titulos[0]
         pu   = float(t.get('sellPrice') or t.get('price') or 0)
-        data_str = t.get('date', '')[:10]
+        data_str = str(t.get('date', ''))[:10]
         if pu > 0:
             return pu, data_str
-        return None, f'campo price vazio: {t}'
+        return None, f'price zerado: {t}'
     except Exception as e:
         return None, str(e)
 
