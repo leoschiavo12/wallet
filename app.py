@@ -90,21 +90,15 @@ def obter_preco_renda_mais():
         if not renda:
             return None, f'titulo nao encontrado — {len(linhas)} linhas baixadas'
 
-        # ordenar por data (coluna 2) e pegar a mais recente
-        def extrair_data(linha):
+        # debug: mostrar todas as datas encontradas
+        datas = []
+        for l in renda:
             try:
-                partes = linha.split(';')
-                d, m, a = partes[2].strip().split('/')
-                return (int(a), int(m), int(d))
+                datas.append(l.split(';')[2].strip())
             except:
-                return (0, 0, 0)
-
-        renda_ord = sorted(renda, key=extrair_data, reverse=True)
-        ultima = renda_ord[0].split(';')
-        pu_str = ultima[6].strip()
-        dt_str = ultima[2].strip()
-        pu = float(pu_str.replace('.', '').replace(',', '.'))
-        return pu, dt_str
+                pass
+        datas_sorted = sorted(set(datas))
+        return None, f'{len(renda)} registros encontrados, datas: {datas_sorted[-5:]}'
     except Exception as e:
         return None, str(e)
 
