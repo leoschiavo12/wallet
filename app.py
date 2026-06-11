@@ -127,7 +127,7 @@ def data_td_de_secrets(nome):
     except:
         return "nao definida"
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=0)
 def obter_preco_renda_mais_cached():
     return obter_preco_renda_mais()
 
