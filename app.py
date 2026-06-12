@@ -73,10 +73,8 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
                 continue
             divs.index = divs.index.tz_localize(None) if divs.index.tzinfo else divs.index
 
-            # filtrar dividendos cujo pagamento ocorreu no mes_ref
-            # yfinance registra a data ex-dividend — pagamento tipicamente e
-            # no mesmo mes ou mes seguinte ao ex-dividend
-            # estrategia: pegar entradas de mes_ref e mes_ref-1 e verificar ambas
+            # yfinance pode registrar na data ex (mes anterior) ou pagamento (mes ref)
+            # buscar nos dois meses e usar o mais recente por ativo
             mes_ant = mes_ref - 1 if mes_ref > 1 else 12
             ano_ant = ano_ref if mes_ref > 1 else ano_ref - 1
             mask = (
@@ -86,6 +84,10 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
             divs_ex = divs[mask]
             if divs_ex.empty:
                 continue
+            # se tiver em ambos os meses, usar apenas o do mes_ref (evita duplicar)
+            mask_ref = (divs_ex.index.month == mes_ref) & (divs_ex.index.year == ano_ref)
+            if mask_ref.any():
+                divs_ex = divs_ex[mask_ref]
 
             alias_inv = {v: k for k, v in ALIAS.items()}
             nomes = [fii, fii_norm] + ([alias_inv[fii_norm]] if fii_norm in alias_inv else [])
