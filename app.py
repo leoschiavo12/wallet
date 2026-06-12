@@ -424,7 +424,9 @@ with aba_detalhe:
         if row['Ativo'] == 'BTC':
             v = row['preco_unit']
             return f"R$ {v/1000:.1f}k".replace('.', ',')
-        return f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
+        v = row['preco_unit']
+        s = f"{v:,.2f}".replace(',','X').replace('.',',').replace('X','.')
+        return f"R$ {s}" 
 
     # formatar qtd: BTC com 4 decimais, outros sem decimais desnecessarias
     def fmt_qtd(row):
@@ -443,20 +445,15 @@ with aba_detalhe:
         lambda x: f"{x:.2f}%".replace('.', ','))
 
     config = {
-        'Ativo':       st.column_config.TextColumn("ativo",          alignment="center"),
-        'Classe':      st.column_config.TextColumn("classe",         alignment="center"),
-        'preco_fmt':   st.column_config.TextColumn("preço unidade",  alignment="center"),
-        'qtd_fmt':     st.column_config.TextColumn("qtd",            alignment="center"),
-        'total_fmt':   st.column_config.TextColumn("total atual",    alignment="center"),
-        'part_fmt':    st.column_config.TextColumn("part. %",        alignment="center"),
-        'preco_unit':  None,
-        'Qtd':         None,
-        'Total Atual': None,
-        'Part. %':     None,
+        'Ativo':       st.column_config.TextColumn("ativo",       alignment="center"),
+        'Classe':      st.column_config.TextColumn("classe",      alignment="center"),
+        'preco_unit':  st.column_config.NumberColumn("preço atual",  format="R$ %.2f", alignment="center"),
+        'Qtd':         st.column_config.NumberColumn("qtd",          format="%.4g",    alignment="center"),
+        'Total Atual': st.column_config.NumberColumn("total atual",  format="R$ %d",   alignment="center"),
+        'Part. %':     st.column_config.NumberColumn("part. %",      format="%.2f%%",  alignment="center"),
     }
-    # usar df numérico para sort funcionar — exibir colunas fmt mas manter originais ocultas
-    # st.dataframe com column_config None oculta a coluna mas mantém sort pelo valor original
-    st.dataframe(df_view, use_container_width=True, hide_index=True, column_config=config)
+    st.dataframe(df[['Ativo','Classe','preco_unit','Qtd','Total Atual','Part. %']],
+                 use_container_width=True, hide_index=True, column_config=config)
 
     st.markdown("---")
 
