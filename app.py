@@ -53,36 +53,29 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
     df_lanc = pd.DataFrame(df_lancamentos_json)
     if df_lanc.empty:
         return 0.0, {}
-    df_lanc['data_dt'] = pd.to_datetime(df_lanc['data'], format='%d/%m/%Y', errors='coerce')
-    df_lanc['sinal']   = df_lanc['tipo'].map({'compra': 1, 'venda': -1}).fillna(0)
+    # normalizar nomes de colunas
+    df_lanc.columns = [c.title() for c in df_lanc.columns]
+    df_lanc['data_dt'] = pd.to_datetime(df_lanc['Data'], format='%d/%m/%Y', errors='coerce')
+    df_lanc['sinal']   = df_lanc['Tipo'].str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
 
     total    = 0.0
     detalhes = {}
     ALIAS    = {'GALG11': 'GARE11'}
 
-    fiis = list(df_lanc[df_lanc['Classe'] == 'FII']['Ativo'].unique())
+    # Classe vem como 'FII' do Sheets — após title() fica 'Fii'
+    fiis = list(df_lanc[df_lanc['Classe'].str.upper() == 'FII']['Ativo'].unique())
 
     for fii in fiis:
         fii_norm = ALIAS.get(fii, fii)
         try:
             tk = yf.Ticker(f"{fii_norm}.SA")
-            # actions traz data ex-dividend (quando o yfinance registra o dividendo)
-            # que tipicamente e o mes anterior ao pagamento
             divs = tk.dividends
             if divs is None or divs.empty:
                 continue
             divs.index = divs.index.tz_localize(None) if divs.index.tzinfo else divs.index
 
-            # filtrar dividendos cujo pagamento ocorreu no mes_ref
-            # yfinance registra a data ex-dividend — pagamento tipicamente e
-            # no mesmo mes ou mes seguinte ao ex-dividend
-            # estrategia: pegar entradas de mes_ref e mes_ref-1 e verificar ambas
-            mes_ant = mes_ref - 1 if mes_ref > 1 else 12
-            ano_ant = ano_ref if mes_ref > 1 else ano_ref - 1
-            mask = (
-                ((divs.index.month == mes_ref) & (divs.index.year == ano_ref)) |
-                ((divs.index.month == mes_ant) & (divs.index.year == ano_ant))
-            )
+            # filtrar pelo mes de referencia apenas
+            mask   = (divs.index.month == mes_ref) & (divs.index.year == ano_ref)
             divs_ex = divs[mask]
             if divs_ex.empty:
                 continue
@@ -91,12 +84,11 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
             nomes = [fii, fii_norm] + ([alias_inv[fii_norm]] if fii_norm in alias_inv else [])
 
             for data_ex, val_cota in divs_ex.items():
-                # quantidade na data ex-dividend
                 ops = df_lanc[
                     (df_lanc['Ativo'].isin(nomes)) &
                     (df_lanc['data_dt'] <= data_ex)
                 ]
-                qtd_na_data = (ops['quantidade'] * ops['sinal']).sum()
+                qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
                 if qtd_na_data > 0:
                     val_total = float(val_cota) * qtd_na_data
                     if fii_norm not in detalhes:
