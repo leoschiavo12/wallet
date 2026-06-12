@@ -448,7 +448,7 @@ with aba_detalhe:
     if div_detalhe:
         df_div = pd.DataFrame([
             {'ativo': t, 'qtd na data': round(v['qtd'], 2),
-             'div/cota': formatar_brl(v['por_cota']),
+             'div/cota': f"R$ {v['por_cota']:.4f}".replace('.', ','),
              'total calc.': formatar_brl(v['total'])}
             for t, v in sorted(div_detalhe.items(), key=lambda x: -x[1]['total'])
         ])
