@@ -73,8 +73,10 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
                 continue
             divs.index = divs.index.tz_localize(None) if divs.index.tzinfo else divs.index
 
-            # yfinance pode registrar na data ex (mes anterior) ou pagamento (mes ref)
-            # buscar nos dois meses e usar o mais recente por ativo
+            # filtrar dividendos cujo pagamento ocorreu no mes_ref
+            # yfinance registra a data ex-dividend — pagamento tipicamente e
+            # no mesmo mes ou mes seguinte ao ex-dividend
+            # estrategia: pegar entradas de mes_ref e mes_ref-1 e verificar ambas
             mes_ant = mes_ref - 1 if mes_ref > 1 else 12
             ano_ant = ano_ref if mes_ref > 1 else ano_ref - 1
             mask = (
@@ -84,10 +86,6 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
             divs_ex = divs[mask]
             if divs_ex.empty:
                 continue
-            # se tiver em ambos os meses, usar apenas o do mes_ref (evita duplicar)
-            mask_ref = (divs_ex.index.month == mes_ref) & (divs_ex.index.year == ano_ref)
-            if mask_ref.any():
-                divs_ex = divs_ex[mask_ref]
 
             alias_inv = {v: k for k, v in ALIAS.items()}
             nomes = [fii, fii_norm] + ([alias_inv[fii_norm]] if fii_norm in alias_inv else [])
@@ -418,7 +416,51 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    # dividendos do ultimo mes
+    # ── Tabela de ativos (primeira) ──────────────────────────────────────────
+    df_view = df.copy()
+
+    # formatar preco_unit: BTC abreviado, outros normal
+    def fmt_preco(row):
+        if row['Ativo'] == 'BTC':
+            v = row['preco_unit']
+            return f"R$ {v/1000:.1f}k".replace('.', ',')
+        return f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
+
+    # formatar qtd: BTC com 4 decimais, outros sem decimais desnecessarias
+    def fmt_qtd(row):
+        if row['Ativo'] == 'BTC':
+            return f"{row['Qtd']:.4f}".replace('.', ',')
+        v = row['Qtd']
+        if v == int(v):
+            return str(int(v))
+        return f"{v:g}".replace('.', ',')
+
+    df_view['preco_fmt']  = df_view.apply(fmt_preco, axis=1)
+    df_view['qtd_fmt']    = df_view.apply(fmt_qtd, axis=1)
+    df_view['total_fmt']  = df_view['Total Atual'].apply(
+        lambda x: f"R$ {int(round(x)):,}".replace(',', '.'))
+    df_view['part_fmt']   = df_view['Part. %'].apply(
+        lambda x: f"{x:.2f}%".replace('.', ','))
+
+    config = {
+        'Ativo':       st.column_config.TextColumn("ativo",          alignment="center"),
+        'Classe':      st.column_config.TextColumn("classe",         alignment="center"),
+        'preco_fmt':   st.column_config.TextColumn("preço unidade",  alignment="center"),
+        'qtd_fmt':     st.column_config.TextColumn("qtd",            alignment="center"),
+        'total_fmt':   st.column_config.TextColumn("total atual",    alignment="center"),
+        'part_fmt':    st.column_config.TextColumn("part. %",        alignment="center"),
+        'preco_unit':  None,
+        'Qtd':         None,
+        'Total Atual': None,
+        'Part. %':     None,
+    }
+    # usar df numérico para sort funcionar — exibir colunas fmt mas manter originais ocultas
+    # st.dataframe com column_config None oculta a coluna mas mantém sort pelo valor original
+    st.dataframe(df_view, use_container_width=True, hide_index=True, column_config=config)
+
+    st.markdown("---")
+
+    # ── Dividendos (depois da tabela de ativos) ───────────────────────────────
     from datetime import date as _d
     hoje_d  = _d.today()
     mes_ref = hoje_d.month - 1 if hoje_d.month > 1 else 12
@@ -426,7 +468,6 @@ with aba_detalhe:
     meses_pt2 = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
                  7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
 
-    # passar lancamentos como json para o cache funcionar corretamente
     try:
         _svc  = get_sheets_service()
         _res  = _svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
@@ -449,27 +490,16 @@ with aba_detalhe:
 
     if div_detalhe:
         df_div = pd.DataFrame([
-            {'ativo': t, 'qtd na data': round(v['qtd'], 2),
-             'div/cota': f"R$ {v['por_cota']:.4f}".replace('.', ','),
-             'total calc.': formatar_brl(v['total'])}
+            {'ativo': t,
+             'qtd na data': str(int(round(v['qtd']))),
+             'div/cota': f"R$ {v['por_cota']:.2f}".replace('.', ','),
+             'total': formatar_brl(v['total'])}
             for t, v in sorted(div_detalhe.items(), key=lambda x: -x[1]['total'])
         ])
         cfg_div = {c: st.column_config.TextColumn(c, alignment="center") for c in df_div.columns}
         st.dataframe(df_div, use_container_width=True, hide_index=True, column_config=cfg_div)
     else:
         st.caption("nenhum dividendo encontrado para o mês de referência")
-
-    st.markdown("---")
-
-    config = {
-        'Ativo':       st.column_config.TextColumn("ativo",          alignment="center"),
-        'Classe':      st.column_config.TextColumn("classe",         alignment="center"),
-        'preco_unit':  st.column_config.NumberColumn("preco unidade", format="R$ %.2f", alignment="center"),
-        'Qtd':         st.column_config.NumberColumn("qtd",           format="%.6g",    alignment="center"),
-        'Total Atual': st.column_config.NumberColumn("total atual",   format="R$ %.2f", alignment="center"),
-        'Part. %':     st.column_config.NumberColumn("part. %",       format="%.2f%%",  alignment="center"),
-    }
-    st.dataframe(df, use_container_width=True, hide_index=True, column_config=config)
 
 # ── Google Sheets helpers movidos para antes das abas ──
 
