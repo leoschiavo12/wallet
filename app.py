@@ -125,26 +125,33 @@ def obter_preco_btc_brl():
         pass
     return 0.0
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def obter_historico_btc_brl():
+    """retorna (Series|None, str_status)"""
+    # tentativa 1: coingecko
     try:
         url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
         params = {"vs_currency": "brl", "days": "1825", "interval": "daily"}
         r = requests.get(url, params=params, timeout=15)
-        dados = r.json()
-        prices = dados.get("prices", [])
-        df_h = pd.DataFrame(prices, columns=["ts", "preco"])
-        df_h["data"] = pd.to_datetime(df_h["ts"], unit="ms")
-        df_h = df_h.set_index("data")["preco"]
-        return df_h
-    except:
+        if r.status_code == 200:
+            prices = r.json().get("prices", [])
+            if prices:
+                df_h = pd.DataFrame(prices, columns=["ts", "preco"])
+                df_h["data"] = pd.to_datetime(df_h["ts"], unit="ms")
+                return df_h.set_index("data")["preco"], "coingecko"
+    except Exception as e:
         pass
-    # fallback: yfinance
+    # tentativa 2: yfinance BTC-BRL
     try:
         dados = yf.download("BTC-BRL", period="5y", progress=False, auto_adjust=True)
-        return dados['Close'].ffill().dropna()
-    except:
-        return pd.Series(dtype=float)
+        if not dados.empty:
+            serie = dados['Close'].ffill().dropna()
+            if isinstance(serie.columns if hasattr(serie, 'columns') else None, pd.MultiIndex):
+                serie = serie.iloc[:, 0]
+            return serie, "yfinance"
+    except Exception as e:
+        pass
+    return None, "erro"
 
 def obter_preco_renda_mais():
     try:
@@ -731,10 +738,10 @@ with aba_detalhe:
         preco_btc_atual = precos.get('BTC', 0.0)
         qtd_btc         = MINHA_CARTEIRA['Cripto']['BTC']
         total_btc       = preco_btc_atual * qtd_btc
-        hist = obter_historico_btc_brl()
+        hist, hist_fonte = obter_historico_btc_brl()
 
         def var_pct(serie, dias):
-            if serie.empty or len(serie) < dias + 1:
+            if serie is None or serie.empty or len(serie) < dias + 1:
                 return None
             preco_ant = serie.iloc[-(dias+1)]
             return (preco_btc_atual / preco_ant - 1) * 100 if preco_ant > 0 else None
@@ -771,7 +778,7 @@ with aba_detalhe:
             col.metric(label, fmt_var(v), delta_color="normal" if (v or 0) >= 0 else "inverse")
 
         st.markdown("---")
-        if not hist.empty:
+        if hist is not None and not hist.empty:
             st.subheader("histórico — últimos 12 meses")
             hist_1a = hist.last("365D")
             fig_btc = go.Figure()
@@ -790,6 +797,9 @@ with aba_detalhe:
                 margin=dict(t=10, b=10, l=10, r=10)
             )
             st.plotly_chart(fig_btc, use_container_width=True)
+            st.caption(f"fonte: {hist_fonte}")
+        else:
+            st.warning("histórico de preços indisponível — coingecko e yfinance não retornaram dados.")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: TESOURO
