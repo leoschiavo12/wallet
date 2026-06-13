@@ -125,9 +125,8 @@ def obter_preco_btc_brl():
         pass
     return 0.0
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def obter_historico_btc_brl():
-    """retorna (Series|None, str_status)"""
+def _buscar_historico_btc_brl():
+    """busca histórico sem cache — chamada internamente"""
     # tentativa 1: coingecko
     try:
         url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
@@ -139,19 +138,48 @@ def obter_historico_btc_brl():
                 df_h = pd.DataFrame(prices, columns=["ts", "preco"])
                 df_h["data"] = pd.to_datetime(df_h["ts"], unit="ms")
                 return df_h.set_index("data")["preco"], "coingecko"
-    except Exception as e:
+    except:
         pass
     # tentativa 2: yfinance BTC-BRL
     try:
         dados = yf.download("BTC-BRL", period="5y", progress=False, auto_adjust=True)
         if not dados.empty:
-            serie = dados['Close'].ffill().dropna()
-            if isinstance(serie.columns if hasattr(serie, 'columns') else None, pd.MultiIndex):
-                serie = serie.iloc[:, 0]
-            return serie, "yfinance"
-    except Exception as e:
+            close = dados['Close']
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            serie = close.ffill().dropna()
+            if not serie.empty:
+                return serie, "yfinance"
+    except:
+        pass
+    # tentativa 3: yfinance BTC-USD × BRL=X
+    try:
+        btc_usd = yf.download("BTC-USD", period="5y", progress=False, auto_adjust=True)['Close']
+        usd_brl = yf.download("BRL=X",   period="5y", progress=False, auto_adjust=True)['Close']
+        if isinstance(btc_usd, pd.DataFrame): btc_usd = btc_usd.iloc[:, 0]
+        if isinstance(usd_brl, pd.DataFrame): usd_brl = usd_brl.iloc[:, 0]
+        btc_brl = (btc_usd * usd_brl).ffill().dropna()
+        if not btc_brl.empty:
+            return btc_brl, "yfinance (USD×BRL)"
+    except:
         pass
     return None, "erro"
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _historico_btc_cached(chave_ts):
+    """cache com chave de hora — força retry a cada hora"""
+    return _buscar_historico_btc_brl()
+
+def obter_historico_btc_brl():
+    """wrapper: só cacheia resultado válido; em caso de erro tenta sempre"""
+    import time
+    # chave muda a cada hora, forçando retry em caso de falha anterior
+    chave = int(time.time() // 3600)
+    hist, fonte = _historico_btc_cached(chave)
+    if hist is None:
+        # tenta sem cache imediatamente
+        hist, fonte = _buscar_historico_btc_brl()
+    return hist, fonte
 
 def obter_preco_renda_mais():
     try:
@@ -1119,7 +1147,11 @@ with aba_lanc:
             pm = df_lanc[df_lanc["ativo"].isin(ativos_ativos)].groupby("ativo").apply(calc_pm).reset_index()
             pm_fmt = pm.copy()
             pm_fmt["total investido"] = pm_fmt["total investido"].apply(formatar_brl)
-            pm_fmt["qtd comprada"]    = pm_fmt["qtd comprada"].apply(lambda x: f"{x:g}".replace(".", ","))
+            pm_fmt["qtd comprada"]    = pm_fmt.apply(
+                lambda r: f"{r['qtd comprada']:.8f}".rstrip('0').rstrip('.').replace('.', ',')
+                if r['qtd comprada'] < 1 else f"{r['qtd comprada']:g}".replace('.', ','),
+                axis=1
+            )
             pm_fmt["preco medio"]     = pm_fmt["preco medio"].apply(formatar_brl)
             cfg_pm = {c: st.column_config.TextColumn(c, alignment="center") for c in pm_fmt.columns}
             st.dataframe(pm_fmt, use_container_width=True, hide_index=True, column_config=cfg_pm)
