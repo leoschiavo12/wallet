@@ -529,8 +529,8 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    sub_fiis, sub_etfs, sub_cripto, sub_tesouro, sub_resumo = st.tabs(
-        ["FIIs", "ETFs", "cripto", "tesouro", "resumo carteira"]
+    sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
+        ["carteira", "FIIs", "ETFs", "cripto", "tesouro"]
     )
 
     # ── helpers compartilhados ────────────────────────────────────────────────
@@ -839,16 +839,45 @@ with aba_detalhe:
                 st.caption(f"preço manual (secrets) — API: {st.session_state.get('preco_renda_erro','')}")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # SUB-ABA: RESUMO CARTEIRA
+    # SUB-ABA: CARTEIRA
     # ══════════════════════════════════════════════════════════════════════════
     with sub_resumo:
+        # ── linha 1: exposição geográfica ─────────────────────────────────────
+        GEO_FLAG = {'Brasil': '🇧🇷', 'EUA': '🇺🇸', 'China': '🇨🇳', 'Global (cripto)': '🌐'}
+        GEO_ETF  = {'IVVB11': 'EUA', 'DIVO11': 'Brasil', 'PKIN11': 'China', 'LFTB11': 'Brasil'}
+        geo_totais = {}
+        for _, row in df[df['Classe'] == 'ETF'].iterrows():
+            pais = GEO_ETF.get(row['Ativo'], 'Brasil')
+            geo_totais[pais] = geo_totais.get(pais, 0) + row['Total Atual']
+        geo_totais['Brasil'] = geo_totais.get('Brasil', 0) \
+            + df[df['Classe'] == 'FII']['Total Atual'].sum() \
+            + df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
+        geo_totais['Global (cripto)'] = df[df['Classe'] == 'Cripto']['Total Atual'].sum()
+        geo_sorted = sorted(geo_totais.items(), key=lambda x: -x[1])
+        cols_geo = st.columns(len(geo_sorted))
+        for i, (pais, val) in enumerate(geo_sorted):
+            pct  = val / total_geral * 100 if total_geral > 0 else 0
+            flag = GEO_FLAG.get(pais, '')
+            cols_geo[i].metric(f"{flag} {pais}  ·  {formatar_brl(val)}", f"{pct:.1f}%".replace('.', ','))
+
+        st.markdown("---")
+
+        # ── linha 2: renda fixa vs variável ──────────────────────────────────
+        total_rf = df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
+        total_rv = df[df['Classe'].isin(['ETF','FII','Cripto'])]['Total Atual'].sum()
+        pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
+        pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
+        c1, c2 = st.columns(2)
+        c1.metric(f"renda fixa  ·  {formatar_brl(total_rf)}", f"{pct_rf:.1f}%".replace('.', ','))
+        c2.metric(f"renda variável  ·  {formatar_brl(total_rv)}", f"{pct_rv:.1f}%".replace('.', ','))
+
+        st.markdown("---")
+
         # ── tabela geral de todos os ativos ──────────────────────────────────
         def fmt_preco(row):
             if row['Ativo'] == 'BTC':
-                v = row['preco_unit']
-                return f"R$ {v/1000:.0f}k".replace('.', ',')
-            v = row['preco_unit']
-            s = f"{v:,.2f}".replace(',','X').replace('.',',').replace('X','.')
+                return f"R$ {row['preco_unit']/1000:.0f}k"
+            s = f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
             return f"R$ {s}"
 
         df_view = df.sort_values('Total Atual', ascending=False).copy()
@@ -886,37 +915,6 @@ with aba_detalhe:
         df_resumo_view = pd.DataFrame(linhas_resumo)
         cfg_res = {c: st.column_config.TextColumn(c, alignment="center") for c in df_resumo_view.columns}
         st.dataframe(df_resumo_view, use_container_width=True, hide_index=True, column_config=cfg_res)
-
-        st.markdown("---")
-
-        # ── renda fixa vs variável ────────────────────────────────────────────
-        st.subheader("renda fixa vs renda variável")
-        total_rf = df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
-        total_rv = df[df['Classe'].isin(['ETF','FII','Cripto'])]['Total Atual'].sum()
-        pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
-        pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
-        c1, c2 = st.columns(2)
-        c1.metric(f"renda fixa  ·  {formatar_brl(total_rf)}", f"{pct_rf:.1f}%".replace('.', ','))
-        c2.metric(f"renda variável  ·  {formatar_brl(total_rv)}", f"{pct_rv:.1f}%".replace('.', ','))
-
-        st.markdown("---")
-
-        # ── exposição geográfica ──────────────────────────────────────────────
-        st.subheader("exposição geográfica")
-        GEO = {'IVVB11': 'EUA', 'DIVO11': 'Brasil', 'PKIN11': 'China', 'LFTB11': 'Brasil'}
-        geo_totais = {}
-        for _, row in df[df['Classe'] == 'ETF'].iterrows():
-            pais = GEO.get(row['Ativo'], 'Brasil')
-            geo_totais[pais] = geo_totais.get(pais, 0) + row['Total Atual']
-        geo_totais['Brasil'] = geo_totais.get('Brasil', 0) \
-            + df[df['Classe'] == 'FII']['Total Atual'].sum() \
-            + df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
-        geo_totais['Global (cripto)'] = df[df['Classe'] == 'Cripto']['Total Atual'].sum()
-        geo_sorted = sorted(geo_totais.items(), key=lambda x: -x[1])
-        cols_geo = st.columns(len(geo_sorted))
-        for i, (pais, val) in enumerate(geo_sorted):
-            pct = val / total_geral * 100 if total_geral > 0 else 0
-            cols_geo[i].metric(f"{pais}  ·  {formatar_brl(val)}", f"{pct:.1f}%".replace('.', ','))
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
 with aba_lanc:
