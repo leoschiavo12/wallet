@@ -517,36 +517,6 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    # ── Tabela geral de todos os ativos ──────────────────────────────────────
-    def fmt_preco(row):
-        if row['Ativo'] == 'BTC':
-            v = row['preco_unit']
-            return f"R$ {v/1000:.0f}k".replace('.', ',')
-        v = row['preco_unit']
-        s = f"{v:,.2f}".replace(',','X').replace('.',',').replace('X','.')
-        return f"R$ {s}"
-
-    def fmt_qtd(row):
-        if row['Ativo'] == 'BTC':
-            return f"{row['Qtd']:.4f}".replace('.', ',')
-        v = row['Qtd']
-        if v == int(v):
-            return str(int(v))
-        return f"{v:g}".replace('.', ',')
-
-    config_geral = {
-        'Ativo':       st.column_config.TextColumn("ativo",       alignment="center"),
-        'Classe':      st.column_config.TextColumn("classe",      alignment="center"),
-        'preco_unit':  st.column_config.NumberColumn("preço atual",  format="R$ %.2f", alignment="center"),
-        'Qtd':         st.column_config.NumberColumn("qtd",          format="%.4g",    alignment="center"),
-        'Total Atual': st.column_config.NumberColumn("total atual",  format="R$ %d",   alignment="center"),
-        'Part. %':     st.column_config.NumberColumn("part. %",      format="%.2f%%",  alignment="center"),
-    }
-    st.dataframe(df[['Ativo','Classe','preco_unit','Qtd','Total Atual','Part. %']],
-                 use_container_width=True, hide_index=True, column_config=config_geral)
-
-    st.markdown("---")
-
     sub_fiis, sub_etfs, sub_cripto, sub_tesouro, sub_resumo = st.tabs(
         ["FIIs", "ETFs", "cripto", "tesouro", "resumo carteira"]
     )
@@ -632,6 +602,37 @@ with aba_detalhe:
 
         cfg_fii = {c: st.column_config.TextColumn(c, alignment="center") for c in df_fii_fmt.columns}
         st.dataframe(df_fii_fmt, use_container_width=True, hide_index=True, column_config=cfg_fii)
+
+        st.markdown("---")
+        st.subheader("tijolo vs papel")
+        df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
+        resumo_tipo = df_fii.groupby('tipo_fii')['Total Atual'].sum().reset_index()
+        resumo_tipo['%'] = resumo_tipo['Total Atual'] / total_fii * 100
+        c1, c2 = st.columns(2)
+        for _, r in resumo_tipo.sort_values('Total Atual', ascending=False).iterrows():
+            col = c1 if r['tipo_fii'] == 'tijolo' else c2
+            col.metric(f"{r['tipo_fii']} — {r['%']:.1f}%".replace('.', ','), formatar_brl(r['Total Atual']))
+
+        st.markdown("---")
+        st.subheader("papel — CDI vs IPCA")
+        df_papel = df_fii[df_fii['tipo_fii'] == 'papel'].copy()
+        df_papel['indexador'] = df_papel['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('indexador', '?'))
+        if not df_papel.empty:
+            total_papel = df_papel['Total Atual'].sum()
+            resumo_idx  = df_papel.groupby('indexador')['Total Atual'].sum().reset_index()
+            cols_idx = st.columns(len(resumo_idx))
+            for i, (_, r) in enumerate(resumo_idx.sort_values('Total Atual', ascending=False).iterrows()):
+                pct = r['Total Atual'] / total_papel * 100 if total_papel > 0 else 0
+                cols_idx[i].metric(f"{r['indexador']} — {pct:.1f}%".replace('.', ','), formatar_brl(r['Total Atual']))
+            df_papel_fmt = pd.DataFrame({
+                'ativo':     df_papel.sort_values('Total Atual', ascending=False)['Ativo'].values,
+                'indexador': df_papel.sort_values('Total Atual', ascending=False)['indexador'].values,
+                'qtd':       df_papel.sort_values('Total Atual', ascending=False)['Qtd'].apply(lambda x: str(int(x))).values,
+                'total':     df_papel.sort_values('Total Atual', ascending=False)['Total Atual'].apply(formatar_brl).values,
+                'part. %':   df_papel.sort_values('Total Atual', ascending=False)['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ',')).values,
+            })
+            cfg_papel = {c: st.column_config.TextColumn(c, alignment="center") for c in df_papel_fmt.columns}
+            st.dataframe(df_papel_fmt, use_container_width=True, hide_index=True, column_config=cfg_papel)
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: ETFs
@@ -804,6 +805,29 @@ with aba_detalhe:
     # SUB-ABA: RESUMO CARTEIRA
     # ══════════════════════════════════════════════════════════════════════════
     with sub_resumo:
+        # ── tabela geral de todos os ativos ──────────────────────────────────
+        def fmt_preco(row):
+            if row['Ativo'] == 'BTC':
+                v = row['preco_unit']
+                return f"R$ {v/1000:.0f}k".replace('.', ',')
+            v = row['preco_unit']
+            s = f"{v:,.2f}".replace(',','X').replace('.',',').replace('X','.')
+            return f"R$ {s}"
+
+        df_view = df.sort_values('Total Atual', ascending=False).copy()
+        config_geral = {
+            'Ativo':       st.column_config.TextColumn("ativo",        alignment="center"),
+            'Classe':      st.column_config.TextColumn("classe",       alignment="center"),
+            'preco_unit':  st.column_config.NumberColumn("preço atual", format="R$ %.2f", alignment="center"),
+            'Qtd':         st.column_config.NumberColumn("qtd",         format="%.4g",    alignment="center"),
+            'Total Atual': st.column_config.NumberColumn("total atual", format="R$ %d",   alignment="center"),
+            'Part. %':     st.column_config.NumberColumn("part. %",     format="%.2f%%",  alignment="center"),
+        }
+        st.dataframe(df_view[['Ativo','Classe','preco_unit','Qtd','Total Atual','Part. %']],
+                     use_container_width=True, hide_index=True, column_config=config_geral)
+
+        st.markdown("---")
+
         st.info("⚙️ % alvo será vinculado à aba **configurações** quando criada. valores abaixo usam alocação padrão da estratégia.", icon="ℹ️")
 
         # ── alocação por classe ───────────────────────────────────────────────
@@ -856,65 +880,6 @@ with aba_detalhe:
         for i, (pais, val) in enumerate(geo_sorted):
             pct = val / total_geral * 100 if total_geral > 0 else 0
             cols_geo[i].metric(f"{pais} — {pct:.1f}%".replace('.', ','), formatar_brl(val))
-
-        st.markdown("---")
-
-        # ── CDI vs IPCA (carteira indexada) ──────────────────────────────────
-        st.subheader("exposição CDI vs IPCA")
-        df_fii_res = df[df['Classe'] == 'FII'].copy()
-        total_cdi  = df_fii_res[df_fii_res['Ativo'].map(
-            lambda t: FII_INFO.get(t,{}).get('indexador')) == 'CDI']['Total Atual'].sum()
-        total_ipca = df_fii_res[df_fii_res['Ativo'].map(
-            lambda t: FII_INFO.get(t,{}).get('indexador')) == 'IPCA']['Total Atual'].sum()
-        total_ipca += df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
-        total_idx  = total_cdi + total_ipca
-        c1, c2 = st.columns(2)
-        pct_cdi  = total_cdi  / total_idx * 100 if total_idx > 0 else 0
-        pct_ipca = total_ipca / total_idx * 100 if total_idx > 0 else 0
-        c1.metric(f"CDI — {pct_cdi:.1f}%".replace('.', ','), formatar_brl(total_cdi))
-        c2.metric(f"IPCA — {pct_ipca:.1f}%".replace('.', ','), formatar_brl(total_ipca))
-        st.caption("CDI: FIIs papel CDI  |  IPCA: FIIs papel IPCA + Renda+ 2050")
-
-        st.markdown("---")
-
-        # ── tijolo vs papel (FIIs) ────────────────────────────────────────────
-        st.subheader("FIIs — tijolo vs papel")
-        df_fii_res2 = df[df['Classe'] == 'FII'].copy()
-        df_fii_res2['tipo_fii'] = df_fii_res2['Ativo'].map(
-            lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
-        total_fii_res = df_fii_res2['Total Atual'].sum()
-        resumo_tipo   = df_fii_res2.groupby('tipo_fii')['Total Atual'].sum().reset_index()
-        cols_tipo = st.columns(len(resumo_tipo))
-        for i, (_, r) in enumerate(resumo_tipo.sort_values('Total Atual', ascending=False).iterrows()):
-            pct = r['Total Atual'] / total_fii_res * 100 if total_fii_res > 0 else 0
-            cols_tipo[i].metric(f"{r['tipo_fii']} — {pct:.1f}%".replace('.', ','), formatar_brl(r['Total Atual']))
-
-        st.markdown("---")
-
-        # ── papel: CDI vs IPCA (detalhado) ───────────────────────────────────
-        st.subheader("FIIs papel — CDI vs IPCA")
-        df_papel_res = df_fii_res2[df_fii_res2['tipo_fii'] == 'papel'].copy()
-        df_papel_res['indexador'] = df_papel_res['Ativo'].map(
-            lambda t: FII_INFO.get(t, {}).get('indexador', '?'))
-        if not df_papel_res.empty:
-            total_papel = df_papel_res['Total Atual'].sum()
-            resumo_idx  = df_papel_res.groupby('indexador')['Total Atual'].sum().reset_index()
-            cols_idx = st.columns(len(resumo_idx))
-            for i, (_, r) in enumerate(resumo_idx.sort_values('Total Atual', ascending=False).iterrows()):
-                pct = r['Total Atual'] / total_papel * 100 if total_papel > 0 else 0
-                cols_idx[i].metric(f"{r['indexador']} — {pct:.1f}%".replace('.', ','), formatar_brl(r['Total Atual']))
-
-            df_papel_view = df_papel_res[['Ativo','indexador','Qtd','Total Atual','Part. %']].copy()
-            df_papel_view = df_papel_view.sort_values('Total Atual', ascending=False)
-            df_papel_fmt  = pd.DataFrame({
-                'ativo':      df_papel_view['Ativo'].values,
-                'indexador':  df_papel_view['indexador'].values,
-                'qtd':        df_papel_view['Qtd'].apply(lambda x: str(int(x))).values,
-                'total':      df_papel_view['Total Atual'].apply(formatar_brl).values,
-                'part. %':    df_papel_view['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ',')).values,
-            })
-            cfg_papel = {c: st.column_config.TextColumn(c, alignment="center") for c in df_papel_fmt.columns}
-            st.dataframe(df_papel_fmt, use_container_width=True, hide_index=True, column_config=cfg_papel)
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
 with aba_lanc:
