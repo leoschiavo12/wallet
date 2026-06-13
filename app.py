@@ -360,8 +360,8 @@ SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
 SHEET_TAB = "lancamentos"
 HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
 
-@st.cache_data(ttl=0)
-def ler_lancamentos():
+@st.cache_data(show_spinner=False)
+def ler_lancamentos(_versao=0):
     try:
         svc  = get_sheets_service()
         res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
@@ -422,7 +422,7 @@ def salvar_lancamento(row: list):
         valueInputOption="USER_ENTERED",
         body={"values": [row]}
     ).execute()
-    st.cache_data.clear()
+    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
 def deletar_lancamento(idx_linha_sheet: int):
     svc = get_sheets_service()
@@ -433,7 +433,7 @@ def deletar_lancamento(idx_linha_sheet: int):
         "endIndex":   idx_linha_sheet + 1
     }}}]}
     svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
-    st.cache_data.clear()
+    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
 def garantir_cabecalho():
     try:
@@ -1086,7 +1086,8 @@ with aba_lanc:
         from datetime import date as _date
 
         # ── lê dados frescos sempre que o fragment reroda ─────────────────────
-        df_lanc = ler_lancamentos()
+        _versao = st.session_state.get("_lanc_versao", 0)
+        df_lanc = ler_lancamentos(_versao=_versao)
         if not df_lanc.empty:
             df_lanc["data_dt"] = pd.to_datetime(df_lanc["data"], format="%d/%m/%Y", errors="coerce")
             df_lanc["sinal"]   = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
