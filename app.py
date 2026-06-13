@@ -792,7 +792,6 @@ with aba_detalhe:
         c3.metric("total na carteira", formatar_brl(total_btc))
 
         st.markdown("---")
-        st.subheader("variação do preço (BRL)")
 
         c1, c2, c3, c4, c5, c6 = st.columns(6)
         for col, label, v in [
@@ -803,11 +802,21 @@ with aba_detalhe:
             (c5, "1 ano",   var_1a),
             (c6, "5 anos",  var_5a),
         ]:
-            col.metric(label, fmt_var(v), delta_color="normal" if (v or 0) >= 0 else "inverse")
+            if v is None:
+                cor, texto = "#888888", "—"
+            elif v >= 0:
+                cor, texto = "#22c55e", f"+{v:.1f}%".replace('.', ',')
+            else:
+                cor, texto = "#ef4444", f"{v:.1f}%".replace('.', ',')
+            col.markdown(
+                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>{label}</div>"
+                f"<div style='font-size:1.6rem;font-weight:700;color:{cor}'>{texto}</div>",
+                unsafe_allow_html=True
+            )
 
         st.markdown("---")
         if hist is not None and not hist.empty:
-            st.subheader("histórico — últimos 12 meses")
+            st.subheader("últimos 12 meses")
             corte = hist.index.max() - pd.DateOffset(days=365)
             hist_1a = hist[hist.index >= corte]
             fig_btc = go.Figure()
