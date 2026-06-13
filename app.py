@@ -563,6 +563,50 @@ with aba_dash:
         )
         st.plotly_chart(fig_ativo, use_container_width=True)
 
+    # ── Evolução do patrimônio investido ─────────────────────────────────────
+    st.markdown("---")
+    st.subheader("evolução do patrimônio investido")
+    try:
+        _svc_evo  = get_sheets_service()
+        _res_evo  = _svc_evo.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
+        _rows_evo = _res_evo.get("values", [])
+        _hdrs_evo = ["data","tipo","ativo","classe","quantidade","preco_unitario","total"]
+        if len(_rows_evo) > 1:
+            _n = len(_hdrs_evo)
+            _pad = [(r + [''] * _n)[:_n] for r in _rows_evo[1:]]
+            df_evo_raw = pd.DataFrame(_pad, columns=_hdrs_evo)
+            df_evo_raw["quantidade"]    = pd.to_numeric(df_evo_raw["quantidade"],    errors="coerce").fillna(0)
+            df_evo_raw["preco_unitario"]= pd.to_numeric(df_evo_raw["preco_unitario"],errors="coerce").fillna(0)
+            df_evo_raw["total"]         = pd.to_numeric(df_evo_raw["total"],         errors="coerce").fillna(0)
+        else:
+            df_evo_raw = pd.DataFrame(columns=_hdrs_evo)
+    except:
+        df_evo_raw = pd.DataFrame(columns=["data","tipo","ativo","classe","quantidade","preco_unitario","total"])
+
+    if not df_evo_raw.empty:
+        df_evo_raw["data_dt"]   = pd.to_datetime(df_evo_raw["data"], format="%d/%m/%Y", errors="coerce")
+        df_evo_raw["sinal_evo"] = df_evo_raw["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+        df_evo_raw["valor_evo"] = df_evo_raw["total"] * df_evo_raw["sinal_evo"]
+        df_evo = df_evo_raw.groupby("data_dt")["valor_evo"].sum().reset_index().sort_values("data_dt")
+        df_evo["acum"] = df_evo["valor_evo"].cumsum()
+
+        fig_evo = go.Figure()
+        fig_evo.add_trace(go.Scatter(
+            x=df_evo["data_dt"], y=df_evo["acum"],
+            mode="lines+markers",
+            line=dict(color="#1E88E5", width=2),
+            marker=dict(size=5),
+            hovertemplate="%{x|%d/%m/%Y}<br>R$ %{y:,.2f}<extra></extra>"
+        ))
+        fig_evo.update_layout(
+            height=300,
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            showlegend=False,
+            xaxis=dict(showgrid=False),
+            yaxis=dict(showgrid=True, gridcolor="#333")
+        )
+        st.plotly_chart(fig_evo, use_container_width=True)
+
 with aba_detalhe:
     sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
         ["carteira", "FIIs", "ETFs", "cripto", "tesouro"]
@@ -1154,7 +1198,10 @@ with aba_lanc:
                     "preco medio":     tot_c / qtd_c if qtd_c > 0 else 0
                 })
 
-            pm = df_lanc[df_lanc["ativo"].isin(ativos_ativos)].groupby("ativo").apply(calc_pm).reset_index()
+            try:
+                pm = df_lanc[df_lanc["ativo"].isin(ativos_ativos)].groupby("ativo").apply(calc_pm, include_groups=False).reset_index()
+            except TypeError:
+                pm = df_lanc[df_lanc["ativo"].isin(ativos_ativos)].groupby("ativo").apply(calc_pm).reset_index()
             pm_fmt = pm.copy()
             pm_fmt["total investido"] = pm_fmt["total investido"].apply(formatar_brl)
             pm_fmt["qtd comprada"]    = pm_fmt.apply(
@@ -1166,36 +1213,6 @@ with aba_lanc:
             cfg_pm = {c: st.column_config.TextColumn(c, alignment="center") for c in pm_fmt.columns}
             st.dataframe(pm_fmt, use_container_width=True, hide_index=True, column_config=cfg_pm)
 
-        st.markdown("---")
-
-        # ── Evolucao do patrimonio investido ─────────────────────────────────
-        st.subheader("evolucao do patrimonio investido")
-        df_evo = df_lanc.sort_values("data_dt").copy()
-        df_evo["sinal_evo"] = df_evo["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-        df_evo["total"]     = pd.to_numeric(df_evo["total"], errors="coerce").fillna(0)
-        df_evo["valor_evo"] = df_evo["total"] * df_evo["sinal_evo"]
-        # agrupar por data para mostrar saldo liquido do dia
-        df_evo = df_evo.groupby("data_dt")["valor_evo"].sum().reset_index()
-        df_evo = df_evo.sort_values("data_dt")
-        df_evo["acum"] = df_evo["valor_evo"].cumsum()
-
-        fig_evo = go.Figure()
-        fig_evo.add_trace(go.Scatter(
-            x=df_evo["data_dt"], y=df_evo["acum"],
-            mode="lines+markers",
-            line=dict(color="#1E88E5", width=2),
-            marker=dict(size=5),
-            hovertemplate="%{x|%d/%m/%Y}<br>R$ %{y:,.2f}<extra></extra>"
-        ))
-        fig_evo.update_layout(
-            height=300,
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            showlegend=False,
-            xaxis=dict(showgrid=False),
-            yaxis=dict(showgrid=True, gridcolor="#333")
-        )
-        st.plotly_chart(fig_evo, use_container_width=True)
 
 # ── Aba configurações (esqueleto) ─────────────────────────────────────────────
 with aba_config:
