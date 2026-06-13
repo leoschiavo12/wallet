@@ -1188,28 +1188,22 @@ with aba_lanc:
             # apenas ativos com saldo positivo (ainda na carteira)
             ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0.001]["ativo"].tolist()
 
-            def calc_pm(g):
-                c = g[g["tipo"] == "compra"]
-                qtd_c = c["quantidade"].sum()
-                tot_c = (c["quantidade"] * c["preco_unitario"]).sum()
-                return pd.Series({
-                    "total investido": tot_c,
-                    "qtd comprada":    qtd_c,
-                    "preco medio":     tot_c / qtd_c if qtd_c > 0 else 0
-                })
+            # calcular preço médio sem groupby/apply para evitar bugs de colunas
+            rows_pm = []
+            for ativo in sorted(ativos_ativos):
+                c = df_lanc[(df_lanc["ativo"] == ativo) & (df_lanc["tipo"] == "compra")]
+                qtd_c = float(c["quantidade"].sum())
+                tot_c = float((c["quantidade"] * c["preco_unitario"]).sum())
+                pm_val = tot_c / qtd_c if qtd_c > 0 else 0
+                rows_pm.append({"ativo": ativo, "total investido": tot_c, "qtd comprada": qtd_c, "preco medio": pm_val})
 
-            try:
-                pm = df_lanc[df_lanc["ativo"].isin(ativos_ativos)].groupby("ativo").apply(calc_pm, include_groups=False).reset_index()
-            except TypeError:
-                pm = df_lanc[df_lanc["ativo"].isin(ativos_ativos)].groupby("ativo").apply(calc_pm).reset_index()
-            pm_fmt = pm.copy()
+            pm_fmt = pd.DataFrame(rows_pm)
             pm_fmt["total investido"] = pm_fmt["total investido"].apply(formatar_brl)
-            pm_fmt["qtd comprada"]    = pm_fmt.apply(
-                lambda r: f"{r['qtd comprada']:.8f}".rstrip('0').rstrip('.').replace('.', ',')
-                if r['qtd comprada'] < 1 else f"{r['qtd comprada']:g}".replace('.', ','),
-                axis=1
+            pm_fmt["qtd comprada"]    = pm_fmt["qtd comprada"].apply(
+                lambda x: f"{x:.8f}".rstrip('0').rstrip('.').replace('.', ',') if x < 1
+                else f"{x:g}".replace('.', ',')
             )
-            pm_fmt["preco medio"]     = pm_fmt["preco medio"].apply(formatar_brl)
+            pm_fmt["preco medio"] = pm_fmt["preco medio"].apply(formatar_brl)
             cfg_pm = {c: st.column_config.TextColumn(c, alignment="center") for c in pm_fmt.columns}
             st.dataframe(pm_fmt, use_container_width=True, hide_index=True, column_config=cfg_pm)
 
