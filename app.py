@@ -853,8 +853,8 @@ with aba_detalhe:
             else:
                 cor, texto = "#ef4444", f"{v:.1f}%".replace('.', ',')
             col.markdown(
-                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>{label}</div>"
-                f"<div style='font-size:1.6rem;font-weight:700;color:{cor}'>{texto}</div>",
+                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px;font-family:inherit'>{label}</div>"
+                f"<div style='font-size:1.6rem;font-weight:700;color:{cor};font-family:inherit'>{texto}</div>",
                 unsafe_allow_html=True
             )
 
