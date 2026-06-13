@@ -700,6 +700,7 @@ with aba_detalhe:
         n_papel   = sum(1 for t in df_fii['Ativo'] if FII_INFO.get(t, {}).get('tipo') == 'papel')
 
         # ── linha 1: total, dividendos, yield corrente ───────────────────────
+        total_fii_k = f"R$ {total_fii/1000:.1f}k".replace('.', ',')
         yield_corrente = (div_total / total_fii * 100) if total_fii > 0 and div_total > 0 else None
 
         c1, c2, c3 = st.columns(3)
