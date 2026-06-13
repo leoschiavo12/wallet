@@ -1217,10 +1217,18 @@ with aba_lanc:
         with st.expander("excluir lançamento"):
             idx_del = st.number_input(
                 "número # do lançamento (conforme tabela acima)",
-                min_value=1, max_value=n, step=1, value=n
+                min_value=1, max_value=n, step=1, value=1,
+                key="idx_del_input"
             )
+            # mostrar preview do lançamento selecionado
+            # # decrescente: #=n → índice 0 na tabela ordenada desc, #=1 → índice n-1
+            preview_idx = n - int(idx_del)
+            if 0 <= preview_idx < len(df_hist):
+                row_prev = df_hist.iloc[preview_idx]
+                st.caption(f"selecionado: {row_prev['data']} · {row_prev['ativo']} · {row_prev['tipo']} · qtd {row_prev['quantidade']}")
             if st.button("excluir", type="secondary"):
-                pos_sheet = (n - idx_del) + 1
+                # #=n (mais antigo) → linha 2 do Sheets; #=1 (mais recente) → linha n+1
+                pos_sheet = (n - int(idx_del)) + 2
                 deletar_lancamento(pos_sheet)
                 st.success("lançamento excluído!")
                 st.rerun(scope="fragment")
