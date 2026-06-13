@@ -624,24 +624,25 @@ with aba_dash:
         st.plotly_chart(fig_evo, use_container_width=True)
 
         # ── gráfico mensal ────────────────────────────────────────────────────
-        st.subheader("aportes por mês")
-        df_evo_raw["ano_mes"] = df_evo_raw["data_dt"].dt.to_period("M")
-        df_mensal = df_evo_raw.groupby("ano_mes")["valor_evo"].sum().reset_index()
+        st.subheader("evolução mensal do patrimônio investido")
+        # pegar o último valor acumulado de cada mês
+        df_evo["ano_mes"] = df_evo["data_dt"].dt.to_period("M")
+        df_mensal = df_evo.groupby("ano_mes")["acum"].last().reset_index()
         df_mensal["ano_mes_dt"] = df_mensal["ano_mes"].dt.to_timestamp()
-        df_mensal["label"]      = df_mensal["ano_mes_dt"].dt.strftime("%b/%y")
-        df_mensal["cor"]        = df_mensal["valor_evo"].apply(
-            lambda x: "#1E88E5" if x >= 0 else "#ef4444"
-        )
         df_mensal["hover"] = df_mensal.apply(
-            lambda r: f"<b>{r['label']}</b><br>R$ {r['valor_evo']:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            lambda r: (
+                f"<b>{r['ano_mes_dt'].strftime('%b/%y')}</b><br>"
+                f"R$ {r['acum']:,.2f}"
+                .replace(",", "X").replace(".", ",").replace("X", ".")
+            ),
             axis=1
         )
 
         fig_mensal = go.Figure()
         fig_mensal.add_trace(go.Bar(
             x=df_mensal["ano_mes_dt"],
-            y=df_mensal["valor_evo"],
-            marker_color=df_mensal["cor"].tolist(),
+            y=df_mensal["acum"],
+            marker_color="#1E88E5",
             hovertemplate="%{customdata}<extra></extra>",
             customdata=df_mensal["hover"].tolist(),
         ))
