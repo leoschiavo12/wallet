@@ -808,7 +808,8 @@ with aba_detalhe:
         st.markdown("---")
         if hist is not None and not hist.empty:
             st.subheader("histórico — últimos 12 meses")
-            hist_1a = hist.last("365D")
+            corte = hist.index.max() - pd.DateOffset(days=365)
+            hist_1a = hist[hist.index >= corte]
             fig_btc = go.Figure()
             fig_btc.add_trace(go.Scatter(
                 x=hist_1a.index, y=hist_1a.values,
