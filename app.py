@@ -425,12 +425,15 @@ def salvar_lancamento(row: list):
     st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
 def deletar_lancamento(idx_linha_sheet: int):
+    # idx_linha_sheet é 1-based (linha 1 = header, linha 2 = primeiro dado)
+    # deleteDimension usa 0-based
     svc = get_sheets_service()
+    start = idx_linha_sheet - 1  # converter para 0-based
     body = {"requests": [{"deleteDimension": {"range": {
         "sheetId": 0,
         "dimension": "ROWS",
-        "startIndex": idx_linha_sheet,
-        "endIndex":   idx_linha_sheet + 1
+        "startIndex": start,
+        "endIndex":   start + 1
     }}}]}
     svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
     st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
