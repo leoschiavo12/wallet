@@ -623,6 +623,39 @@ with aba_dash:
         )
         st.plotly_chart(fig_evo, use_container_width=True)
 
+        # ── gráfico mensal ────────────────────────────────────────────────────
+        st.subheader("aportes por mês")
+        df_evo_raw["ano_mes"] = df_evo_raw["data_dt"].dt.to_period("M")
+        df_mensal = df_evo_raw.groupby("ano_mes")["valor_evo"].sum().reset_index()
+        df_mensal["ano_mes_dt"] = df_mensal["ano_mes"].dt.to_timestamp()
+        df_mensal["label"]      = df_mensal["ano_mes_dt"].dt.strftime("%b/%y")
+        df_mensal["cor"]        = df_mensal["valor_evo"].apply(
+            lambda x: "#1E88E5" if x >= 0 else "#ef4444"
+        )
+        df_mensal["hover"] = df_mensal.apply(
+            lambda r: f"<b>{r['label']}</b><br>R$ {r['valor_evo']:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            axis=1
+        )
+
+        fig_mensal = go.Figure()
+        fig_mensal.add_trace(go.Bar(
+            x=df_mensal["ano_mes_dt"],
+            y=df_mensal["valor_evo"],
+            marker_color=df_mensal["cor"].tolist(),
+            hovertemplate="%{customdata}<extra></extra>",
+            customdata=df_mensal["hover"].tolist(),
+        ))
+        fig_mensal.update_layout(
+            height=280,
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            showlegend=False,
+            bargap=0.2,
+            xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45),
+            yaxis=dict(showgrid=True, gridcolor="#333"),
+            margin=dict(t=10, b=10, l=10, r=10)
+        )
+        st.plotly_chart(fig_mensal, use_container_width=True)
+
 with aba_detalhe:
     sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
         ["carteira", "FIIs", "ETFs", "cripto", "tesouro"]
