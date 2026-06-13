@@ -125,6 +125,27 @@ def obter_preco_btc_brl():
         pass
     return 0.0
 
+@st.cache_data(ttl=3600)
+def obter_historico_btc_brl():
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
+        params = {"vs_currency": "brl", "days": "1825", "interval": "daily"}
+        r = requests.get(url, params=params, timeout=15)
+        dados = r.json()
+        prices = dados.get("prices", [])
+        df_h = pd.DataFrame(prices, columns=["ts", "preco"])
+        df_h["data"] = pd.to_datetime(df_h["ts"], unit="ms")
+        df_h = df_h.set_index("data")["preco"]
+        return df_h
+    except:
+        pass
+    # fallback: yfinance
+    try:
+        dados = yf.download("BTC-BRL", period="5y", progress=False, auto_adjust=True)
+        return dados['Close'].ffill().dropna()
+    except:
+        return pd.Series(dtype=float)
+
 def obter_preco_renda_mais():
     try:
         from io import StringIO
@@ -549,6 +570,7 @@ with aba_detalhe:
         n_tijolo  = sum(1 for t in df_fii['Ativo'] if FII_INFO.get(t, {}).get('tipo') == 'tijolo')
         n_papel   = sum(1 for t in df_fii['Ativo'] if FII_INFO.get(t, {}).get('tipo') == 'papel')
 
+        # cards resumo
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("total FIIs", formatar_brl(total_fii))
         c2.metric(f"dividendos — {meses_pt3[mes_ref_f]}/{ano_ref_f}", formatar_brl(div_total))
@@ -557,55 +579,18 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        # tabela com colunas numéricas para sort correto
-        linhas_fii = []
-        for _, row in df_fii.iterrows():
-            t        = row['Ativo']
-            info     = FII_INFO.get(t, {'tipo': '?', 'indexador': None})
-            preco    = row['preco_unit']
-            div_info = div_detalhe.get(t, {})
-            div_cota = div_info.get('por_cota', 0.0)
-            yield_m  = (div_cota / preco * 100) if preco > 0 and div_cota > 0 else None
-            yield_a  = ((1 + yield_m/100)**12 - 1)*100 if yield_m else None
-            linhas_fii.append({
-                'ativo':        t,
-                'tipo':         info['tipo'],
-                'indexador':    info['indexador'] if info['tipo'] == 'papel' and info['indexador'] else '—',
-                'qtd':          int(row['Qtd']),
-                'preço':        preco,
-                'total':        row['Total Atual'],
-                'part. %':      row['Part. %'],
-                'div/cota':     div_cota if div_cota > 0 else None,
-                'yield mensal': yield_m,
-                'yield anual':  yield_a,
-            })
-
-        df_fii_num = pd.DataFrame(linhas_fii).sort_values('total', ascending=False)
-
-        df_fii_fmt = df_fii_num.copy()
-        df_fii_fmt['preço']        = df_fii_fmt['preço'].apply(formatar_brl)
-        df_fii_fmt['total']        = df_fii_fmt['total'].apply(formatar_brl)
-        df_fii_fmt['part. %']      = df_fii_fmt['part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
-        df_fii_fmt['div/cota']     = df_fii_fmt['div/cota'].apply(lambda x: formatar_brl(x) if x else '—')
-        df_fii_fmt['yield mensal'] = df_fii_fmt['yield mensal'].apply(lambda x: f"{x:.2f}%".replace('.', ',') if x else '—')
-        df_fii_fmt['yield anual']  = df_fii_fmt['yield anual'].apply(lambda x: f"{x:.1f}%".replace('.', ',') if x else '—')
-        df_fii_fmt['qtd']          = df_fii_fmt['qtd'].apply(str)
-
-        cfg_fii = {c: st.column_config.TextColumn(c, alignment="center") for c in df_fii_fmt.columns}
-        st.dataframe(df_fii_fmt, use_container_width=True, hide_index=True, column_config=cfg_fii)
-
-        st.markdown("---")
-        st.subheader("tijolo vs papel")
+        # tijolo vs papel (sem título)
         df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
         resumo_tipo = df_fii.groupby('tipo_fii')['Total Atual'].sum().reset_index()
-        resumo_tipo['%'] = resumo_tipo['Total Atual'] / total_fii * 100
         c1, c2 = st.columns(2)
         for _, r in resumo_tipo.sort_values('Total Atual', ascending=False).iterrows():
+            pct = r['Total Atual'] / total_fii * 100 if total_fii > 0 else 0
             col = c1 if r['tipo_fii'] == 'tijolo' else c2
-            col.metric(f"{r['tipo_fii']} — {r['%']:.1f}%".replace('.', ','), formatar_brl(r['Total Atual']))
+            col.metric(f"{r['tipo_fii']} — {pct:.1f}%".replace('.', ','), formatar_brl(r['Total Atual']))
 
         st.markdown("---")
-        st.subheader("papel — CDI vs IPCA")
+
+        # papel CDI vs IPCA (sem título)
         df_papel = df_fii[df_fii['tipo_fii'] == 'papel'].copy()
         df_papel['indexador'] = df_papel['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('indexador', '?'))
         if not df_papel.empty:
@@ -615,15 +600,58 @@ with aba_detalhe:
             for i, (_, r) in enumerate(resumo_idx.sort_values('Total Atual', ascending=False).iterrows()):
                 pct = r['Total Atual'] / total_papel * 100 if total_papel > 0 else 0
                 cols_idx[i].metric(f"{r['indexador']} — {pct:.1f}%".replace('.', ','), formatar_brl(r['Total Atual']))
-            df_papel_fmt = pd.DataFrame({
-                'ativo':     df_papel.sort_values('Total Atual', ascending=False)['Ativo'].values,
-                'indexador': df_papel.sort_values('Total Atual', ascending=False)['indexador'].values,
-                'qtd':       df_papel.sort_values('Total Atual', ascending=False)['Qtd'].apply(lambda x: str(int(x))).values,
-                'total':     df_papel.sort_values('Total Atual', ascending=False)['Total Atual'].apply(formatar_brl).values,
-                'part. %':   df_papel.sort_values('Total Atual', ascending=False)['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ',')).values,
+
+        st.markdown("---")
+
+        # calcular preço médio por FII dos lançamentos
+        lanc_df = ler_lancamentos()
+        pm_fii = {}
+        if not lanc_df.empty:
+            for t in df_fii['Ativo']:
+                compras = lanc_df[(lanc_df['ativo'] == t) & (lanc_df['tipo'] == 'compra')]
+                if not compras.empty:
+                    total_c = (compras['quantidade'] * compras['preco_unitario']).sum()
+                    qtd_c   = compras['quantidade'].sum()
+                    pm_fii[t] = total_c / qtd_c if qtd_c > 0 else 0
+
+        # tabela detalhada (no final)
+        linhas_fii = []
+        for _, row in df_fii.iterrows():
+            t        = row['Ativo']
+            info     = FII_INFO.get(t, {'tipo': '?', 'indexador': None})
+            preco    = row['preco_unit']
+            pm       = pm_fii.get(t, None)
+            div_info = div_detalhe.get(t, {})
+            div_cota = div_info.get('por_cota', 0.0)
+            yield_m  = (div_cota / preco * 100) if preco > 0 and div_cota > 0 else None
+            yield_a  = ((1 + yield_m/100)**12 - 1)*100 if yield_m else None
+            linhas_fii.append({
+                'ativo':        t,
+                'tipo':         info['tipo'],
+                'indexador':    info['indexador'] if info['tipo'] == 'papel' and info['indexador'] else '—',
+                'qtd':          int(row['Qtd']),
+                'preço médio':  pm,
+                'preço atual':  preco,
+                'total':        row['Total Atual'],
+                'part. %':      row['Part. %'],
+                'div/cota':     div_cota if div_cota > 0 else None,
+                'yield mensal': yield_m,
+                'yield anual':  yield_a,
             })
-            cfg_papel = {c: st.column_config.TextColumn(c, alignment="center") for c in df_papel_fmt.columns}
-            st.dataframe(df_papel_fmt, use_container_width=True, hide_index=True, column_config=cfg_papel)
+
+        df_fii_num = pd.DataFrame(linhas_fii).sort_values('total', ascending=False)
+        df_fii_fmt = df_fii_num.copy()
+        df_fii_fmt['preço médio']  = df_fii_fmt['preço médio'].apply(lambda x: formatar_brl(x) if x else '—')
+        df_fii_fmt['preço atual']  = df_fii_fmt['preço atual'].apply(formatar_brl)
+        df_fii_fmt['total']        = df_fii_fmt['total'].apply(formatar_brl)
+        df_fii_fmt['part. %']      = df_fii_fmt['part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
+        df_fii_fmt['div/cota']     = df_fii_fmt['div/cota'].apply(lambda x: formatar_brl(x) if x else '—')
+        df_fii_fmt['yield mensal'] = df_fii_fmt['yield mensal'].apply(lambda x: f"{x:.2f}%".replace('.', ',') if x else '—')
+        df_fii_fmt['yield anual']  = df_fii_fmt['yield anual'].apply(lambda x: f"{x:.1f}%".replace('.', ',') if x else '—')
+        df_fii_fmt['qtd']          = df_fii_fmt['qtd'].apply(str)
+
+        cfg_fii = {c: st.column_config.TextColumn(c, alignment="center") for c in df_fii_fmt.columns}
+        st.dataframe(df_fii_fmt, use_container_width=True, hide_index=True, column_config=cfg_fii)
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: ETFs
@@ -667,21 +695,6 @@ with aba_detalhe:
     # SUB-ABA: CRIPTO
     # ══════════════════════════════════════════════════════════════════════════
     with sub_cripto:
-        @st.cache_data(ttl=3600)
-        def obter_historico_btc_brl():
-            try:
-                url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
-                params = {"vs_currency": "brl", "days": "1825", "interval": "daily"}
-                r = requests.get(url, params=params, timeout=15)
-                dados = r.json()
-                prices = dados.get("prices", [])
-                df_h = pd.DataFrame(prices, columns=["ts", "preco"])
-                df_h["data"] = pd.to_datetime(df_h["ts"], unit="ms")
-                df_h = df_h.set_index("data")["preco"]
-                return df_h
-            except:
-                return pd.Series(dtype=float)
-
         preco_btc_atual = precos.get('BTC', 0.0)
         qtd_btc         = MINHA_CARTEIRA['Cripto']['BTC']
         total_btc       = preco_btc_atual * qtd_btc
