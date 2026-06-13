@@ -235,6 +235,30 @@ MINHA_CARTEIRA = {
     'Tesouro Direto': {'Renda+ 2050': (24, 490.02)}
 }
 
+# ── Classificação dos FIIs ───────────────────────────────────────────────────
+FII_INFO = {
+    'TRXF11': {'tipo': 'tijolo',  'indexador': None},
+    'XPML11': {'tipo': 'tijolo',  'indexador': None},
+    'XPLG11': {'tipo': 'tijolo',  'indexador': None},
+    'KNRI11': {'tipo': 'tijolo',  'indexador': None},
+    'BTLG11': {'tipo': 'tijolo',  'indexador': None},
+    'GARE11': {'tipo': 'tijolo',  'indexador': None},
+    'RZTR11': {'tipo': 'tijolo',  'indexador': None},
+    'BTCI11': {'tipo': 'papel',   'indexador': 'IPCA'},
+    'VGIR11': {'tipo': 'papel',   'indexador': 'CDI'},
+    'MCCI11': {'tipo': 'papel',   'indexador': 'IPCA'},
+    'KNCR11': {'tipo': 'papel',   'indexador': 'CDI'},
+}
+
+# ── Configurações de alocação alvo (será migrado para aba configs no futuro) ─
+ALVO_CLASSE = {
+    'ETF':            40.0,
+    'FII':            25.0,
+    'Tesouro Direto': 20.0,
+    'Cripto':         10.0,
+    # Tesouro Selic 2031 = 0% (sendo zerado)
+}
+
 todos_b3 = [t for cls in ['ETF', 'FII'] for t in MINHA_CARTEIRA[cls].keys()]
 precos = obter_precos_b3(todos_b3)
 precos['BTC'] = obter_preco_btc_brl()
@@ -279,7 +303,7 @@ SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
 SHEET_TAB = "lancamentos"
 HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
 
-aba_dash, aba_detalhe, aba_lanc, aba_aportes = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes"])
+aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes", "⚙️ configurações"])
 
 with aba_dash:
     st.metric("patrimonio total", formatar_brl(total_geral))
@@ -408,87 +432,354 @@ with aba_dash:
         st.plotly_chart(fig_ativo, use_container_width=True)
 
 with aba_detalhe:
-    # ── Tabela de ativos (primeira) ──────────────────────────────────────────
-    df_view = df.copy()
+    sub_fiis, sub_etfs, sub_cripto, sub_tesouro, sub_resumo = st.tabs(
+        ["FIIs", "ETFs", "cripto", "tesouro", "resumo carteira"]
+    )
 
-    # formatar preco_unit: BTC abreviado, outros normal
-    def fmt_preco(row):
-        if row['Ativo'] == 'BTC':
-            v = row['preco_unit']
-            return f"R$ {v/1000:.1f}k".replace('.', ',')
-        v = row['preco_unit']
-        s = f"{v:,.2f}".replace(',','X').replace('.',',').replace('X','.')
-        return f"R$ {s}" 
+    # ── helpers compartilhados ────────────────────────────────────────────────
+    def _lanc_json_cached():
+        try:
+            svc  = get_sheets_service()
+            res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
+            rows = res.get("values", [])
+            hdrs = ["data","tipo","Ativo","Classe","quantidade","preco_unitario","total"]
+            if len(rows) > 1:
+                n = len(hdrs)
+                padded = [(r + [''] * n)[:n] for r in rows[1:]]
+                df_tmp = pd.DataFrame(padded, columns=hdrs)
+                for col in ["quantidade","total"]:
+                    df_tmp[col] = pd.to_numeric(df_tmp[col], errors='coerce').fillna(0)
+                return df_tmp.to_dict(orient='records')
+        except:
+            pass
+        return []
 
-    # formatar qtd: BTC com 4 decimais, outros sem decimais desnecessarias
-    def fmt_qtd(row):
-        if row['Ativo'] == 'BTC':
-            return f"{row['Qtd']:.4f}".replace('.', ',')
-        v = row['Qtd']
-        if v == int(v):
-            return str(int(v))
-        return f"{v:g}".replace('.', ',')
+    # ══════════════════════════════════════════════════════════════════════════
+    # SUB-ABA: FIIs
+    # ══════════════════════════════════════════════════════════════════════════
+    with sub_fiis:
+        from datetime import date as _d
+        hoje_d  = _d.today()
+        mes_ref_f = hoje_d.month - 1 if hoje_d.month > 1 else 12
+        ano_ref_f = hoje_d.year if hoje_d.month > 1 else hoje_d.year - 1
+        meses_pt3 = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
+                     7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
 
-    df_view['preco_fmt']  = df_view.apply(fmt_preco, axis=1)
-    df_view['qtd_fmt']    = df_view.apply(fmt_qtd, axis=1)
-    df_view['total_fmt']  = df_view['Total Atual'].apply(
-        lambda x: f"R$ {int(round(x)):,}".replace(',', '.'))
-    df_view['part_fmt']   = df_view['Part. %'].apply(
-        lambda x: f"{x:.2f}%".replace('.', ','))
+        lanc_json = _lanc_json_cached()
+        div_total, div_detalhe = obter_dividendos_mes_anterior(lanc_json)
 
-    config = {
-        'Ativo':       st.column_config.TextColumn("ativo",       alignment="center"),
-        'Classe':      st.column_config.TextColumn("classe",      alignment="center"),
-        'preco_unit':  st.column_config.NumberColumn("preço atual",  format="R$ %.2f", alignment="center"),
-        'Qtd':         st.column_config.NumberColumn("qtd",          format="%.4g",    alignment="center"),
-        'Total Atual': st.column_config.NumberColumn("total atual",  format="R$ %d",   alignment="center"),
-        'Part. %':     st.column_config.NumberColumn("part. %",      format="%.2f%%",  alignment="center"),
-    }
-    st.dataframe(df[['Ativo','Classe','preco_unit','Qtd','Total Atual','Part. %']],
-                 use_container_width=True, hide_index=True, column_config=config)
+        df_fii = df[df['Classe'] == 'FII'].copy()
+        total_fii = df_fii['Total Atual'].sum()
+        n_tijolo  = sum(1 for t in df_fii['Ativo'] if FII_INFO.get(t, {}).get('tipo') == 'tijolo')
+        n_papel   = sum(1 for t in df_fii['Ativo'] if FII_INFO.get(t, {}).get('tipo') == 'papel')
 
-    st.markdown("---")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("total FIIs",        formatar_brl(total_fii))
+        c2.metric(f"dividendos — {meses_pt3[mes_ref_f]}/{ano_ref_f}", formatar_brl(div_total))
+        c3.metric("fundos tijolo",     f"{n_tijolo}")
+        c4.metric("fundos papel",      f"{n_papel}")
 
-    # ── Dividendos (depois da tabela de ativos) ───────────────────────────────
-    from datetime import date as _d
-    hoje_d  = _d.today()
-    mes_ref = hoje_d.month - 1 if hoje_d.month > 1 else 12
-    ano_ref = hoje_d.year if hoje_d.month > 1 else hoje_d.year - 1
-    meses_pt2 = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
-                 7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
+        st.markdown("---")
+        st.subheader("posição atual")
 
-    try:
-        _svc  = get_sheets_service()
-        _res  = _svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
-        _rows = _res.get("values", [])
-        _hdrs = ["data","tipo","Ativo","Classe","quantidade","preco_unitario","total"]
-        if len(_rows) > 1:
-            _n = len(_hdrs)
-            _padded = [(r + [''] * _n)[:_n] for r in _rows[1:]]
-            _df_tmp = pd.DataFrame(_padded, columns=_hdrs)
-            for col in ["quantidade","total"]:
-                _df_tmp[col] = pd.to_numeric(_df_tmp[col], errors='coerce').fillna(0)
-            _lanc_json = _df_tmp.to_dict(orient='records')
-        else:
-            _lanc_json = []
-    except:
-        _lanc_json = []
-    div_total, div_detalhe = obter_dividendos_mes_anterior(_lanc_json)
+        linhas_fii = []
+        for _, row in df_fii.iterrows():
+            t    = row['Ativo']
+            info = FII_INFO.get(t, {'tipo': '?', 'indexador': None})
+            preco = row['preco_unit']
+            div_info = div_detalhe.get(t, {})
+            div_cota  = div_info.get('por_cota', 0.0)
+            yield_m   = (div_cota / preco * 100) if preco > 0 and div_cota > 0 else None
+            yield_a   = ((1 + yield_m/100)**12 - 1)*100 if yield_m else None
+            indexador = info['indexador'] if info['tipo'] == 'papel' else '—'
+            linhas_fii.append({
+                'ativo':        t,
+                'tipo':         info['tipo'],
+                'indexador':    indexador if indexador else '—',
+                'qtd':          int(row['Qtd']),
+                'preço':        formatar_brl(preco),
+                'total':        formatar_brl(row['Total Atual']),
+                'part. %':      f"{row['Part. %']:.2f}%".replace('.', ','),
+                'div/cota':     formatar_brl(div_cota) if div_cota > 0 else '—',
+                'yield mensal': f"{yield_m:.2f}%".replace('.', ',') if yield_m else '—',
+                'yield anual':  f"{yield_a:.1f}%".replace('.', ',')  if yield_a else '—',
+            })
 
-    st.metric(f"dividendos FIIs — {meses_pt2[mes_ref]}/{ano_ref}", formatar_brl(div_total))
+        df_fii_view = pd.DataFrame(linhas_fii).sort_values('total', ascending=False)
+        cfg_fii = {c: st.column_config.TextColumn(c, alignment="center") for c in df_fii_view.columns}
+        st.dataframe(df_fii_view, use_container_width=True, hide_index=True, column_config=cfg_fii)
 
-    if div_detalhe:
-        df_div = pd.DataFrame([
-            {'ativo': t,
-             'qtd na data': str(int(round(v['qtd']))),
-             'div/cota': f"R$ {v['por_cota']:.2f}".replace('.', ','),
-             'total': formatar_brl(v['total'])}
-            for t, v in sorted(div_detalhe.items(), key=lambda x: -x[1]['total'])
+        st.markdown("---")
+        st.subheader("tijolo vs papel")
+
+        df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
+        resumo_tipo = df_fii.groupby('tipo_fii')['Total Atual'].sum().reset_index()
+        resumo_tipo['%'] = resumo_tipo['Total Atual'] / total_fii * 100
+
+        c1, c2 = st.columns(2)
+        for _, r in resumo_tipo.iterrows():
+            col = c1 if r['tipo_fii'] == 'tijolo' else c2
+            col.metric(r['tipo_fii'], formatar_brl(r['Total Atual']),
+                       f"{r['%']:.1f}% dos FIIs".replace('.', ','))
+
+        st.markdown("---")
+        st.subheader("papel — CDI vs IPCA")
+
+        df_papel = df_fii[df_fii['tipo_fii'] == 'papel'].copy()
+        df_papel['indexador'] = df_papel['Ativo'].map(
+            lambda t: FII_INFO.get(t, {}).get('indexador', '?'))
+        if not df_papel.empty:
+            resumo_idx = df_papel.groupby('indexador')['Total Atual'].sum().reset_index()
+            resumo_idx['%'] = resumo_idx['Total Atual'] / df_papel['Total Atual'].sum() * 100
+            cols_idx = st.columns(len(resumo_idx))
+            for i, (_, r) in enumerate(resumo_idx.iterrows()):
+                cols_idx[i].metric(r['indexador'], formatar_brl(r['Total Atual']),
+                                   f"{r['%']:.1f}% dos FIIs papel".replace('.', ','))
+            df_papel_view = df_papel[['Ativo','indexador','Qtd','Total Atual','Part. %']].copy()
+            df_papel_view['Qtd']         = df_papel_view['Qtd'].apply(lambda x: str(int(x)))
+            df_papel_view['Total Atual'] = df_papel_view['Total Atual'].apply(formatar_brl)
+            df_papel_view['Part. %']     = df_papel_view['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
+            df_papel_view = df_papel_view.rename(columns={'Ativo':'ativo','indexador':'indexador','Qtd':'qtd','Total Atual':'total','Part. %':'part. %'})
+            cfg_papel = {c: st.column_config.TextColumn(c, alignment="center") for c in df_papel_view.columns}
+            st.dataframe(df_papel_view, use_container_width=True, hide_index=True, column_config=cfg_papel)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SUB-ABA: ETFs
+    # ══════════════════════════════════════════════════════════════════════════
+    with sub_etfs:
+        df_etf = df[df['Classe'] == 'ETF'].copy()
+        total_etf = df_etf['Total Atual'].sum()
+        df_etf['part_classe_%'] = df_etf['Total Atual'] / total_etf * 100
+
+        st.subheader("posição atual")
+        df_etf_view = pd.DataFrame({
+            'ativo':          df_etf['Ativo'],
+            'qtd':            df_etf['Qtd'].apply(lambda x: str(int(x))),
+            'preço':          df_etf['preco_unit'].apply(formatar_brl),
+            'total':          df_etf['Total Atual'].apply(formatar_brl),
+            'part. carteira': df_etf['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ',')),
+            'part. ETFs':     df_etf['part_classe_%'].apply(lambda x: f"{x:.1f}%".replace('.', ',')),
+        })
+        cfg_etf = {c: st.column_config.TextColumn(c, alignment="center") for c in df_etf_view.columns}
+        st.dataframe(df_etf_view.sort_values('total', ascending=False),
+                     use_container_width=True, hide_index=True, column_config=cfg_etf)
+
+        st.markdown("---")
+        st.subheader("distribuição dentro da classe")
+        fig_etf_donut = go.Figure(go.Pie(
+            labels=df_etf['Ativo'].tolist(),
+            values=df_etf['Total Atual'].tolist(),
+            hole=0.6,
+            textinfo='label+percent',
+            textfont=dict(size=11),
+            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_etf)]),
+        ))
+        fig_etf_donut.update_layout(
+            height=320, showlegend=False,
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(t=20, b=20, l=20, r=20)
+        )
+        st.plotly_chart(fig_etf_donut, use_container_width=True)
+        st.info("⚙️ % alvo por ativo será configurado na aba **configurações** — desvios aparecerão aqui quando disponível.", icon="ℹ️")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SUB-ABA: CRIPTO
+    # ══════════════════════════════════════════════════════════════════════════
+    with sub_cripto:
+        @st.cache_data(ttl=3600)
+        def obter_historico_btc_brl():
+            try:
+                url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
+                params = {"vs_currency": "brl", "days": "1825", "interval": "daily"}
+                r = requests.get(url, params=params, timeout=15)
+                dados = r.json()
+                prices = dados.get("prices", [])
+                df_h = pd.DataFrame(prices, columns=["ts", "preco"])
+                df_h["data"] = pd.to_datetime(df_h["ts"], unit="ms")
+                df_h = df_h.set_index("data")["preco"]
+                return df_h
+            except:
+                return pd.Series(dtype=float)
+
+        preco_btc_atual = precos.get('BTC', 0.0)
+        qtd_btc         = MINHA_CARTEIRA['Cripto']['BTC']
+        total_btc       = preco_btc_atual * qtd_btc
+        hist = obter_historico_btc_brl()
+
+        def var_pct(serie, dias):
+            if serie.empty or len(serie) < dias + 1:
+                return None
+            preco_ant = serie.iloc[-(dias+1)]
+            return (preco_btc_atual / preco_ant - 1) * 100 if preco_ant > 0 else None
+
+        var_1d  = var_pct(hist, 1)
+        var_7d  = var_pct(hist, 7)
+        var_30d = var_pct(hist, 30)
+        var_6m  = var_pct(hist, 182)
+        var_1a  = var_pct(hist, 365)
+        var_5a  = var_pct(hist, 1825)
+
+        def fmt_var(v):
+            if v is None: return "—"
+            sinal = "+" if v >= 0 else ""
+            return f"{sinal}{v:.1f}%".replace('.', ',')
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("quantidade",       f"{qtd_btc:.6f}".replace('.', ',') + " BTC")
+        c2.metric("preço atual",      formatar_brl(preco_btc_atual))
+        c3.metric("total na carteira", formatar_brl(total_btc))
+
+        st.markdown("---")
+        st.subheader("variação do preço (BRL)")
+
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        for col, label, v in [
+            (c1, "hoje",    var_1d),
+            (c2, "7 dias",  var_7d),
+            (c3, "30 dias", var_30d),
+            (c4, "6 meses", var_6m),
+            (c5, "1 ano",   var_1a),
+            (c6, "5 anos",  var_5a),
+        ]:
+            col.metric(label, fmt_var(v), delta_color="normal" if (v or 0) >= 0 else "inverse")
+
+        st.markdown("---")
+        if not hist.empty:
+            st.subheader("histórico — últimos 12 meses")
+            hist_1a = hist.last("365D")
+            fig_btc = go.Figure()
+            fig_btc.add_trace(go.Scatter(
+                x=hist_1a.index, y=hist_1a.values,
+                mode="lines",
+                line=dict(color="#F7931A", width=2),
+                hovertemplate="%{x|%d/%m/%Y}<br>R$ %{y:,.0f}<extra></extra>"
+            ))
+            fig_btc.update_layout(
+                height=280,
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                showlegend=False,
+                xaxis=dict(showgrid=False),
+                yaxis=dict(showgrid=True, gridcolor="#333"),
+                margin=dict(t=10, b=10, l=10, r=10)
+            )
+            st.plotly_chart(fig_btc, use_container_width=True)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SUB-ABA: TESOURO
+    # ══════════════════════════════════════════════════════════════════════════
+    with sub_tesouro:
+        df_td = df[df['Classe'] == 'Tesouro Direto'].copy()
+        st.subheader("tesouro direto")
+
+        lanc_all = ler_lancamentos()
+        for _, row in df_td.iterrows():
+            ativo       = row['Ativo']
+            qtd         = int(row['Qtd'])
+            preco_atual = row['preco_unit']
+            total_atual = row['Total Atual']
+
+            if not lanc_all.empty:
+                compras_td      = lanc_all[(lanc_all['ativo'] == ativo) & (lanc_all['tipo'] == 'compra')]
+                total_investido = (compras_td['quantidade'] * compras_td['preco_unitario']).sum()
+                qtd_comprada    = compras_td['quantidade'].sum()
+                pm              = total_investido / qtd_comprada if qtd_comprada > 0 else 0
+            else:
+                total_investido, pm = 0.0, 0.0
+
+            valorizacao     = total_atual - total_investido if total_investido > 0 else None
+            valorizacao_pct = (valorizacao / total_investido * 100) if total_investido > 0 and valorizacao else None
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("ativo",               ativo)
+            c2.metric("quantidade (títulos)", str(qtd))
+            c3.metric("preço atual (PU)",     formatar_brl(preco_atual))
+            c4.metric("total atual (venda)",  formatar_brl(total_atual))
+
+            c5, c6, c7 = st.columns(3)
+            c5.metric("total investido",  formatar_brl(total_investido) if total_investido > 0 else "—")
+            c6.metric("preço médio pago", formatar_brl(pm) if pm > 0 else "—")
+            if valorizacao is not None:
+                sinal = "+" if valorizacao >= 0 else ""
+                c7.metric("valorização mark-to-market", formatar_brl(valorizacao),
+                           f"{sinal}{valorizacao_pct:.1f}%".replace('.', ','),
+                           delta_color="normal" if valorizacao >= 0 else "inverse")
+            else:
+                c7.metric("valorização mark-to-market", "—")
+
+            if 'preco_renda_auto' in st.session_state:
+                st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
+            elif 'preco_renda_erro' in st.session_state:
+                st.caption(f"preço manual (secrets) — API: {st.session_state.get('preco_renda_erro','')}")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SUB-ABA: RESUMO CARTEIRA
+    # ══════════════════════════════════════════════════════════════════════════
+    with sub_resumo:
+        st.subheader("alocação por classe")
+        st.info("⚙️ % alvo será vinculado à aba **configurações** quando criada. valores abaixo usam alocação padrão da estratégia.", icon="ℹ️")
+
+        linhas_resumo = []
+        for cls, alvo in ALVO_CLASSE.items():
+            total_cls = df[df['Classe'] == cls]['Total Atual'].sum()
+            atual_pct = total_cls / total_geral * 100 if total_geral > 0 else 0
+            desvio    = atual_pct - alvo
+            semaforo  = "🟡" if abs(desvio) < 2 else ("🔴" if desvio < 0 else "🟢")
+            linhas_resumo.append({
+                'classe':  cls,
+                'alvo %':  f"{alvo:.1f}%".replace('.', ','),
+                'atual %': f"{atual_pct:.1f}%".replace('.', ','),
+                'desvio':  f"{'+' if desvio >= 0 else ''}{desvio:.1f}%".replace('.', ','),
+                'status':  semaforo,
+                'total':   formatar_brl(total_cls),
+            })
+
+        df_resumo_view = pd.DataFrame(linhas_resumo)
+        cfg_res = {c: st.column_config.TextColumn(c, alignment="center") for c in df_resumo_view.columns}
+        st.dataframe(df_resumo_view, use_container_width=True, hide_index=True, column_config=cfg_res)
+
+        st.markdown("---")
+        st.subheader("renda fixa vs renda variável")
+        total_rf = df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
+        total_rv = df[df['Classe'].isin(['ETF','FII','Cripto'])]['Total Atual'].sum()
+        pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
+        pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
+        c1, c2 = st.columns(2)
+        c1.metric("renda fixa (tesouro)", formatar_brl(total_rf),
+                  f"{pct_rf:.1f}% da carteira".replace('.', ','))
+        c2.metric("renda variável (ETF + FII + cripto)", formatar_brl(total_rv),
+                  f"{pct_rv:.1f}% da carteira".replace('.', ','))
+
+        st.markdown("---")
+        st.subheader("exposição CDI vs IPCA (renda fixa + FII papel)")
+        df_fii_res = df[df['Classe'] == 'FII'].copy()
+        total_cdi  = df_fii_res[df_fii_res['Ativo'].map(lambda t: FII_INFO.get(t,{}).get('indexador')) == 'CDI']['Total Atual'].sum()
+        total_ipca = df_fii_res[df_fii_res['Ativo'].map(lambda t: FII_INFO.get(t,{}).get('indexador')) == 'IPCA']['Total Atual'].sum()
+        total_ipca += df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
+        total_idx  = total_cdi + total_ipca
+        c1, c2 = st.columns(2)
+        c1.metric("CDI (FIIs papel CDI)", formatar_brl(total_cdi),
+                  f"{total_cdi/total_idx*100:.1f}% do indexado".replace('.', ',') if total_idx > 0 else "—")
+        c2.metric("IPCA (FIIs papel IPCA + Renda+)", formatar_brl(total_ipca),
+                  f"{total_ipca/total_idx*100:.1f}% do indexado".replace('.', ',') if total_idx > 0 else "—")
+
+        st.markdown("---")
+        st.subheader("exposição geográfica")
+        GEO = {'IVVB11': 'EUA', 'DIVO11': 'Brasil', 'PKIN11': 'China', 'LFTB11': 'Brasil'}
+        geo_totais = {}
+        for _, row in df[df['Classe'] == 'ETF'].iterrows():
+            pais = GEO.get(row['Ativo'], 'Brasil')
+            geo_totais[pais] = geo_totais.get(pais, 0) + row['Total Atual']
+        geo_totais['Brasil'] = geo_totais.get('Brasil', 0) \
+            + df[df['Classe'] == 'FII']['Total Atual'].sum() \
+            + df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
+        geo_totais['Global (cripto)'] = df[df['Classe'] == 'Cripto']['Total Atual'].sum()
+        df_geo = pd.DataFrame([
+            {'país/região': p, 'total': formatar_brl(v),
+             '%': f"{v/total_geral*100:.1f}%".replace('.', ',')}
+            for p, v in sorted(geo_totais.items(), key=lambda x: -x[1])
         ])
-        cfg_div = {c: st.column_config.TextColumn(c, alignment="center") for c in df_div.columns}
-        st.dataframe(df_div, use_container_width=True, hide_index=True, column_config=cfg_div)
-    else:
-        st.caption("nenhum dividendo encontrado para o mês de referência")
+        cfg_geo = {c: st.column_config.TextColumn(c, alignment="center") for c in df_geo.columns}
+        st.dataframe(df_geo, use_container_width=True, hide_index=True, column_config=cfg_geo)
 
 # ── Google Sheets helpers movidos para antes das abas ──
 
@@ -806,3 +1097,14 @@ with aba_lanc:
             yaxis=dict(showgrid=True, gridcolor="#333")
         )
         st.plotly_chart(fig_evo, use_container_width=True)
+
+# ── Aba configurações (esqueleto) ─────────────────────────────────────────────
+with aba_config:
+    st.subheader("⚙️ configurações")
+    st.caption("esta aba está em construção. aqui você poderá definir % alvo por classe e por ativo, metas financeiras e meta de aportes.")
+
+    st.markdown("---")
+    st.markdown("**alocação alvo por classe** *(em breve)*")
+    st.markdown("**alocação alvo por ativo** *(em breve)*")
+    st.markdown("**meta de aporte mensal** *(em breve)*")
+    st.markdown("**metas financeiras** *(em breve)*")
