@@ -364,7 +364,7 @@ HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", 
 def ler_lancamentos():
     try:
         svc  = get_sheets_service()
-        res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:H").execute()
+        res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
         rows = res.get("values", [])
         if len(rows) <= 1:
             return pd.DataFrame(columns=HEADERS)
@@ -402,7 +402,7 @@ def salvar_lancamento(row: list):
     svc = get_sheets_service()
     svc.values().append(
         spreadsheetId=SHEET_ID,
-        range=f"{SHEET_TAB}!A:H",
+        range=f"{SHEET_TAB}!A:G",
         valueInputOption="USER_ENTERED",
         body={"values": [row]}
     ).execute()
