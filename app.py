@@ -580,14 +580,14 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        # tijolo vs papel (sem título) — % em destaque, valor abaixo
+        # tijolo vs papel (sem título) — % em destaque, nome + R$ no label
         df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
         resumo_tipo = df_fii.groupby('tipo_fii')['Total Atual'].sum().reset_index()
         c1, c2 = st.columns(2)
         for _, r in resumo_tipo.sort_values('Total Atual', ascending=False).iterrows():
             pct = r['Total Atual'] / total_fii * 100 if total_fii > 0 else 0
             col = c1 if r['tipo_fii'] == 'tijolo' else c2
-            col.metric(formatar_brl(r['Total Atual']), f"{pct:.1f}%".replace('.', ','))
+            col.metric(f"{r['tipo_fii']}  ·  {formatar_brl(r['Total Atual'])}", f"{pct:.1f}%".replace('.', ','))
 
         st.markdown("---")
 
@@ -600,7 +600,7 @@ with aba_detalhe:
             cols_idx = st.columns(len(resumo_idx))
             for i, (_, r) in enumerate(resumo_idx.sort_values('Total Atual', ascending=False).iterrows()):
                 pct = r['Total Atual'] / total_papel * 100 if total_papel > 0 else 0
-                cols_idx[i].metric(formatar_brl(r['Total Atual']), f"{pct:.1f}%".replace('.', ','))
+                cols_idx[i].metric(f"{r['indexador']}  ·  {formatar_brl(r['Total Atual'])}", f"{pct:.1f}%".replace('.', ','))
 
         st.markdown("---")
 
@@ -896,8 +896,8 @@ with aba_detalhe:
         pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
         pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
         c1, c2 = st.columns(2)
-        c1.metric(f"renda fixa — {pct_rf:.1f}%".replace('.', ','), formatar_brl(total_rf))
-        c2.metric(f"renda variável — {pct_rv:.1f}%".replace('.', ','), formatar_brl(total_rv))
+        c1.metric(f"renda fixa  ·  {formatar_brl(total_rf)}", f"{pct_rf:.1f}%".replace('.', ','))
+        c2.metric(f"renda variável  ·  {formatar_brl(total_rv)}", f"{pct_rv:.1f}%".replace('.', ','))
 
         st.markdown("---")
 
@@ -916,7 +916,7 @@ with aba_detalhe:
         cols_geo = st.columns(len(geo_sorted))
         for i, (pais, val) in enumerate(geo_sorted):
             pct = val / total_geral * 100 if total_geral > 0 else 0
-            cols_geo[i].metric(f"{pais} — {pct:.1f}%".replace('.', ','), formatar_brl(val))
+            cols_geo[i].metric(f"{pais}  ·  {formatar_brl(val)}", f"{pct:.1f}%".replace('.', ','))
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
 with aba_lanc:
