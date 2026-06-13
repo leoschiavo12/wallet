@@ -1193,7 +1193,9 @@ with aba_lanc:
 
         # ── histórico ────────────────────────────────────────────────────────
         st.subheader("histórico")
-        df_hist = df_lanc.copy()
+        # guardar índice original (posição no Sheets = índice + 2)
+        df_hist = df_lanc.copy().reset_index(drop=True)
+        df_hist["_sheet_row"] = df_hist.index + 2  # linha real no Sheets (1-based, +1 header)
         df_hist = df_hist.sort_values("data_dt", ascending=False).reset_index(drop=True)
         n = len(df_hist)
         df_hist.insert(0, "#", range(n, 0, -1))
@@ -1223,19 +1225,20 @@ with aba_lanc:
                 min_value=1, max_value=n, step=1, value=1,
                 key="idx_del_input"
             )
-            preview_idx = n - int(idx_del)
-            if 0 <= preview_idx < len(df_hist):
-                row_prev = df_hist.iloc[preview_idx]
+            # buscar a linha real no Sheets pelo # selecionado
+            sel = df_hist[df_hist["#"] == int(idx_del)]
+            if not sel.empty:
+                row_prev   = sel.iloc[0]
+                pos_sheet  = int(row_prev["_sheet_row"])
                 st.caption(f"selecionado: {row_prev['data']} · {row_prev['ativo']} · {row_prev['tipo']} · qtd {row_prev['quantidade']}")
-            pos_sheet = (n - int(idx_del)) + 2
-            st.caption(f"⚙️ debug: n={n}, #={int(idx_del)}, pos_sheet={pos_sheet}, startIndex={pos_sheet-1}")
-            if st.button("excluir", type="secondary"):
-                try:
-                    deletar_lancamento(pos_sheet)
-                    st.success(f"excluído! linha {pos_sheet} do Sheets removida.")
-                except Exception as e:
-                    st.error(f"erro ao excluir: {e}")
-                st.rerun(scope="fragment")
+                st.caption(f"⚙️ debug: linha real no Sheets = {pos_sheet}, startIndex = {pos_sheet - 1}")
+                if st.button("excluir", type="secondary"):
+                    try:
+                        deletar_lancamento(pos_sheet)
+                        st.success(f"excluído!")
+                    except Exception as e:
+                        st.error(f"erro: {e}")
+                    st.rerun(scope="fragment")
 
         st.markdown("---")
 
