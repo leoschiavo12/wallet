@@ -1188,22 +1188,28 @@ with aba_lanc:
             # apenas ativos com saldo positivo (ainda na carteira)
             ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0.001]["ativo"].tolist()
 
-            # calcular preço médio sem groupby/apply para evitar bugs de colunas
+            # calcular preço médio — mesmo padrão da sub-aba FIIs
+            _lanc_pm = ler_lancamentos()
             rows_pm = []
             for ativo in sorted(ativos_ativos):
-                c = df_lanc[(df_lanc["ativo"] == ativo) & (df_lanc["tipo"] == "compra")]
-                qtd_c = float(c["quantidade"].sum())
-                tot_c = float((c["quantidade"] * c["preco_unitario"]).sum())
-                pm_val = tot_c / qtd_c if qtd_c > 0 else 0
-                rows_pm.append({"ativo": ativo, "total investido": tot_c, "qtd comprada": qtd_c, "preco medio": pm_val})
+                compras_a = _lanc_pm[(_lanc_pm['ativo'] == ativo) & (_lanc_pm['tipo'] == 'compra')]
+                if not compras_a.empty:
+                    tot_c = (compras_a['quantidade'] * compras_a['preco_unitario']).sum()
+                    qtd_c = compras_a['quantidade'].sum()
+                    rows_pm.append({
+                        'ativo': ativo,
+                        'total investido': tot_c,
+                        'qtd comprada': qtd_c,
+                        'preco medio': tot_c / qtd_c if qtd_c > 0 else 0
+                    })
 
             pm_fmt = pd.DataFrame(rows_pm)
-            pm_fmt["total investido"] = pm_fmt["total investido"].apply(formatar_brl)
-            pm_fmt["qtd comprada"]    = pm_fmt["qtd comprada"].apply(
+            pm_fmt['total investido'] = pm_fmt['total investido'].apply(formatar_brl)
+            pm_fmt['qtd comprada']    = pm_fmt['qtd comprada'].apply(
                 lambda x: f"{x:.8f}".rstrip('0').rstrip('.').replace('.', ',') if x < 1
                 else f"{x:g}".replace('.', ',')
             )
-            pm_fmt["preco medio"] = pm_fmt["preco medio"].apply(formatar_brl)
+            pm_fmt['preco medio'] = pm_fmt['preco medio'].apply(formatar_brl)
             cfg_pm = {c: st.column_config.TextColumn(c, alignment="center") for c in pm_fmt.columns}
             st.dataframe(pm_fmt, use_container_width=True, hide_index=True, column_config=cfg_pm)
 
