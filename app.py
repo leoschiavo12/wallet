@@ -1072,51 +1072,6 @@ with aba_detalhe:
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
 with aba_lanc:
 
-    df_lanc = ler_lancamentos()
-
-
-    if not df_lanc.empty:
-        df_lanc["data_dt"] = pd.to_datetime(df_lanc["data"], format="%d/%m/%Y", errors="coerce")
-        df_lanc["sinal"]   = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-        df_lanc["valor"]   = df_lanc["total"] * df_lanc["sinal"]
-
-        meses_pt = {
-            1: 'janeiro', 2: 'fevereiro', 3: 'marco', 4: 'abril',
-            5: 'maio', 6: 'junho', 7: 'julho', 8: 'agosto',
-            9: 'setembro', 10: 'outubro', 11: 'novembro', 12: 'dezembro'
-        }
-        hoje      = pd.Timestamp.today()
-        mes_atual = hoje.month
-        ano_atual = hoje.year
-
-        # ── Resumo do mes corrente ────────────────────────────────────────────
-        df_mes = df_lanc[
-            (df_lanc["data_dt"].dt.month == mes_atual) &
-            (df_lanc["data_dt"].dt.year  == ano_atual)
-        ].copy()
-        df_mes["sinal_m"] = df_mes["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-        aporte_mes = (df_mes["total"] * df_mes["sinal_m"]).sum()
-
-        # media dos ultimos 6 meses (excluindo mes atual)
-        meses = []
-        for i in range(1, 7):
-            ref = hoje - pd.DateOffset(months=i)
-            df_ref = df_lanc[
-                (df_lanc["data_dt"].dt.month == ref.month) &
-                (df_lanc["data_dt"].dt.year  == ref.year)
-            ].copy()
-            df_ref["sinal_r"] = df_ref["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-            val = (df_ref["total"] * df_ref["sinal_r"]).sum()
-            meses.append(val)
-        media_6m = sum(meses) / 6
-
-        nome_mes = meses_pt[mes_atual]
-        # guardar no session_state para o fragment acessar
-        st.session_state['_nome_mes']   = nome_mes
-        st.session_state['_aporte_mes'] = formatar_brl(aporte_mes)
-        st.session_state['_media_6m']   = formatar_brl(media_6m)
-
-    # lista unificada de ativos para o formulario
     _opcoes = []
     for t in sorted(MINHA_CARTEIRA.get('ETF', {}).keys()):
         _opcoes.append((t, 'ETF'))
@@ -1127,14 +1082,51 @@ with aba_lanc:
     _nomes = [t for t, _ in _opcoes]
 
     @st.fragment
-    def cabecalho_lancamentos():
+    def aba_lancamentos_fragment():
         from datetime import date as _date
+
+        # ── lê dados frescos sempre que o fragment reroda ─────────────────────
+        df_lanc = ler_lancamentos()
+        if not df_lanc.empty:
+            df_lanc["data_dt"] = pd.to_datetime(df_lanc["data"], format="%d/%m/%Y", errors="coerce")
+            df_lanc["sinal"]   = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+            df_lanc["valor"]   = df_lanc["total"] * df_lanc["sinal"]
+
+        meses_pt = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
+                    7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
+        hoje      = pd.Timestamp.today()
+        mes_atual = hoje.month
+        ano_atual = hoje.year
+
+        # calcular métricas
+        if not df_lanc.empty:
+            df_mes = df_lanc[
+                (df_lanc["data_dt"].dt.month == mes_atual) &
+                (df_lanc["data_dt"].dt.year  == ano_atual)
+            ].copy()
+            df_mes["sinal_m"] = df_mes["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+            aporte_mes = (df_mes["total"] * df_mes["sinal_m"]).sum()
+
+            _meses = []
+            for i in range(1, 7):
+                ref = hoje - pd.DateOffset(months=i)
+                df_ref = df_lanc[
+                    (df_lanc["data_dt"].dt.month == ref.month) &
+                    (df_lanc["data_dt"].dt.year  == ref.year)
+                ].copy()
+                df_ref["sinal_r"] = df_ref["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+                _meses.append((df_ref["total"] * df_ref["sinal_r"]).sum())
+            media_6m = sum(_meses) / 6
+        else:
+            aporte_mes, media_6m = 0.0, 0.0
+
+        # ── cabeçalho: métricas + formulário ─────────────────────────────────
         aberto = st.session_state.get("abrir_form_aporte", False)
 
         if not aberto:
             c1, c2, c3 = st.columns([1.4, 1, 0.7])
-            c1.metric(f"total aportado em {st.session_state.get('_nome_mes','')}", st.session_state.get('_aporte_mes',''))
-            c2.metric("média mensal (6m)", st.session_state.get('_media_6m',''))
+            c1.metric(f"total aportado em {meses_pt[mes_atual]}", formatar_brl(aporte_mes))
+            c2.metric("média mensal (6m)", formatar_brl(media_6m))
             with c3:
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("+ novo aporte", type="primary", use_container_width=True):
@@ -1175,49 +1167,12 @@ with aba_lanc:
                 with ca:
                     if st.button("salvar", type="primary", use_container_width=True):
                         if f_qtd > 0 and f_preco > 0:
-                            # salvar no Sheets sem limpar cache global
-                            svc = get_sheets_service()
-                            svc.values().append(
-                                spreadsheetId=SHEET_ID,
-                                range=f"{SHEET_TAB}!A:G",
-                                valueInputOption="USER_ENTERED",
-                                body={"values": [[
-                                    f_data.strftime("%d/%m/%Y"),
-                                    f_tipo, f_ativo, f_classe,
-                                    f_qtd, f_preco, round(f_total, 2)
-                                ]]}
-                            ).execute()
-
-                            # recalcular métricas com dados frescos
-                            _df_novo = ler_lancamentos.clear() or ler_lancamentos()
-                            if not _df_novo.empty:
-                                _df_novo["data_dt"] = pd.to_datetime(_df_novo["data"], format="%d/%m/%Y", errors="coerce")
-                                _df_novo["sinal"]   = _df_novo["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-                                _hoje = pd.Timestamp.today()
-                                _mes, _ano = _hoje.month, _hoje.year
-                                _df_mes = _df_novo[
-                                    (_df_novo["data_dt"].dt.month == _mes) &
-                                    (_df_novo["data_dt"].dt.year  == _ano)
-                                ].copy()
-                                _df_mes["sinal_m"] = _df_mes["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-                                _aporte = (_df_mes["total"] * _df_mes["sinal_m"]).sum()
-                                _meses = []
-                                for i in range(1, 7):
-                                    _ref = _hoje - pd.DateOffset(months=i)
-                                    _df_ref = _df_novo[
-                                        (_df_novo["data_dt"].dt.month == _ref.month) &
-                                        (_df_novo["data_dt"].dt.year  == _ref.year)
-                                    ].copy()
-                                    _df_ref["sinal_r"] = _df_ref["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-                                    _meses.append((_df_ref["total"] * _df_ref["sinal_r"]).sum())
-                                _meses_pt = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
-                                             7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
-                                st.session_state['_nome_mes']   = _meses_pt[_mes]
-                                st.session_state['_aporte_mes'] = formatar_brl(_aporte)
-                                st.session_state['_media_6m']   = formatar_brl(sum(_meses) / 6)
-
+                            salvar_lancamento([
+                                f_data.strftime("%d/%m/%Y"),
+                                f_tipo, f_ativo, f_classe,
+                                f_qtd, f_preco, round(f_total, 2)
+                            ])
                             st.session_state["abrir_form_aporte"] = False
-                            st.success("lançamento salvo!")
                             st.rerun(scope="fragment")
                         else:
                             st.warning("preencha quantidade e preço.")
@@ -1226,19 +1181,18 @@ with aba_lanc:
                         st.session_state["abrir_form_aporte"] = False
                         st.rerun(scope="fragment")
 
-    cabecalho_lancamentos()
-    st.markdown("---")
+        st.markdown("---")
 
-    if df_lanc.empty:
-        st.info("nenhum lancamento registrado ainda.")
-    else:
-        # ── Historico: mais novo no topo, indice decrescente a partir de 1 ──
-        st.subheader("historico")
+        if df_lanc.empty:
+            st.info("nenhum lançamento registrado ainda.")
+            return
 
+        # ── histórico ────────────────────────────────────────────────────────
+        st.subheader("histórico")
         df_hist = df_lanc.copy()
         df_hist = df_hist.sort_values("data_dt", ascending=False).reset_index(drop=True)
         n = len(df_hist)
-        df_hist.insert(0, "#", range(n, 0, -1))  # indice decrescente, sem 0
+        df_hist.insert(0, "#", range(n, 0, -1))
 
         df_hist_fmt = df_hist.copy()
         df_hist_fmt["preco_unitario"] = df_hist_fmt["preco_unitario"].apply(
@@ -1246,61 +1200,54 @@ with aba_lanc:
         df_hist_fmt["total"] = df_hist_fmt["total"].apply(
             lambda x: formatar_brl(x) if pd.notna(x) else "")
         df_hist_fmt["quantidade"] = df_hist_fmt["quantidade"].apply(
-            lambda x: f"{x:g}".replace(".", ",") if pd.notna(x) else "")
-        df_hist_fmt["valor"]   = df_hist_fmt["valor"].apply(
+            lambda x: f"{x:.8f}".rstrip('0').rstrip('.').replace('.', ',')
+            if pd.notna(x) and x < 1 else (f"{x:g}".replace('.', ',') if pd.notna(x) else ""))
+        df_hist_fmt["valor"] = df_hist_fmt["valor"].apply(
             lambda x: formatar_brl(x) if pd.notna(x) else "")
 
         cols_show = ["#", "data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
         cfg_hist  = {c: st.column_config.TextColumn(c, alignment="center") for c in cols_show}
-        st.dataframe(
-            df_hist_fmt[cols_show],
-            use_container_width=True, hide_index=True, column_config=cfg_hist
-        )
+        st.dataframe(df_hist_fmt[cols_show], use_container_width=True,
+                     hide_index=True, column_config=cfg_hist)
 
         st.markdown("---")
 
-        # ── Exclusao por indice ───────────────────────────────────────────────
-        with st.expander("excluir lancamento"):
+        # ── excluir ──────────────────────────────────────────────────────────
+        with st.expander("excluir lançamento"):
             idx_del = st.number_input(
-                "numero # do lancamento (conforme tabela acima)",
+                "número # do lançamento (conforme tabela acima)",
                 min_value=1, max_value=n, step=1, value=n
             )
             if st.button("excluir", type="secondary"):
-                # converter # decrescente para posicao na sheet (crescente)
-                # # = n → linha mais antiga = sheet linha 2; # = 1 → linha mais recente
-                pos_sheet = (n - idx_del) + 1  # 1-based, pula header
+                pos_sheet = (n - idx_del) + 1
                 deletar_lancamento(pos_sheet)
-                st.success("lancamento excluido!")
-                st.rerun()
+                st.success("lançamento excluído!")
+                st.rerun(scope="fragment")
 
         st.markdown("---")
 
-        # ── Preco medio por ativo ────────────────────────────────────────────
-        st.subheader("preco medio por ativo")
-        compras = df_lanc[df_lanc["tipo"] == "compra"].copy()
-        if not compras.empty:
-            saldo_ativo = df_lanc.groupby("ativo").apply(
-                lambda g: (g["quantidade"] * g["sinal"]).sum()
-            ).reset_index()
-            saldo_ativo.columns = ["ativo", "saldo"]
-            # apenas ativos com saldo positivo (ainda na carteira)
-            ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0.001]["ativo"].tolist()
+        # ── preço médio por ativo ─────────────────────────────────────────────
+        st.subheader("preço médio por ativo")
+        saldo_ativo = df_lanc.groupby("ativo").apply(
+            lambda g: (g["quantidade"] * g["sinal"]).sum()
+        ).reset_index()
+        saldo_ativo.columns = ["ativo", "saldo"]
+        ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0.001]["ativo"].tolist()
 
-            # calcular preço médio — mesmo padrão da sub-aba FIIs
-            _lanc_pm = ler_lancamentos()
-            rows_pm = []
-            for ativo in sorted(ativos_ativos):
-                compras_a = _lanc_pm[(_lanc_pm['ativo'] == ativo) & (_lanc_pm['tipo'] == 'compra')]
-                if not compras_a.empty:
-                    tot_c = (compras_a['quantidade'] * compras_a['preco_unitario']).sum()
-                    qtd_c = compras_a['quantidade'].sum()
-                    rows_pm.append({
-                        'ativo': ativo,
-                        'total investido': tot_c,
-                        'qtd comprada': qtd_c,
-                        'preco medio': tot_c / qtd_c if qtd_c > 0 else 0
-                    })
+        rows_pm = []
+        for ativo in sorted(ativos_ativos):
+            compras_a = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'] == 'compra')]
+            if not compras_a.empty:
+                tot_c = (compras_a['quantidade'] * compras_a['preco_unitario']).sum()
+                qtd_c = compras_a['quantidade'].sum()
+                rows_pm.append({
+                    'ativo': ativo,
+                    'total investido': tot_c,
+                    'qtd comprada': qtd_c,
+                    'preco medio': tot_c / qtd_c if qtd_c > 0 else 0
+                })
 
+        if rows_pm:
             pm_fmt = pd.DataFrame(rows_pm)
             pm_fmt['total investido'] = pm_fmt['total investido'].apply(formatar_brl)
             pm_fmt['qtd comprada']    = pm_fmt['qtd comprada'].apply(
@@ -1310,6 +1257,8 @@ with aba_lanc:
             pm_fmt['preco medio'] = pm_fmt['preco medio'].apply(formatar_brl)
             cfg_pm = {c: st.column_config.TextColumn(c, alignment="center") for c in pm_fmt.columns}
             st.dataframe(pm_fmt, use_container_width=True, hide_index=True, column_config=cfg_pm)
+
+    aba_lancamentos_fragment()
 
 
 # ── Aba configurações (esqueleto) ─────────────────────────────────────────────
