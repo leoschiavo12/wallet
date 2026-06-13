@@ -625,10 +625,10 @@ with aba_dash:
 
         # ── gráfico mensal ────────────────────────────────────────────────────
         st.subheader("evolução mensal do patrimônio investido")
-        # pegar o último valor acumulado de cada mês
-        df_evo["ano_mes"] = df_evo["data_dt"].dt.to_period("M")
-        df_mensal = df_evo.groupby("ano_mes")["acum"].last().reset_index()
-        df_mensal["ano_mes_dt"] = df_mensal["ano_mes"].dt.to_timestamp()
+        # último valor acumulado de cada mês, preenchendo meses sem aporte com ffill
+        df_evo_idx = df_evo.set_index("data_dt")["acum"]
+        df_mensal  = df_evo_idx.resample("MS").last().ffill().reset_index()
+        df_mensal.columns = ["ano_mes_dt", "acum"]
         df_mensal["hover"] = df_mensal.apply(
             lambda r: (
                 f"<b>{r['ano_mes_dt'].strftime('%b/%y')}</b><br>"
