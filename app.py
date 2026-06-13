@@ -16,15 +16,6 @@ st.markdown("""
     <style>
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
-        /* cards de métrica com paleta azul */
-        [data-testid="stMetric"] {
-            background-color: #0d2137;
-            border: 1px solid #1a3a5c;
-            border-radius: 8px;
-            padding: 12px 16px;
-        }
-        [data-testid="stMetricLabel"] { color: #7eb3d8 !important; font-size: 0.78rem !important; }
-        [data-testid="stMetricValue"] { color: #e8f4fd !important; font-size: 1.15rem !important; }
         [data-testid="stMetricDelta"] { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
