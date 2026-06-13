@@ -377,15 +377,31 @@ def ler_lancamentos():
                 return None
             s = s.replace('R$', '').replace(' ', '')
             if ',' in s and '.' not in s:
+                # só vírgula: decimal PT-BR  "9,21" → 9.21
                 s = s.replace(',', '.')
             elif ',' in s and '.' in s:
                 if s.rindex(',') > s.rindex('.'):
+                    # vírgula depois do ponto: PT-BR milhar  "1.234,56" → 1234.56
                     s = s.replace('.', '').replace(',', '.')
                 else:
+                    # ponto depois da vírgula: EN milhar com vírgula  "1,234.56" → 1234.56
                     s = s.replace(',', '')
             elif s.count('.') > 1:
                 parts = s.split('.')
-                s = ''.join(parts[:-1]) + '.' + parts[-1]
+                # detectar padrão de decimal fracionário com pontos de milhar nos decimais
+                # ex: "0.000.650" → parte inteira "0", decimais "000" e "650"
+                # regra: se parte inteira é "0" ou vazia, concatenar tudo sem pontos
+                if parts[0] in ('0', ''):
+                    # "0.000.650" → "0.000650"
+                    s = parts[0] + '.' + ''.join(parts[1:])
+                else:
+                    # número grande com milhar: "1.234.567" → "1234567"
+                    # ou "1.234.567.89" → "1234567.89"  (último grupo é decimal)
+                    # heurística: se último grupo tem <= 2 dígitos, é decimal
+                    if len(parts[-1]) <= 2:
+                        s = ''.join(parts[:-1]) + '.' + parts[-1]
+                    else:
+                        s = ''.join(parts)
             try:
                 return float(s)
             except:
