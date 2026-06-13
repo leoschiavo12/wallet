@@ -1,4 +1,3 @@
-
 import streamlit as st
 import yfinance as yf
 import plotly.express as px
@@ -607,12 +606,19 @@ with aba_detalhe:
 
         # donut distribuição por ativo dentro dos FIIs
         df_fii_donut = df_fii.sort_values('Total Atual', ascending=False)
+        total_fii_donut = df_fii_donut['Total Atual'].sum()
+        hover_fii = [
+            f"<b>{row['Ativo']}</b><br>{row['Total Atual']/total_fii_donut*100:.1f}%<br>{formatar_brl(row['Total Atual'])}".replace('.', ',')
+            for _, row in df_fii_donut.iterrows()
+        ]
         fig_fii_donut = go.Figure(go.Pie(
             labels=df_fii_donut['Ativo'].tolist(),
             values=df_fii_donut['Total Atual'].tolist(),
             hole=0.6,
             textinfo='label+percent',
             textfont=dict(size=11),
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_fii,
             marker=dict(colors=px.colors.sequential.Blues_r[:len(df_fii_donut)]),
         ))
         fig_fii_donut.update_layout(
@@ -696,12 +702,18 @@ with aba_detalhe:
 
         st.markdown("---")
         st.subheader("distribuição dentro da classe")
+        hover_etf = [
+            f"<b>{row['Ativo']}</b><br>{row['Total Atual']/total_etf*100:.1f}%<br>{formatar_brl(row['Total Atual'])}"
+            for _, row in df_etf.iterrows()
+        ]
         fig_etf_donut = go.Figure(go.Pie(
             labels=df_etf['Ativo'].tolist(),
             values=df_etf['Total Atual'].tolist(),
             hole=0.6,
             textinfo='label+percent',
             textfont=dict(size=11),
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_etf,
             marker=dict(colors=px.colors.sequential.Blues_r[:len(df_etf)]),
         ))
         fig_etf_donut.update_layout(
