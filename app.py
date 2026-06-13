@@ -303,6 +303,81 @@ SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
 SHEET_TAB = "lancamentos"
 HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
 
+@st.cache_data(ttl=0)
+def ler_lancamentos():
+    try:
+        svc  = get_sheets_service()
+        res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:H").execute()
+        rows = res.get("values", [])
+        if len(rows) <= 1:
+            return pd.DataFrame(columns=HEADERS)
+        n = len(HEADERS)
+        padded = [(r + [''] * n)[:n] for r in rows[1:]]
+        df_l = pd.DataFrame(padded, columns=HEADERS)
+        def normalizar_numero(s):
+            s = str(s).strip()
+            if s in ('', 'nan', 'None'):
+                return None
+            s = s.replace('R$', '').replace(' ', '')
+            if ',' in s and '.' not in s:
+                s = s.replace(',', '.')
+            elif ',' in s and '.' in s:
+                if s.rindex(',') > s.rindex('.'):
+                    s = s.replace('.', '').replace(',', '.')
+                else:
+                    s = s.replace(',', '')
+            elif s.count('.') > 1:
+                parts = s.split('.')
+                s = ''.join(parts[:-1]) + '.' + parts[-1]
+            try:
+                return float(s)
+            except:
+                return None
+        for col in ["quantidade", "preco_unitario", "total"]:
+            df_l[col] = df_l[col].apply(normalizar_numero)
+            df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
+        return df_l
+    except Exception as e:
+        st.error(f"Erro ao ler planilha: {e}")
+        return pd.DataFrame(columns=HEADERS)
+
+def salvar_lancamento(row: list):
+    svc = get_sheets_service()
+    svc.values().append(
+        spreadsheetId=SHEET_ID,
+        range=f"{SHEET_TAB}!A:H",
+        valueInputOption="USER_ENTERED",
+        body={"values": [row]}
+    ).execute()
+    st.cache_data.clear()
+
+def deletar_lancamento(idx_linha_sheet: int):
+    svc = get_sheets_service()
+    body = {"requests": [{"deleteDimension": {"range": {
+        "sheetId": 0,
+        "dimension": "ROWS",
+        "startIndex": idx_linha_sheet,
+        "endIndex":   idx_linha_sheet + 1
+    }}}]}
+    svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
+    st.cache_data.clear()
+
+def garantir_cabecalho():
+    try:
+        svc = get_sheets_service()
+        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A1:H1").execute()
+        if not res.get("values"):
+            svc.values().update(
+                spreadsheetId=SHEET_ID,
+                range=f"{SHEET_TAB}!A1",
+                valueInputOption="RAW",
+                body={"values": [HEADERS]}
+            ).execute()
+    except:
+        pass
+
+garantir_cabecalho()
+
 aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes", "⚙️ configurações"])
 
 with aba_dash:
@@ -780,94 +855,6 @@ with aba_detalhe:
         ])
         cfg_geo = {c: st.column_config.TextColumn(c, alignment="center") for c in df_geo.columns}
         st.dataframe(df_geo, use_container_width=True, hide_index=True, column_config=cfg_geo)
-
-# ── Google Sheets helpers movidos para antes das abas ──
-
-@st.cache_data(ttl=0)
-def ler_lancamentos():
-    try:
-        svc  = get_sheets_service()
-        res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:H").execute()
-        rows = res.get("values", [])
-        if len(rows) <= 1:
-            return pd.DataFrame(columns=HEADERS)
-        # truncar para len(HEADERS) colunas e preencher faltantes
-        # (planilha pode ter colunas extras legadas como observacao)
-        n = len(HEADERS)
-        padded = [(r + [''] * n)[:n] for r in rows[1:]]
-        df_l = pd.DataFrame(padded, columns=HEADERS)
-        # normalizar numeros que podem vir em diferentes formatos do Sheets:
-        # "1234.56" (EN), "1234,56" (PT virgula decimal), "1.234,56" (PT ponto milhar)
-        def normalizar_numero(s):
-            s = str(s).strip()
-            if s in ('', 'nan', 'None'):
-                return None
-            s = s.replace('R$', '').replace(' ', '')
-            # virgula sem ponto: decimal PT-BR ("9,21" → 9.21)
-            if ',' in s and '.' not in s:
-                s = s.replace(',', '.')
-            # ambos: detectar qual e decimal pelo ultimo
-            elif ',' in s and '.' in s:
-                if s.rindex(',') > s.rindex('.'):
-                    s = s.replace('.', '').replace(',', '.')
-                else:
-                    s = s.replace(',', '')
-            # multiplos pontos: todos sao milhar, ultimo e decimal
-            elif s.count('.') > 1:
-                parts = s.split('.')
-                s = ''.join(parts[:-1]) + '.' + parts[-1]
-            try:
-                return float(s)
-            except:
-                return None
-
-        for col in ["quantidade", "preco_unitario", "total"]:
-            df_l[col] = df_l[col].apply(normalizar_numero)
-            df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
-
-
-        return df_l
-    except Exception as e:
-        st.error(f"Erro ao ler planilha: {e}")
-        return pd.DataFrame(columns=HEADERS)
-
-def salvar_lancamento(row: list):
-    svc = get_sheets_service()
-    svc.values().append(
-        spreadsheetId=SHEET_ID,
-        range=f"{SHEET_TAB}!A:H",
-        valueInputOption="USER_ENTERED",
-        body={"values": [row]}
-    ).execute()
-    st.cache_data.clear()
-
-def deletar_lancamento(idx_linha_sheet: int):
-    # idx_linha_sheet: 1-based, linha 1 = header
-    svc = get_sheets_service()
-    body = {"requests": [{"deleteDimension": {"range": {
-        "sheetId": 0,
-        "dimension": "ROWS",
-        "startIndex": idx_linha_sheet,
-        "endIndex":   idx_linha_sheet + 1
-    }}}]}
-    svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
-    st.cache_data.clear()
-
-def garantir_cabecalho():
-    try:
-        svc = get_sheets_service()
-        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A1:H1").execute()
-        if not res.get("values"):
-            svc.values().update(
-                spreadsheetId=SHEET_ID,
-                range=f"{SHEET_TAB}!A1",
-                valueInputOption="RAW",
-                body={"values": [HEADERS]}
-            ).execute()
-    except:
-        pass
-
-garantir_cabecalho()
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
 with aba_lanc:
