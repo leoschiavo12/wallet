@@ -1175,13 +1175,50 @@ with aba_lanc:
                 with ca:
                     if st.button("salvar", type="primary", use_container_width=True):
                         if f_qtd > 0 and f_preco > 0:
-                            salvar_lancamento([
-                                f_data.strftime("%d/%m/%Y"),
-                                f_tipo, f_ativo, f_classe,
-                                f_qtd, f_preco, round(f_total, 2)
-                            ])
+                            # salvar no Sheets sem limpar cache global
+                            svc = get_sheets_service()
+                            svc.values().append(
+                                spreadsheetId=SHEET_ID,
+                                range=f"{SHEET_TAB}!A:G",
+                                valueInputOption="USER_ENTERED",
+                                body={"values": [[
+                                    f_data.strftime("%d/%m/%Y"),
+                                    f_tipo, f_ativo, f_classe,
+                                    f_qtd, f_preco, round(f_total, 2)
+                                ]]}
+                            ).execute()
+
+                            # recalcular métricas com dados frescos
+                            _df_novo = ler_lancamentos.clear() or ler_lancamentos()
+                            if not _df_novo.empty:
+                                _df_novo["data_dt"] = pd.to_datetime(_df_novo["data"], format="%d/%m/%Y", errors="coerce")
+                                _df_novo["sinal"]   = _df_novo["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+                                _hoje = pd.Timestamp.today()
+                                _mes, _ano = _hoje.month, _hoje.year
+                                _df_mes = _df_novo[
+                                    (_df_novo["data_dt"].dt.month == _mes) &
+                                    (_df_novo["data_dt"].dt.year  == _ano)
+                                ].copy()
+                                _df_mes["sinal_m"] = _df_mes["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+                                _aporte = (_df_mes["total"] * _df_mes["sinal_m"]).sum()
+                                _meses = []
+                                for i in range(1, 7):
+                                    _ref = _hoje - pd.DateOffset(months=i)
+                                    _df_ref = _df_novo[
+                                        (_df_novo["data_dt"].dt.month == _ref.month) &
+                                        (_df_novo["data_dt"].dt.year  == _ref.year)
+                                    ].copy()
+                                    _df_ref["sinal_r"] = _df_ref["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+                                    _meses.append((_df_ref["total"] * _df_ref["sinal_r"]).sum())
+                                _meses_pt = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
+                                             7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
+                                st.session_state['_nome_mes']   = _meses_pt[_mes]
+                                st.session_state['_aporte_mes'] = formatar_brl(_aporte)
+                                st.session_state['_media_6m']   = formatar_brl(sum(_meses) / 6)
+
                             st.session_state["abrir_form_aporte"] = False
                             st.success("lançamento salvo!")
+                            st.rerun(scope="fragment")
                         else:
                             st.warning("preencha quantidade e preço.")
                 with cb:
