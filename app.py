@@ -405,7 +405,7 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
 
     # ativos presentes por mês
     ALIAS_B3 = {'GALG11': 'GARE11'}
-    TESOURO  = ['Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro Prefixado 2032']
+    TESOURO  = ['Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro SELIC 2031', 'Tesouro Prefixado 2032']
     novos = []
 
     for mes in meses:
