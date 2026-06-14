@@ -360,7 +360,6 @@ SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
 SHEET_TAB = "lancamentos"
 HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
 
-@st.cache_data(show_spinner=False)
 def ler_lancamentos(_versao=0):
     try:
         svc  = get_sheets_service()
@@ -604,9 +603,28 @@ with aba_dash:
             _n = len(_hdrs_evo)
             _pad = [(r + [''] * _n)[:_n] for r in _rows_evo[1:]]
             df_evo_raw = pd.DataFrame(_pad, columns=_hdrs_evo)
-            df_evo_raw["quantidade"]    = pd.to_numeric(df_evo_raw["quantidade"],    errors="coerce").fillna(0)
-            df_evo_raw["preco_unitario"]= pd.to_numeric(df_evo_raw["preco_unitario"],errors="coerce").fillna(0)
-            df_evo_raw["total"]         = pd.to_numeric(df_evo_raw["total"],         errors="coerce").fillna(0)
+            def _norm(s):
+                s = str(s).strip()
+                if s in ('', 'nan', 'None'): return 0.0
+                s = s.replace('R$', '').replace(' ', '')
+                if ',' in s and '.' not in s:
+                    s = s.replace(',', '.')
+                elif ',' in s and '.' in s:
+                    if s.rindex(',') > s.rindex('.'):
+                        s = s.replace('.', '').replace(',', '.')
+                    else:
+                        s = s.replace(',', '')
+                elif s.count('.') > 1:
+                    parts = s.split('.')
+                    if parts[0] in ('0', ''):
+                        s = parts[0] + '.' + ''.join(parts[1:])
+                    else:
+                        s = ''.join(parts[:-1]) + '.' + parts[-1] if len(parts[-1]) <= 2 else ''.join(parts)
+                try: return float(s)
+                except: return 0.0
+            df_evo_raw["quantidade"]     = df_evo_raw["quantidade"].apply(_norm)
+            df_evo_raw["preco_unitario"] = df_evo_raw["preco_unitario"].apply(_norm)
+            df_evo_raw["total"]          = df_evo_raw["total"].apply(_norm)
         else:
             df_evo_raw = pd.DataFrame(columns=_hdrs_evo)
     except:
@@ -1186,7 +1204,6 @@ with aba_lanc:
                                 f_tipo, f_ativo, f_classe,
                                 float(f_qtd), float(f_preco), float(round(f_total, 2))
                             ])
-                            ler_lancamentos.clear()
                             st.session_state["abrir_form_aporte"] = False
                             st.rerun(scope="fragment")
                             st.session_state["abrir_form_aporte"] = False
