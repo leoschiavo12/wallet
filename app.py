@@ -313,32 +313,31 @@ def calcular_posicao(df_lanc):
     """retorna DataFrame com ativo, classe, qtd_atual, custo_total, preco_medio"""
     if df_lanc.empty:
         return pd.DataFrame(columns=['ativo','classe','qtd_atual','custo_total','preco_medio'])
+
     df = df_lanc.copy()
+    df['tipo'] = df['tipo'].str.strip().str.lower()
     df['sinal'] = df['tipo'].map({'compra': 1, 'venda': -1}).fillna(0)
-    df['valor'] = df['total'] * df['sinal']
-    # classe por ativo (última ocorrência)
-    classe_map = df.groupby('ativo')['classe'].last()
-    # qtd atual
-    qtd = df.groupby('ativo').apply(
-        lambda g: (g['quantidade'] * g['sinal']).sum()
-    )
-    # custo total (só compras)
-    custo = df[df['tipo'] == 'compra'].groupby('ativo').apply(
-        lambda g: (g['quantidade'] * g['preco_unitario']).sum()
-    )
-    qtd_comprada = df[df['tipo'] == 'compra'].groupby('ativo')['quantidade'].sum()
-    result = pd.DataFrame({
-        'qtd_atual':   qtd,
-        'custo_total': custo,
-        'qtd_comprada': qtd_comprada,
-    }).fillna(0)
-    result['preco_medio'] = result.apply(
-        lambda r: r['custo_total'] / r['qtd_comprada'] if r['qtd_comprada'] > 0 else 0, axis=1
-    )
-    result['classe'] = classe_map
-    result = result[result['qtd_atual'] > 0.000001].copy()
-    result.index.name = 'ativo'
-    return result.reset_index()
+
+    ativos = df['ativo'].unique()
+    rows = []
+    for ativo in ativos:
+        g = df[df['ativo'] == ativo]
+        qtd_atual = (g['quantidade'] * g['sinal']).sum()
+        if qtd_atual <= 0.000001:
+            continue
+        classe    = g['classe'].iloc[-1]
+        compras   = g[g['tipo'] == 'compra']
+        qtd_comp  = compras['quantidade'].sum()
+        custo     = (compras['quantidade'] * compras['preco_unitario']).sum()
+        pm        = custo / qtd_comp if qtd_comp > 0 else 0
+        rows.append({
+            'ativo':       ativo,
+            'classe':      classe,
+            'qtd_atual':   qtd_atual,
+            'custo_total': custo,
+            'preco_medio': pm,
+        })
+    return pd.DataFrame(rows)
 
 # ── preços mensais (Sheets) ───────────────────────────────────────────────────
 def ler_precos_mensais():
