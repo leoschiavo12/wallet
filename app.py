@@ -360,7 +360,6 @@ SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
 SHEET_TAB = "lancamentos"
 HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
 
-@st.cache_data(show_spinner=False)
 def ler_lancamentos(_versao=0):
     try:
         svc  = get_sheets_service()
@@ -1186,7 +1185,6 @@ with aba_lanc:
                                 f_tipo, f_ativo, f_classe,
                                 float(f_qtd), float(f_preco), float(round(f_total, 2))
                             ])
-                            ler_lancamentos.clear()
                             st.session_state["abrir_form_aporte"] = False
                             st.rerun(scope="fragment")
                             st.session_state["abrir_form_aporte"] = False
