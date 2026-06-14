@@ -284,13 +284,256 @@ def data_td_de_secrets(nome):
 def obter_preco_renda_mais_cached():
     return obter_preco_renda_mais()
 
+SHEET_PM_TAB = "precos_mensais"
+PM_HEADERS   = ["ano_mes", "ativo", "preco_fechamento"]
+
+# ── helpers de normalização (compartilhado) ────────────────────────────────────
+def normalizar_numero(s):
+    s = str(s).strip()
+    if s in ('', 'nan', 'None'): return None
+    s = s.replace('R$', '').replace(' ', '')
+    if ',' in s and '.' not in s:
+        s = s.replace(',', '.')
+    elif ',' in s and '.' in s:
+        if s.rindex(',') > s.rindex('.'):
+            s = s.replace('.', '').replace(',', '.')
+        else:
+            s = s.replace(',', '')
+    elif s.count('.') > 1:
+        parts = s.split('.')
+        if parts[0] in ('0', ''):
+            s = parts[0] + '.' + ''.join(parts[1:])
+        else:
+            s = ''.join(parts[:-1]) + '.' + parts[-1] if len(parts[-1]) <= 2 else ''.join(parts)
+    try: return float(s)
+    except: return None
+
+# ── lançamentos → posição atual ───────────────────────────────────────────────
+def calcular_posicao(df_lanc):
+    """retorna DataFrame com ativo, classe, qtd_atual, custo_total, preco_medio"""
+    if df_lanc.empty:
+        return pd.DataFrame(columns=['ativo','classe','qtd_atual','custo_total','preco_medio'])
+    df = df_lanc.copy()
+    df['sinal'] = df['tipo'].map({'compra': 1, 'venda': -1}).fillna(0)
+    df['valor'] = df['total'] * df['sinal']
+    # classe por ativo (última ocorrência)
+    classe_map = df.groupby('ativo')['classe'].last()
+    # qtd atual
+    qtd = df.groupby('ativo').apply(
+        lambda g: (g['quantidade'] * g['sinal']).sum()
+    )
+    # custo total (só compras)
+    custo = df[df['tipo'] == 'compra'].groupby('ativo').apply(
+        lambda g: (g['quantidade'] * g['preco_unitario']).sum()
+    )
+    qtd_comprada = df[df['tipo'] == 'compra'].groupby('ativo')['quantidade'].sum()
+    result = pd.DataFrame({
+        'qtd_atual':   qtd,
+        'custo_total': custo,
+        'qtd_comprada': qtd_comprada,
+    }).fillna(0)
+    result['preco_medio'] = result.apply(
+        lambda r: r['custo_total'] / r['qtd_comprada'] if r['qtd_comprada'] > 0 else 0, axis=1
+    )
+    result['classe'] = classe_map
+    result = result[result['qtd_atual'] > 0.000001].copy()
+    result.index.name = 'ativo'
+    return result.reset_index()
+
+# ── preços mensais (Sheets) ───────────────────────────────────────────────────
+def ler_precos_mensais():
+    try:
+        svc  = get_sheets_service()
+        res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A:C").execute()
+        rows = res.get("values", [])
+        if len(rows) <= 1:
+            return pd.DataFrame(columns=PM_HEADERS)
+        n      = len(PM_HEADERS)
+        padded = [(r + [''] * n)[:n] for r in rows[1:]]
+        df_pm  = pd.DataFrame(padded, columns=PM_HEADERS)
+        df_pm['preco_fechamento'] = df_pm['preco_fechamento'].apply(normalizar_numero)
+        return df_pm
+    except:
+        return pd.DataFrame(columns=PM_HEADERS)
+
+def salvar_precos_mensais(rows_list):
+    """rows_list: lista de [ano_mes, ativo, preco]"""
+    try:
+        svc = get_sheets_service()
+        # garantir cabeçalho
+        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A1:C1").execute()
+        if not res.get("values"):
+            svc.values().update(
+                spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A1",
+                valueInputOption="RAW", body={"values": [PM_HEADERS]}
+            ).execute()
+        fmt_rows = [[r[0], r[1], str(r[2]).replace('.', ',')] for r in rows_list]
+        svc.values().append(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A:C",
+            valueInputOption="USER_ENTERED", body={"values": fmt_rows}
+        ).execute()
+    except Exception as e:
+        st.warning(f"erro ao salvar preços mensais: {e}")
+
+def obter_preco_historico_yfinance(ticker_sa, data_fim):
+    """preço de fechamento do último dia útil até data_fim"""
+    try:
+        import datetime
+        data_ini = data_fim - datetime.timedelta(days=10)
+        dados = yf.download(ticker_sa, start=data_ini.strftime('%Y-%m-%d'),
+                            end=(data_fim + datetime.timedelta(days=1)).strftime('%Y-%m-%d'),
+                            progress=False, auto_adjust=True)
+        if dados.empty: return None
+        close = dados['Close']
+        if isinstance(close, pd.DataFrame): close = close.iloc[:, 0]
+        return float(close.ffill().dropna().iloc[-1])
+    except:
+        return None
+
+def popular_precos_mensais(df_lanc, df_pm_existente):
+    """verifica meses sem preço e popula via yfinance, retorna df_pm atualizado"""
+    import datetime
+    if df_lanc.empty: return df_pm_existente
+
+    df_lanc = df_lanc.copy()
+    df_lanc['data_dt'] = pd.to_datetime(df_lanc['data'], format='%d/%m/%Y', errors='coerce')
+    hoje = datetime.date.today()
+    mes_atual = f"{hoje.year}-{hoje.month:02d}"
+
+    # meses com lançamentos, exceto o mês atual (ainda não fechou)
+    meses = df_lanc['data_dt'].dropna().dt.to_period('M').unique()
+    meses = [str(m) for m in sorted(meses) if str(m) < mes_atual]
+
+    # ativos presentes por mês
+    ALIAS_B3 = {'GALG11': 'GARE11'}
+    TESOURO  = ['Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro Prefixado 2032']
+    novos = []
+
+    for mes in meses:
+        # ativos com posição naquele mês
+        df_ate = df_lanc[df_lanc['data_dt'].dt.to_period('M').astype(str) <= mes].copy()
+        pos = calcular_posicao(df_ate)
+        if pos.empty: continue
+
+        for _, row in pos.iterrows():
+            ativo = row['ativo']
+            # já existe?
+            if not df_pm_existente.empty:
+                existe = ((df_pm_existente['ano_mes'] == mes) &
+                          (df_pm_existente['ativo']   == ativo)).any()
+                if existe: continue
+
+            # buscar preço
+            import calendar
+            ano, m = int(mes[:4]), int(mes[5:7])
+            ultimo_dia = datetime.date(ano, m, calendar.monthrange(ano, m)[1])
+
+            if ativo == 'BTC':
+                preco = None
+                try:
+                    url = "https://api.coingecko.com/api/v3/coins/bitcoin/history"
+                    r = requests.get(url, params={"date": ultimo_dia.strftime('%d-%m-%Y')}, timeout=10)
+                    if r.status_code == 200:
+                        preco = r.json()['market_data']['current_price']['brl']
+                except: pass
+                if preco is None:
+                    dados = yf.download("BTC-BRL", start=str(ultimo_dia - datetime.timedelta(days=5)),
+                                        end=str(ultimo_dia + datetime.timedelta(days=1)),
+                                        progress=False, auto_adjust=True)
+                    if not dados.empty:
+                        c = dados['Close']
+                        if isinstance(c, pd.DataFrame): c = c.iloc[:,0]
+                        preco = float(c.ffill().dropna().iloc[-1])
+            elif ativo in TESOURO:
+                # usar preço médio de aquisição como proxy
+                comp = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'] == 'compra')]
+                comp_ate = comp[comp['data_dt'].dt.to_period('M').astype(str) <= mes]
+                if not comp_ate.empty and comp_ate['quantidade'].sum() > 0:
+                    preco = (comp_ate['quantidade'] * comp_ate['preco_unitario']).sum() / comp_ate['quantidade'].sum()
+                else:
+                    preco = row['preco_medio']
+            else:
+                ativo_norm = ALIAS_B3.get(ativo, ativo)
+                preco = obter_preco_historico_yfinance(f"{ativo_norm}.SA", ultimo_dia)
+
+            if preco and preco > 0:
+                novos.append([mes, ativo, round(preco, 4)])
+
+    if novos:
+        salvar_precos_mensais(novos)
+        df_novos = pd.DataFrame(novos, columns=PM_HEADERS)
+        df_novos['preco_fechamento'] = pd.to_numeric(df_novos['preco_fechamento'])
+        return pd.concat([df_pm_existente, df_novos], ignore_index=True)
+
+    return df_pm_existente
+
+# ── carregar dados principais ─────────────────────────────────────────────────
+_df_lanc_raw = ler_lancamentos()
+
+# calcular posição atual
+_posicao = calcular_posicao(_df_lanc_raw)
+
+# preços atuais
+_todos_b3 = [r['ativo'] for _, r in _posicao.iterrows()
+             if r['classe'] in ('ETF', 'FII') and r['ativo'] != 'BTC']
+precos = obter_precos_b3(_todos_b3)
+precos['BTC'] = obter_preco_btc_brl()
+
+# preço Renda+ (API ou secrets)
+_resultado_renda = obter_preco_renda_mais_cached()
+if _resultado_renda and _resultado_renda[0]:
+    precos['Renda+ 2050'] = _resultado_renda[0]
+    st.session_state['preco_renda_auto'] = _resultado_renda[0]
+    st.session_state['data_renda_auto']  = _resultado_renda[1]
+else:
+    precos['Renda+ 2050'] = preco_td_de_secrets('Renda+ 2050', 490.02)
+    if _resultado_renda:
+        st.session_state['preco_renda_erro'] = _resultado_renda[1]
+
+precos['Tesouro Selic 2031']     = preco_td_de_secrets('Tesouro Selic 2031', 13000.0)
+precos['Tesouro Prefixado 2032'] = preco_td_de_secrets('Tesouro Prefixado 2032', 700.0)
+
+# construir df principal
+linhas = []
+for _, r in _posicao.iterrows():
+    ativo  = r['ativo']
+    classe = r['classe']
+    qtd    = r['qtd_atual']
+    prc    = precos.get(ativo, precos.get(ativo.upper(), 0.0))
+    linhas.append({
+        'Ativo':         ativo,
+        'Classe':        classe,
+        'preco_unit':    prc,
+        'Qtd':           qtd,
+        'Total Atual':   qtd * prc,
+        'custo_total':   r['custo_total'],
+        'preco_medio':   r['preco_medio'],
+    })
+
+df = pd.DataFrame(linhas)
+if df.empty:
+    df = pd.DataFrame(columns=['Ativo','Classe','preco_unit','Qtd','Total Atual','custo_total','preco_medio'])
+
+total_geral = df['Total Atual'].sum()
+df['Part. %'] = (df['Total Atual'] / total_geral * 100) if total_geral > 0 else 0
+df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
+df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
+df_ativo = df.sort_values(by='Total Atual', ascending=False)
+
+# MINHA_CARTEIRA mantido para compatibilidade com formulário de lançamento
 MINHA_CARTEIRA = {
-    'ETF': {'IVVB11': 8, 'DIVO11': 27, 'PKIN11': 5, 'LFTB11': 30},
-    'FII': {'TRXF11': 25, 'XPML11': 15, 'XPLG11': 22, 'KNRI11': 4, 'BTLG11': 8, 'BTCI11': 177, 'VGIR11': 150, 'MCCI11': 10, 'GARE11': 255, 'RZTR11': 15, 'KNCR11': 2},
-    'Cripto': {'BTC': 0.01492559},
-    # (qtd, preco_fallback) — preco real vem de st.secrets
-    'Tesouro Direto': {'Renda+ 2050': (24, 490.02)}
+    'ETF': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='ETF'].iterrows()},
+    'FII': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='FII'].iterrows()},
+    'Cripto': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='Cripto'].iterrows()},
+    'Tesouro Direto': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='Tesouro Direto'].iterrows()},
 }
+
+# popular preços mensais em background (silencioso)
+try:
+    _df_pm = ler_precos_mensais()
+    _df_pm = popular_precos_mensais(_df_lanc_raw, _df_pm)
+except:
+    _df_pm = pd.DataFrame(columns=PM_HEADERS)
 
 # ── Classificação dos FIIs ───────────────────────────────────────────────────
 FII_INFO = {
@@ -316,38 +559,6 @@ ALVO_CLASSE = {
     # Tesouro Selic 2031 = 0% (sendo zerado)
 }
 
-todos_b3 = [t for cls in ['ETF', 'FII'] for t in MINHA_CARTEIRA[cls].keys()]
-precos = obter_precos_b3(todos_b3)
-precos['BTC'] = obter_preco_btc_brl()
-
-linhas = []
-for cls, ativos in MINHA_CARTEIRA.items():
-    for t, v in ativos.items():
-        if isinstance(v, tuple):
-            q = v[0]
-            if 'Renda' in t:
-                resultado_api = obter_preco_renda_mais_cached()
-                if resultado_api and resultado_api[0]:
-                    prc = resultado_api[0]
-                    st.session_state['preco_renda_auto'] = resultado_api[0]
-                    st.session_state['data_renda_auto']  = resultado_api[1]
-                else:
-                    prc = preco_td_de_secrets(t, v[1])
-                    st.session_state['preco_renda_erro'] = resultado_api[1] if resultado_api else ''
-            else:
-                prc = preco_td_de_secrets(t, v[1])
-        else:
-            q   = v
-            prc = precos.get(t.upper(), 0.0)
-        linhas.append({'Ativo': t, 'Classe': cls, 'preco_unit': prc, 'Qtd': q, 'Total Atual': q * prc})
-
-df = pd.DataFrame(linhas)
-total_geral = df['Total Atual'].sum()
-df['Part. %'] = (df['Total Atual'] / total_geral) * 100
-df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
-df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
-df_ativo = df.sort_values(by='Total Atual', ascending=False)
-
 # ── Google Sheets helpers ─────────────────────────────────────────────────────
 def get_sheets_service():
     creds = service_account.Credentials.from_service_account_info(
@@ -370,41 +581,6 @@ def ler_lancamentos(_versao=0):
         n = len(HEADERS)
         padded = [(r + [''] * n)[:n] for r in rows[1:]]
         df_l = pd.DataFrame(padded, columns=HEADERS)
-        def normalizar_numero(s):
-            s = str(s).strip()
-            if s in ('', 'nan', 'None'):
-                return None
-            s = s.replace('R$', '').replace(' ', '')
-            if ',' in s and '.' not in s:
-                # só vírgula: decimal PT-BR  "9,21" → 9.21
-                s = s.replace(',', '.')
-            elif ',' in s and '.' in s:
-                if s.rindex(',') > s.rindex('.'):
-                    # vírgula depois do ponto: PT-BR milhar  "1.234,56" → 1234.56
-                    s = s.replace('.', '').replace(',', '.')
-                else:
-                    # ponto depois da vírgula: EN milhar com vírgula  "1,234.56" → 1234.56
-                    s = s.replace(',', '')
-            elif s.count('.') > 1:
-                parts = s.split('.')
-                # detectar padrão de decimal fracionário com pontos de milhar nos decimais
-                # ex: "0.000.650" → parte inteira "0", decimais "000" e "650"
-                # regra: se parte inteira é "0" ou vazia, concatenar tudo sem pontos
-                if parts[0] in ('0', ''):
-                    # "0.000.650" → "0.000650"
-                    s = parts[0] + '.' + ''.join(parts[1:])
-                else:
-                    # número grande com milhar: "1.234.567" → "1234567"
-                    # ou "1.234.567.89" → "1234567.89"  (último grupo é decimal)
-                    # heurística: se último grupo tem <= 2 dígitos, é decimal
-                    if len(parts[-1]) <= 2:
-                        s = ''.join(parts[:-1]) + '.' + parts[-1]
-                    else:
-                        s = ''.join(parts)
-            try:
-                return float(s)
-            except:
-                return None
         for col in ["quantidade", "preco_unitario", "total"]:
             df_l[col] = df_l[col].apply(normalizar_numero)
             df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
@@ -654,39 +830,71 @@ with aba_dash:
         )
         st.plotly_chart(fig_evo, use_container_width=True)
 
-        # ── gráfico mensal ────────────────────────────────────────────────────
+        # ── gráfico mensal com preços históricos ─────────────────────────────
         st.subheader("evolução mensal do patrimônio investido")
-        # último valor acumulado de cada mês, preenchendo meses sem aporte com ffill
-        df_evo_idx = df_evo.set_index("data_dt")["acum"]
-        df_mensal  = df_evo_idx.resample("MS").last().ffill().reset_index()
-        df_mensal.columns = ["ano_mes_dt", "acum"]
-        df_mensal["hover"] = df_mensal.apply(
-            lambda r: (
-                f"<b>{r['ano_mes_dt'].strftime('%b/%y')}</b><br>"
-                f"R$ {r['acum']:,.2f}"
-                .replace(",", "X").replace(".", ",").replace("X", ".")
-            ),
-            axis=1
-        )
+        import calendar as _cal
+        import datetime as _dt
 
-        fig_mensal = go.Figure()
-        fig_mensal.add_trace(go.Bar(
-            x=df_mensal["ano_mes_dt"],
-            y=df_mensal["acum"],
-            marker_color="#1E88E5",
-            hovertemplate="%{customdata}<extra></extra>",
-            customdata=df_mensal["hover"].tolist(),
-        ))
-        fig_mensal.update_layout(
-            height=280,
-            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-            showlegend=False,
-            bargap=0.2,
-            xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45),
-            yaxis=dict(showgrid=True, gridcolor="#333"),
-            margin=dict(t=10, b=10, l=10, r=10)
-        )
-        st.plotly_chart(fig_mensal, use_container_width=True)
+        hoje_dt   = _dt.date.today()
+        mes_atual = f"{hoje_dt.year}-{hoje_dt.month:02d}"
+
+        # meses disponíveis em precos_mensais
+        if not _df_pm.empty and 'ano_mes' in _df_pm.columns:
+            meses_pm = sorted(_df_pm['ano_mes'].unique())
+            meses_pm = [m for m in meses_pm if m < mes_atual]
+        else:
+            meses_pm = []
+
+        if meses_pm:
+            vals_mensais = []
+            for mes in meses_pm:
+                ano, m = int(mes[:4]), int(mes[5:7])
+                # posição no fim do mês
+                df_ate_mes = _df_lanc_raw.copy()
+                df_ate_mes['data_dt'] = pd.to_datetime(df_ate_mes['data'], format='%d/%m/%Y', errors='coerce')
+                df_ate_mes = df_ate_mes[df_ate_mes['data_dt'].dt.to_period('M').astype(str) <= mes]
+                pos_mes = calcular_posicao(df_ate_mes)
+
+                total_mes = 0.0
+                for _, pr in pos_mes.iterrows():
+                    ativo = pr['ativo']
+                    qtd   = pr['qtd_atual']
+                    # buscar preço do mês
+                    pm_row = _df_pm[(_df_pm['ano_mes'] == mes) & (_df_pm['ativo'] == ativo)]
+                    if not pm_row.empty:
+                        preco_hist = float(pm_row['preco_fechamento'].iloc[0])
+                    else:
+                        preco_hist = pr['preco_medio']  # fallback: custo médio
+                    total_mes += qtd * preco_hist
+
+                vals_mensais.append({
+                    'mes': pd.to_datetime(f"{mes}-01"),
+                    'total': total_mes,
+                    'label': pd.to_datetime(f"{mes}-01").strftime('%b/%y')
+                })
+
+            df_mensal = pd.DataFrame(vals_mensais)
+            df_mensal['hover'] = df_mensal.apply(
+                lambda r: f"<b>{r['label']}</b><br>{formatar_brl(r['total'])}", axis=1
+            )
+            fig_mensal = go.Figure()
+            fig_mensal.add_trace(go.Bar(
+                x=df_mensal['mes'], y=df_mensal['total'],
+                marker_color="#1E88E5",
+                hovertemplate="%{customdata}<extra></extra>",
+                customdata=df_mensal['hover'].tolist(),
+            ))
+            fig_mensal.update_layout(
+                height=280,
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                showlegend=False, bargap=0.2,
+                xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45),
+                yaxis=dict(showgrid=True, gridcolor="#333"),
+                margin=dict(t=10, b=10, l=10, r=10)
+            )
+            st.plotly_chart(fig_mensal, use_container_width=True)
+        else:
+            st.info("preços mensais históricos ainda não disponíveis. serão populados automaticamente no próximo carregamento.")
 
 with aba_detalhe:
     sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
@@ -1064,17 +1272,29 @@ with aba_detalhe:
             s = f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
             return f"R$ {s}"
 
-        df_view = df.sort_values('Total Atual', ascending=False).copy()
-        config_geral = {
-            'Ativo':       st.column_config.TextColumn("ativo",        alignment="center"),
-            'Classe':      st.column_config.TextColumn("classe",       alignment="center"),
-            'preco_unit':  st.column_config.NumberColumn("preço atual", format="R$ %.2f", alignment="center"),
-            'Qtd':         st.column_config.NumberColumn("qtd",         format="%.4g",    alignment="center"),
-            'Total Atual': st.column_config.NumberColumn("total atual", format="R$ %d",   alignment="center"),
-            'Part. %':     st.column_config.NumberColumn("part. %",     format="%.2f%%",  alignment="center"),
-        }
-        st.dataframe(df_view[['Ativo','Classe','preco_unit','Qtd','Total Atual','Part. %']],
-                     use_container_width=True, hide_index=True, column_config=config_geral)
+        df_view = df.copy().sort_values('Total Atual', ascending=False)
+        df_view['variacao_rs']  = df_view['Total Atual'] - df_view['custo_total']
+        df_view['variacao_pct'] = df_view.apply(
+            lambda r: (r['variacao_rs'] / r['custo_total'] * 100) if r['custo_total'] > 0 else 0, axis=1
+        )
+        df_geral_fmt = pd.DataFrame({
+            'ativo':           df_view['Ativo'].values,
+            'classe':          df_view['Classe'].values,
+            'qtd':             df_view.apply(lambda r: f"{r['Qtd']:.6f}".replace('.',',') if r['Qtd'] < 1 else str(int(r['Qtd'])), axis=1).values,
+            'preço médio':     df_view['preco_medio'].apply(formatar_brl).values,
+            'total investido': df_view['custo_total'].apply(formatar_brl).values,
+            'preço atual':     df_view.apply(fmt_preco, axis=1).values,
+            'total atual':     df_view['Total Atual'].apply(formatar_brl).values,
+            'variação R$':     df_view['variacao_rs'].apply(
+                lambda x: f"+{formatar_brl(x)}" if x >= 0 else f"−{formatar_brl(abs(x))}"
+            ).values,
+            'variação %':      df_view['variacao_pct'].apply(
+                lambda x: f"{'+' if x >= 0 else ''}{x:.1f}%".replace('.', ',')
+            ).values,
+            'part. %':         df_view['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.',',')).values,
+        })
+        cfg_geral = {c: st.column_config.TextColumn(c, alignment="center") for c in df_geral_fmt.columns}
+        st.dataframe(df_geral_fmt, use_container_width=True, hide_index=True, column_config=cfg_geral)
 
         st.markdown("---")
 
