@@ -467,6 +467,73 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
 
     return df_pm_existente
 
+# ── Google Sheets helpers ─────────────────────────────────────────────────────
+def get_sheets_service():
+    creds = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    return build("sheets", "v4", credentials=creds).spreadsheets()
+
+SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
+SHEET_TAB = "lancamentos"
+HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
+
+def ler_lancamentos(_versao=0):
+    try:
+        svc  = get_sheets_service()
+        res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
+        rows = res.get("values", [])
+        if len(rows) <= 1:
+            return pd.DataFrame(columns=HEADERS)
+        n = len(HEADERS)
+        padded = [(r + [''] * n)[:n] for r in rows[1:]]
+        df_l = pd.DataFrame(padded, columns=HEADERS)
+        for col in ["quantidade", "preco_unitario", "total"]:
+            df_l[col] = df_l[col].apply(normalizar_numero)
+            df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
+        return df_l
+    except Exception as e:
+        st.error(f"Erro ao ler planilha: {e}")
+        return pd.DataFrame(columns=HEADERS)
+
+def salvar_lancamento(row: list):
+    def fmt_num(v):
+        return str(v).replace('.', ',')
+    row_fmt = [row[0], row[1], row[2], row[3],
+               fmt_num(row[4]), fmt_num(row[5]), fmt_num(row[6])]
+    svc = get_sheets_service()
+    svc.values().append(
+        spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G",
+        valueInputOption="USER_ENTERED", body={"values": [row_fmt]}
+    ).execute()
+    import time; time.sleep(1)
+    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
+
+def deletar_lancamento(idx_linha_sheet: int):
+    svc = get_sheets_service()
+    start = idx_linha_sheet - 1
+    body = {"requests": [{"deleteDimension": {"range": {
+        "sheetId": 0, "dimension": "ROWS",
+        "startIndex": start, "endIndex": start + 1
+    }}}]}
+    svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
+    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
+
+def garantir_cabecalho():
+    try:
+        svc = get_sheets_service()
+        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A1:H1").execute()
+        if not res.get("values"):
+            svc.values().update(
+                spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A1",
+                valueInputOption="RAW", body={"values": [HEADERS]}
+            ).execute()
+    except:
+        pass
+
+garantir_cabecalho()
+
 # ── carregar dados principais ─────────────────────────────────────────────────
 _df_lanc_raw = ler_lancamentos()
 
@@ -558,86 +625,6 @@ ALVO_CLASSE = {
     'Cripto':         10.0,
     # Tesouro Selic 2031 = 0% (sendo zerado)
 }
-
-# ── Google Sheets helpers ─────────────────────────────────────────────────────
-def get_sheets_service():
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
-    )
-    return build("sheets", "v4", credentials=creds).spreadsheets()
-
-SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
-SHEET_TAB = "lancamentos"
-HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
-
-def ler_lancamentos(_versao=0):
-    try:
-        svc  = get_sheets_service()
-        res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
-        rows = res.get("values", [])
-        if len(rows) <= 1:
-            return pd.DataFrame(columns=HEADERS)
-        n = len(HEADERS)
-        padded = [(r + [''] * n)[:n] for r in rows[1:]]
-        df_l = pd.DataFrame(padded, columns=HEADERS)
-        for col in ["quantidade", "preco_unitario", "total"]:
-            df_l[col] = df_l[col].apply(normalizar_numero)
-            df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
-        return df_l
-    except Exception as e:
-        st.error(f"Erro ao ler planilha: {e}")
-        return pd.DataFrame(columns=HEADERS)
-
-def salvar_lancamento(row: list):
-    # row = [data_str, tipo, ativo, classe, qtd_float, preco_float, total_float]
-    # Sheets PT-BR usa vírgula como decimal — formatar antes de enviar
-    def fmt_num(v):
-        return str(v).replace('.', ',')
-
-    row_fmt = [
-        row[0], row[1], row[2], row[3],
-        fmt_num(row[4]), fmt_num(row[5]), fmt_num(row[6])
-    ]
-    svc = get_sheets_service()
-    svc.values().append(
-        spreadsheetId=SHEET_ID,
-        range=f"{SHEET_TAB}!A:G",
-        valueInputOption="USER_ENTERED",
-        body={"values": [row_fmt]}
-    ).execute()
-    import time; time.sleep(1)
-    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
-
-def deletar_lancamento(idx_linha_sheet: int):
-    # idx_linha_sheet é 1-based (linha 1 = header, linha 2 = primeiro dado)
-    # deleteDimension usa 0-based
-    svc = get_sheets_service()
-    start = idx_linha_sheet - 1  # converter para 0-based
-    body = {"requests": [{"deleteDimension": {"range": {
-        "sheetId": 0,
-        "dimension": "ROWS",
-        "startIndex": start,
-        "endIndex":   start + 1
-    }}}]}
-    svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
-    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
-
-def garantir_cabecalho():
-    try:
-        svc = get_sheets_service()
-        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A1:H1").execute()
-        if not res.get("values"):
-            svc.values().update(
-                spreadsheetId=SHEET_ID,
-                range=f"{SHEET_TAB}!A1",
-                valueInputOption="RAW",
-                body={"values": [HEADERS]}
-            ).execute()
-    except:
-        pass
-
-garantir_cabecalho()
 
 aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes", "⚙️ configurações"])
 
