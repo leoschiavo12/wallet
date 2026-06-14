@@ -804,26 +804,13 @@ with aba_dash:
     # ── evolução acumulada ────────────────────────────────────────────────────
     st.markdown("---")
     st.subheader("evolução do patrimônio investido")
-    try:
-        _svc_evo  = get_sheets_service()
-        _res_evo  = _svc_evo.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
-        _rows_evo = _res_evo.get("values", [])
-        _hdrs_evo = ["data","tipo","ativo","classe","quantidade","preco_unitario","total"]
-        if len(_rows_evo) > 1:
-            _n   = len(_hdrs_evo)
-            _pad = [(r + [''] * _n)[:_n] for r in _rows_evo[1:]]
-            df_evo_raw = pd.DataFrame(_pad, columns=_hdrs_evo)
-            df_evo_raw["total"] = df_evo_raw["total"].apply(normalizar_numero)
-            df_evo_raw["total"] = pd.to_numeric(df_evo_raw["total"], errors="coerce").fillna(0)
-        else:
-            df_evo_raw = pd.DataFrame(columns=_hdrs_evo)
-    except:
-        df_evo_raw = pd.DataFrame(columns=["data","tipo","ativo","classe","quantidade","preco_unitario","total"])
 
-    if not df_evo_raw.empty:
+    if not _df_lanc_raw.empty:
+        df_evo_raw = _df_lanc_raw.copy()
         df_evo_raw["data_dt"]   = pd.to_datetime(df_evo_raw["data"], format="%d/%m/%Y", errors="coerce")
-        df_evo_raw["sinal_evo"] = df_evo_raw["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
-        df_evo_raw["valor_evo"] = df_evo_raw["total"] * df_evo_raw["sinal_evo"]
+        df_evo_raw["sinal_evo"] = df_evo_raw["tipo"].str.strip().str.lower().map({"compra": 1, "venda": -1}).fillna(0)
+        # usar qtd × preco_unitario para maior precisão (ignora coluna total que pode ter erros)
+        df_evo_raw["valor_evo"] = df_evo_raw["quantidade"] * df_evo_raw["preco_unitario"] * df_evo_raw["sinal_evo"]
         df_evo = df_evo_raw.groupby("data_dt")["valor_evo"].sum().reset_index().sort_values("data_dt")
         df_evo["acum"] = df_evo["valor_evo"].cumsum()
 
@@ -833,7 +820,7 @@ with aba_dash:
             mode="lines+markers",
             line=dict(color="#1E88E5", width=2),
             marker=dict(size=5),
-            hovertemplate="%{x|%d/%m/%Y}<br>R$ %{y:,.2f}<extra></extra>"
+            hovertemplate="%{x|%d/%m/%Y}<br>%{y:,.2f}<extra></extra>"
         ))
         fig_evo.update_layout(
             height=300,
@@ -851,21 +838,8 @@ with aba_detalhe:
 
     # ── helpers compartilhados ────────────────────────────────────────────────
     def _lanc_json_cached():
-        try:
-            svc  = get_sheets_service()
-            res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G").execute()
-            rows = res.get("values", [])
-            hdrs = ["data","tipo","Ativo","Classe","quantidade","preco_unitario","total"]
-            if len(rows) > 1:
-                n = len(hdrs)
-                padded = [(r + [''] * n)[:n] for r in rows[1:]]
-                df_tmp = pd.DataFrame(padded, columns=hdrs)
-                for col in ["quantidade","total"]:
-                    df_tmp[col] = pd.to_numeric(df_tmp[col], errors='coerce').fillna(0)
-                return df_tmp.to_dict(orient='records')
-        except:
-            pass
-        return []
+        # usa _df_lanc_raw já carregado — sem releitura do Sheets
+        return _df_lanc_raw.to_dict(orient='records')
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: FIIs
@@ -958,7 +932,7 @@ with aba_detalhe:
         st.markdown("---")
 
         # calcular preço médio por FII dos lançamentos
-        lanc_df = ler_lancamentos()
+        lanc_df = _df_lanc_raw
         pm_fii = {}
         if not lanc_df.empty:
             for t in df_fii['Ativo']:
@@ -1056,8 +1030,9 @@ with aba_detalhe:
     # ══════════════════════════════════════════════════════════════════════════
     with sub_cripto:
         preco_btc_atual = precos.get('BTC', 0.0)
-        qtd_btc         = MINHA_CARTEIRA['Cripto']['BTC']
-        total_btc       = preco_btc_atual * qtd_btc
+        _btc_pos = _posicao[_posicao['ativo'] == 'BTC']
+        qtd_btc  = float(_btc_pos['qtd_atual'].iloc[0]) if not _btc_pos.empty else 0.0
+        total_btc = preco_btc_atual * qtd_btc
         hist, hist_fonte = obter_historico_btc_brl()
 
         def var_pct(serie, dias):
@@ -1138,7 +1113,7 @@ with aba_detalhe:
         df_td = df[df['Classe'] == 'Tesouro Direto'].copy()
         st.subheader("tesouro direto")
 
-        lanc_all = ler_lancamentos()
+        lanc_all = _df_lanc_raw
         for _, row in df_td.iterrows():
             ativo       = row['Ativo']
             qtd         = int(row['Qtd'])
