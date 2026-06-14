@@ -628,9 +628,27 @@ ALVO_CLASSE = {
 aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes", "⚙️ configurações"])
 
 with aba_dash:
-    # patrimônio total em formato Xk
     total_k = f"R$ {total_geral/1000:.1f}k".replace('.', ',')
-    st.metric("patrimônio", total_k)
+
+    # total investido = custo de todas as compras − total de vendas
+    _custo_total = df['custo_total'].sum()
+    _var_val     = total_geral - _custo_total
+    _var_pct     = (_var_val / _custo_total * 100) if _custo_total > 0 else 0
+
+    c1, c2 = st.columns([1, 1])
+    c1.metric("patrimônio", total_k)
+
+    _sinal = "▲" if _var_val >= 0 else "▼"
+    _cor   = "#22c55e" if _var_val >= 0 else "#ef4444"
+    _pct_fmt = f"{_var_pct:+.1f}%".replace('.', ',')
+    _rs_fmt  = formatar_brl(abs(_var_val))
+    c2.markdown(
+        f"<div style='padding-top:8px'>"
+        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>vs total investido  ·  {formatar_brl(_custo_total)}</div>"
+        f"<div style='font-size:1.15rem;font-weight:700;color:{_cor};font-family:inherit'>"
+        f"{_sinal} {_pct_fmt}  ·  {_rs_fmt}</div></div>",
+        unsafe_allow_html=True
+    )
 
     st.markdown('---')
 
