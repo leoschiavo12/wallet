@@ -628,22 +628,22 @@ ALVO_CLASSE = {
 aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes", "⚙️ configurações"])
 
 with aba_dash:
-    st.metric("patrimonio total", formatar_brl(total_geral))
+    # patrimônio total em formato Xk
+    total_k = f"R$ {total_geral/1000:.1f}k".replace('.', ',')
+    st.metric("patrimônio", total_k)
 
     st.markdown('---')
 
-    col_donut, col_barras = st.columns([1, 2])
+    # ── linha 1: donut + gráfico mensal lado a lado ───────────────────────────
+    col_donut, col_mensal = st.columns([1, 2])
 
     with col_donut:
         total_classe = df_resumo_classe['Total Atual'].sum()
-        labels_donut = []
-        hover_donut  = []
+        labels_donut, hover_donut = [], []
         for _, row in df_resumo_classe.iterrows():
-            pct     = row['Total Atual'] / total_classe * 100
-            pct_str = f"{pct:.1f}%".replace('.', ',')
-            rs_str  = formatar_brl(row['Total Atual'])
-            labels_donut.append(f"{row['Classe']}<br>{pct_str}")
-            hover_donut.append(f"<b>{row['Classe']}</b><br>{pct_str}<br>{rs_str}")
+            pct    = row['Total Atual'] / total_classe * 100
+            labels_donut.append(f"{row['Classe']}<br>{pct:.1f}%".replace('.', ','))
+            hover_donut.append(f"<b>{row['Classe']}</b><br>{pct:.1f}%<br>{formatar_brl(row['Total Atual'])}".replace('.', ','))
 
         fig_donut = go.Figure(go.Pie(
             labels=labels_donut,
@@ -659,24 +659,95 @@ with aba_dash:
         ))
         fig_donut.update_layout(
             margin=dict(t=60, b=60, l=60, r=60),
-            height=400,
-            showlegend=False,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            height=400, showlegend=False,
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
         )
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.plotly_chart(fig_donut, use_container_width=True, config={"displayModeBar": False})
+
+    with col_mensal:
+        # gráfico mensal com preços históricos
+        import calendar as _cal
+        import datetime as _dt
+        hoje_dt   = _dt.date.today()
+        mes_atual = f"{hoje_dt.year}-{hoje_dt.month:02d}"
+
+        if not _df_pm.empty and 'ano_mes' in _df_pm.columns:
+            meses_pm = sorted(_df_pm['ano_mes'].unique())
+            meses_pm = [m for m in meses_pm if m < mes_atual]
+        else:
+            meses_pm = []
+
+        if meses_pm:
+            vals_mensais = []
+            ultimo_total = 0.0
+            # todos os meses desde o primeiro até o último com dados
+            primeiro_mes = meses_pm[0]
+            ano0, m0 = int(primeiro_mes[:4]), int(primeiro_mes[5:7])
+            ano1, m1 = int(meses_pm[-1][:4]), int(meses_pm[-1][5:7])
+            todos_meses = []
+            a, m = ano0, m0
+            while (a, m) <= (ano1, m1):
+                todos_meses.append(f"{a}-{m:02d}")
+                m += 1
+                if m > 12: m, a = 1, a + 1
+
+            for mes in todos_meses:
+                if mes in meses_pm:
+                    ano, mm = int(mes[:4]), int(mes[5:7])
+                    df_ate_mes = _df_lanc_raw.copy()
+                    df_ate_mes['data_dt'] = pd.to_datetime(df_ate_mes['data'], format='%d/%m/%Y', errors='coerce')
+                    df_ate_mes = df_ate_mes[df_ate_mes['data_dt'].dt.to_period('M').astype(str) <= mes]
+                    pos_mes = calcular_posicao(df_ate_mes)
+                    total_mes = 0.0
+                    for _, pr in pos_mes.iterrows():
+                        ativo = pr['ativo']
+                        qtd   = pr['qtd_atual']
+                        pm_row = _df_pm[(_df_pm['ano_mes'] == mes) & (_df_pm['ativo'] == ativo)]
+                        preco_hist = float(pm_row['preco_fechamento'].iloc[0]) if not pm_row.empty else pr['preco_medio']
+                        total_mes += qtd * preco_hist
+                    ultimo_total = total_mes
+                else:
+                    total_mes = ultimo_total  # ffill
+
+                vals_mensais.append({
+                    'mes':   pd.to_datetime(f"{mes}-01"),
+                    'total': total_mes,
+                    'label': pd.to_datetime(f"{mes}-01").strftime('%b/%y')
+                })
+
+            df_mensal = pd.DataFrame(vals_mensais)
+            df_mensal['hover'] = df_mensal.apply(
+                lambda r: f"<b>{r['label']}</b><br>{formatar_brl(r['total'])}", axis=1
+            )
+            fig_mensal = go.Figure()
+            fig_mensal.add_trace(go.Bar(
+                x=df_mensal['mes'], y=df_mensal['total'],
+                marker_color="#1E88E5",
+                hovertemplate="%{customdata}<extra></extra>",
+                customdata=df_mensal['hover'].tolist(),
+            ))
+            y_max = df_mensal['total'].max() * 1.15
+            fig_mensal.update_layout(
+                height=400,
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                showlegend=False, bargap=0.2,
+                xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45),
+                yaxis=dict(showgrid=True, gridcolor="#333", range=[0, y_max]),
+                margin=dict(t=10, b=10, l=10, r=10)
+            )
+            st.plotly_chart(fig_mensal, use_container_width=True, config={"displayModeBar": False})
+        else:
+            st.info("preços mensais históricos ainda não disponíveis. serão populados automaticamente no próximo carregamento.")
+
+    st.markdown('---')
+
+    # ── linha 2: barras por ativo ─────────────────────────────────────────────
+    col_barras, = st.columns([1])
 
     with col_barras:
         max_pct = df_ativo['Part. %'].max()
-        max_rs  = df_ativo['Total Atual'].max()
-
         y_max_pct, ticks_pct = gerar_ticks_pct(max_pct, step=5)
-
-        # ticks % visiveis: apenas os menores que o maximo real
-        ticks_pct_show = [v for v in ticks_pct if v <= max_pct]
-
-        # eixo direito: mesmos pontos do eixo %, convertidos para R$
-        # tick_rs = tick_pct / 100 * total_geral  (escala perfeita)
+        ticks_pct_show  = [v for v in ticks_pct if v <= max_pct]
         ticks_rs_labels = [f"R$ {v/100*total_geral:,.0f}".replace(',', '.') for v in ticks_pct_show]
 
         shapes = []
@@ -693,67 +764,44 @@ with aba_dash:
         ]
 
         fig_ativo = go.Figure()
-        fig_ativo.add_trace(
-            go.Bar(
-                x=df_ativo['Ativo'], y=df_ativo['Part. %'],
-                marker_color='#1E88E5',
-                text=df_ativo['Ativo'],
-                textposition='outside', textangle=-90,
-                textfont=dict(size=9, color='white'),
-                cliponaxis=False,
-                hovertemplate='%{customdata}<extra></extra>',
-                customdata=hover_barras,
-                yaxis='y'
-            )
-        )
-        # trace invisivel no yaxis2 para forca-lo a aparecer
-        fig_ativo.add_trace(
-            go.Scatter(
-                x=[df_ativo['Ativo'].iloc[0]],
-                y=[0],
-                mode='markers',
-                marker=dict(color='rgba(0,0,0,0)', size=0),
-                hoverinfo='skip',
-                showlegend=False,
-                yaxis='y2'
-            )
-        )
-
+        fig_ativo.add_trace(go.Bar(
+            x=df_ativo['Ativo'], y=df_ativo['Part. %'],
+            marker_color='#1E88E5',
+            text=df_ativo['Ativo'],
+            textposition='outside', textangle=-90,
+            textfont=dict(size=9, color='white'),
+            cliponaxis=False,
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_barras,
+            yaxis='y'
+        ))
+        fig_ativo.add_trace(go.Scatter(
+            x=[df_ativo['Ativo'].iloc[0]], y=[0],
+            mode='markers', marker=dict(color='rgba(0,0,0,0)', size=0),
+            hoverinfo='skip', showlegend=False, yaxis='y2'
+        ))
         fig_ativo.update_layout(
             height=400,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False,
-            shapes=shapes,
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            showlegend=False, shapes=shapes,
             xaxis=dict(showticklabels=False),
             bargap=0.15,
             margin=dict(t=10, b=10, l=10, r=10)
         )
-        # eixo esquerdo: part. %
         fig_ativo.update_yaxes(
-            title_text="",
-            showgrid=True, gridcolor='#333', side='left',
+            title_text="", showgrid=True, gridcolor='#333', side='left',
             range=[0, y_max_pct * 1.2],
             tickvals=ticks_pct_show,
             ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct_show]
         )
+        fig_ativo.update_layout(yaxis2=dict(
+            overlaying='y', side='right', showgrid=False,
+            range=[0, y_max_pct * 1.2],
+            tickvals=ticks_pct_show, ticktext=ticks_rs_labels, title_text=""
+        ))
+        st.plotly_chart(fig_ativo, use_container_width=True, config={"displayModeBar": False})
 
-        # eixo direito: mesmo range e mesmos pontos do eixo %
-        # labels convertidos para R$ — escala perfeitamente alinhada
-        fig_ativo.update_layout(
-            yaxis2=dict(
-                overlaying='y',
-                side='right',
-                showgrid=False,
-                range=[0, y_max_pct * 1.2],
-                tickvals=ticks_pct_show,
-                ticktext=ticks_rs_labels,
-                title_text=""
-            )
-        )
-        st.plotly_chart(fig_ativo, use_container_width=True)
-
-    # ── Evolução do patrimônio investido ─────────────────────────────────────
+    # ── evolução acumulada ────────────────────────────────────────────────────
     st.markdown("---")
     st.subheader("evolução do patrimônio investido")
     try:
@@ -762,31 +810,11 @@ with aba_dash:
         _rows_evo = _res_evo.get("values", [])
         _hdrs_evo = ["data","tipo","ativo","classe","quantidade","preco_unitario","total"]
         if len(_rows_evo) > 1:
-            _n = len(_hdrs_evo)
+            _n   = len(_hdrs_evo)
             _pad = [(r + [''] * _n)[:_n] for r in _rows_evo[1:]]
             df_evo_raw = pd.DataFrame(_pad, columns=_hdrs_evo)
-            def _norm(s):
-                s = str(s).strip()
-                if s in ('', 'nan', 'None'): return 0.0
-                s = s.replace('R$', '').replace(' ', '')
-                if ',' in s and '.' not in s:
-                    s = s.replace(',', '.')
-                elif ',' in s and '.' in s:
-                    if s.rindex(',') > s.rindex('.'):
-                        s = s.replace('.', '').replace(',', '.')
-                    else:
-                        s = s.replace(',', '')
-                elif s.count('.') > 1:
-                    parts = s.split('.')
-                    if parts[0] in ('0', ''):
-                        s = parts[0] + '.' + ''.join(parts[1:])
-                    else:
-                        s = ''.join(parts[:-1]) + '.' + parts[-1] if len(parts[-1]) <= 2 else ''.join(parts)
-                try: return float(s)
-                except: return 0.0
-            df_evo_raw["quantidade"]     = df_evo_raw["quantidade"].apply(_norm)
-            df_evo_raw["preco_unitario"] = df_evo_raw["preco_unitario"].apply(_norm)
-            df_evo_raw["total"]          = df_evo_raw["total"].apply(_norm)
+            df_evo_raw["total"] = df_evo_raw["total"].apply(normalizar_numero)
+            df_evo_raw["total"] = pd.to_numeric(df_evo_raw["total"], errors="coerce").fillna(0)
         else:
             df_evo_raw = pd.DataFrame(columns=_hdrs_evo)
     except:
@@ -814,73 +842,7 @@ with aba_dash:
             xaxis=dict(showgrid=False),
             yaxis=dict(showgrid=True, gridcolor="#333")
         )
-        st.plotly_chart(fig_evo, use_container_width=True)
-
-        # ── gráfico mensal com preços históricos ─────────────────────────────
-        st.subheader("evolução mensal do patrimônio investido")
-        import calendar as _cal
-        import datetime as _dt
-
-        hoje_dt   = _dt.date.today()
-        mes_atual = f"{hoje_dt.year}-{hoje_dt.month:02d}"
-
-        # meses disponíveis em precos_mensais
-        if not _df_pm.empty and 'ano_mes' in _df_pm.columns:
-            meses_pm = sorted(_df_pm['ano_mes'].unique())
-            meses_pm = [m for m in meses_pm if m < mes_atual]
-        else:
-            meses_pm = []
-
-        if meses_pm:
-            vals_mensais = []
-            for mes in meses_pm:
-                ano, m = int(mes[:4]), int(mes[5:7])
-                # posição no fim do mês
-                df_ate_mes = _df_lanc_raw.copy()
-                df_ate_mes['data_dt'] = pd.to_datetime(df_ate_mes['data'], format='%d/%m/%Y', errors='coerce')
-                df_ate_mes = df_ate_mes[df_ate_mes['data_dt'].dt.to_period('M').astype(str) <= mes]
-                pos_mes = calcular_posicao(df_ate_mes)
-
-                total_mes = 0.0
-                for _, pr in pos_mes.iterrows():
-                    ativo = pr['ativo']
-                    qtd   = pr['qtd_atual']
-                    # buscar preço do mês
-                    pm_row = _df_pm[(_df_pm['ano_mes'] == mes) & (_df_pm['ativo'] == ativo)]
-                    if not pm_row.empty:
-                        preco_hist = float(pm_row['preco_fechamento'].iloc[0])
-                    else:
-                        preco_hist = pr['preco_medio']  # fallback: custo médio
-                    total_mes += qtd * preco_hist
-
-                vals_mensais.append({
-                    'mes': pd.to_datetime(f"{mes}-01"),
-                    'total': total_mes,
-                    'label': pd.to_datetime(f"{mes}-01").strftime('%b/%y')
-                })
-
-            df_mensal = pd.DataFrame(vals_mensais)
-            df_mensal['hover'] = df_mensal.apply(
-                lambda r: f"<b>{r['label']}</b><br>{formatar_brl(r['total'])}", axis=1
-            )
-            fig_mensal = go.Figure()
-            fig_mensal.add_trace(go.Bar(
-                x=df_mensal['mes'], y=df_mensal['total'],
-                marker_color="#1E88E5",
-                hovertemplate="%{customdata}<extra></extra>",
-                customdata=df_mensal['hover'].tolist(),
-            ))
-            fig_mensal.update_layout(
-                height=280,
-                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                showlegend=False, bargap=0.2,
-                xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45),
-                yaxis=dict(showgrid=True, gridcolor="#333"),
-                margin=dict(t=10, b=10, l=10, r=10)
-            )
-            st.plotly_chart(fig_mensal, use_container_width=True)
-        else:
-            st.info("preços mensais históricos ainda não disponíveis. serão populados automaticamente no próximo carregamento.")
+        st.plotly_chart(fig_evo, use_container_width=True, config={"displayModeBar": False})
 
 with aba_detalhe:
     sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
