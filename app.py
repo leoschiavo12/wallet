@@ -419,9 +419,10 @@ def salvar_lancamento(row: list):
     svc.values().append(
         spreadsheetId=SHEET_ID,
         range=f"{SHEET_TAB}!A:G",
-        valueInputOption="USER_ENTERED",
+        valueInputOption="RAW",
         body={"values": [row]}
     ).execute()
+    import time; time.sleep(1)  # aguarda Sheets propagar
     st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
 def deletar_lancamento(idx_linha_sheet: int):
@@ -1174,7 +1175,7 @@ with aba_lanc:
                             salvar_lancamento([
                                 f_data.strftime("%d/%m/%Y"),
                                 f_tipo, f_ativo, f_classe,
-                                f_qtd, f_preco, round(f_total, 2)
+                                float(f_qtd), float(f_preco), float(round(f_total, 2))
                             ])
                             st.session_state["abrir_form_aporte"] = False
                             st.rerun(scope="fragment")
