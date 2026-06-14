@@ -415,14 +415,23 @@ def ler_lancamentos(_versao=0):
         return pd.DataFrame(columns=HEADERS)
 
 def salvar_lancamento(row: list):
+    # row = [data_str, tipo, ativo, classe, qtd_float, preco_float, total_float]
+    # Sheets PT-BR usa vírgula como decimal — formatar antes de enviar
+    def fmt_num(v):
+        return str(v).replace('.', ',')
+
+    row_fmt = [
+        row[0], row[1], row[2], row[3],
+        fmt_num(row[4]), fmt_num(row[5]), fmt_num(row[6])
+    ]
     svc = get_sheets_service()
     svc.values().append(
         spreadsheetId=SHEET_ID,
         range=f"{SHEET_TAB}!A:G",
-        valueInputOption="RAW",
-        body={"values": [row]}
+        valueInputOption="USER_ENTERED",
+        body={"values": [row_fmt]}
     ).execute()
-    import time; time.sleep(1)  # aguarda Sheets propagar
+    import time; time.sleep(1)
     st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
 def deletar_lancamento(idx_linha_sheet: int):
@@ -1177,6 +1186,9 @@ with aba_lanc:
                                 f_tipo, f_ativo, f_classe,
                                 float(f_qtd), float(f_preco), float(round(f_total, 2))
                             ])
+                            ler_lancamentos.clear()
+                            st.session_state["abrir_form_aporte"] = False
+                            st.rerun(scope="fragment")
                             st.session_state["abrir_form_aporte"] = False
                             st.rerun(scope="fragment")
                         else:
