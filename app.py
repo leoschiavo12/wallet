@@ -20,25 +20,35 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+@st.cache_resource
+def _yf_session():
+    """sessão yfinance reutilizada — evita reconexão a cada chamada"""
+    return yf
+
 def obter_precos_b3(tickers_lista):
     tk_formatados = [f"{t.upper()}.SA" for t in tickers_lista]
     try:
-        dados = yf.download(tk_formatados, period="5d", progress=False, auto_adjust=True, timeout=7)
+        dados = _yf_session().download(tk_formatados, period="5d", progress=False, auto_adjust=True, timeout=7)
         precos = {}
+        falhas = []
         for t in tickers_lista:
             try:
                 tk = f"{t.upper()}.SA"
-                # suportar tanto MultiIndex (varios tickers) quanto Index simples (1 ticker)
                 if isinstance(dados.columns, pd.MultiIndex):
                     serie = dados['Close'][tk].ffill()
                 else:
                     serie = dados['Close'].ffill()
-                precos[t.upper()] = float(serie.dropna().iloc[-1])
+                v = float(serie.dropna().iloc[-1])
+                precos[t.upper()] = v if v > 0 else 0.0
+                if v <= 0: falhas.append(t)
             except:
-                precos[t.upper()] = 100.0
+                precos[t.upper()] = 0.0
+                falhas.append(t)
+        if falhas:
+            st.session_state['_precos_falha'] = falhas
         return precos
     except:
-        return {t.upper(): 100.0 for t in tickers_lista}
+        return {t.upper(): 0.0 for t in tickers_lista}
 
 @st.cache_data(ttl=3600)
 def obter_dividendos_mes_anterior(df_lancamentos_json):
@@ -563,20 +573,64 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
 
     return df_pm_existente
 
-# ── carregar dados principais ─────────────────────────────────────────────────
-_df_lanc_raw = ler_lancamentos()
+@st.cache_data(ttl=3600, show_spinner=False)
+def calcular_valores_mensais(df_lanc_json, df_pm_json):
+    """calcula valor da carteira por mês — cacheado por 1h"""
+    import datetime
+    df_lanc = pd.DataFrame(df_lanc_json)
+    df_pm   = pd.DataFrame(df_pm_json)
+    if df_lanc.empty or df_pm.empty:
+        return []
+    hoje      = datetime.date.today()
+    mes_atual = f"{hoje.year}-{hoje.month:02d}"
+    meses_pm  = sorted(df_pm['ano_mes'].unique())
+    meses_pm  = [m for m in meses_pm if m < mes_atual]
+    if not meses_pm:
+        return []
+    df_lanc['data_dt'] = pd.to_datetime(df_lanc['data'], format='%d/%m/%Y', errors='coerce')
+    vals = []
+    ultimo_total = 0.0
+    ano0, m0 = int(meses_pm[0][:4]), int(meses_pm[0][5:7])
+    ano1, m1 = int(meses_pm[-1][:4]), int(meses_pm[-1][5:7])
+    todos_meses, a, m = [], ano0, m0
+    while (a, m) <= (ano1, m1):
+        todos_meses.append(f"{a}-{m:02d}")
+        m += 1
+        if m > 12: m, a = 1, a + 1
+    for mes in todos_meses:
+        if mes in meses_pm:
+            df_ate  = df_lanc[df_lanc['data_dt'].dt.to_period('M').astype(str) <= mes].copy()
+            pos_mes = calcular_posicao(df_ate)
+            total_mes = 0.0
+            for _, pr in pos_mes.iterrows():
+                pm_row = df_pm[(df_pm['ano_mes'] == mes) & (df_pm['ativo'] == pr['ativo'])]
+                preco_hist = float(pm_row['preco_fechamento'].iloc[0]) if not pm_row.empty else pr['preco_medio']
+                total_mes += pr['qtd_atual'] * preco_hist
+            ultimo_total = total_mes
+        else:
+            total_mes = ultimo_total
+        vals.append({'mes': f"{mes}-01", 'total': total_mes, 'atual': False})
+    return vals
+
+# ── carregar dados principais (session_state cache) ──────────────────────────
+# relê do Sheets só na primeira renderização da sessão
+# ou após salvar/excluir lançamento (_lanc_versao muda)
+_versao_atual = st.session_state.get("_lanc_versao", 0)
+_cache_versao = st.session_state.get("_cache_versao", -1)
+
+if _versao_atual != _cache_versao or "_df_lanc_raw" not in st.session_state:
+    with st.spinner("carregando lançamentos..."):
+        st.session_state["_df_lanc_raw_cached"] = ler_lancamentos()
+        st.session_state["_cache_versao"] = _versao_atual
+
+_df_lanc_raw = st.session_state["_df_lanc_raw_cached"]
 
 # calcular posição atual
 _posicao = calcular_posicao(_df_lanc_raw)
 
-# diagnóstico VIUR11
-_viur = _df_lanc_raw[_df_lanc_raw['ativo'] == 'VIUR11']
-if not _viur.empty:
-    _sinal_viur = _viur['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
-    _saldo_viur = (_viur['quantidade'] * _sinal_viur).sum()
-    st.session_state['_viur_debug'] = f"VIUR11: {len(_viur)} linhas, saldo={_saldo_viur:.4f}, vendas={_viur[_viur['tipo'].str.lower()=='venda']['quantidade'].tolist()}"
+# remover diagnóstico VIUR11 (não mais necessário)
 
-# preços atuais
+# preços atuais — cacheados por 1h via @st.cache_data em obter_precos_b3
 _todos_b3 = [r['ativo'] for _, r in _posicao.iterrows()
              if r['classe'] in ('ETF', 'FII') and r['ativo'] != 'BTC']
 precos = obter_precos_b3(_todos_b3)
@@ -594,7 +648,13 @@ else:
         st.session_state['preco_renda_erro'] = _resultado_renda[1]
 
 precos['Tesouro Selic 2031']     = preco_td_de_secrets('Tesouro Selic 2031', 13000.0)
+precos['Tesouro SELIC 2031']     = precos['Tesouro Selic 2031']
 precos['Tesouro Prefixado 2032'] = preco_td_de_secrets('Tesouro Prefixado 2032', 700.0)
+
+# alerta de preços com problema
+_falhas = st.session_state.pop('_precos_falha', [])
+if _falhas:
+    st.warning(f"⚠️ preço não obtido para: {', '.join(_falhas)} — verifique os tickers.", icon="⚠️")
 
 # construir df principal
 linhas = []
@@ -623,7 +683,7 @@ df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
 df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
 df_ativo = df.sort_values(by='Total Atual', ascending=False)
 
-# MINHA_CARTEIRA mantido para compatibilidade com formulário de lançamento
+# MINHA_CARTEIRA para formulário de lançamento
 MINHA_CARTEIRA = {
     'ETF': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='ETF'].iterrows()},
     'FII': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='FII'].iterrows()},
@@ -631,16 +691,20 @@ MINHA_CARTEIRA = {
     'Tesouro Direto': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='Tesouro Direto'].iterrows()},
 }
 
-# popular preços mensais em background (silencioso)
-try:
-    _df_pm = ler_precos_mensais()
-    _df_pm_antes = len(_df_pm)
-    _df_pm = popular_precos_mensais(_df_lanc_raw, _df_pm)
-    _df_pm_depois = len(_df_pm)
-    st.session_state['_pm_status'] = f"✓ precos_mensais: {_df_pm_antes} → {_df_pm_depois} registros"
-except Exception as _e_pm:
-    st.session_state['_pm_status'] = f"✗ erro: {_e_pm}"
-    _df_pm = pd.DataFrame(columns=PM_HEADERS)
+# popular preços mensais — session_state cache para não rodar a cada render
+if "_df_pm" not in st.session_state:
+    try:
+        with st.spinner("atualizando histórico de preços..."):
+            _df_pm_lido = ler_precos_mensais()
+            _antes = len(_df_pm_lido)
+            _df_pm_lido = popular_precos_mensais(_df_lanc_raw, _df_pm_lido)
+            st.session_state["_df_pm"] = _df_pm_lido
+            st.session_state['_pm_status'] = f"✓ precos_mensais: {_antes} → {len(_df_pm_lido)} registros"
+    except Exception as _e_pm:
+        st.session_state['_pm_status'] = f"✗ erro: {_e_pm}"
+        st.session_state["_df_pm"] = pd.DataFrame(columns=PM_HEADERS)
+
+_df_pm = st.session_state["_df_pm"]
 
 # ── Classificação dos FIIs ───────────────────────────────────────────────────
 FII_INFO = {
@@ -736,39 +800,14 @@ with aba_dash:
             meses_pm = []
 
         if meses_pm:
-            vals_mensais = []
-            ultimo_total = 0.0
-            primeiro_mes = meses_pm[0]
-            ano0, m0 = int(primeiro_mes[:4]), int(primeiro_mes[5:7])
-            ano1, m1 = int(meses_pm[-1][:4]), int(meses_pm[-1][5:7])
-            todos_meses = []
-            a, m = ano0, m0
-            while (a, m) <= (ano1, m1):
-                todos_meses.append(f"{a}-{m:02d}")
-                m += 1
-                if m > 12: m, a = 1, a + 1
-
-            for mes in todos_meses:
-                if mes in meses_pm:
-                    df_ate_mes = _df_lanc_raw.copy()
-                    df_ate_mes['data_dt'] = pd.to_datetime(df_ate_mes['data'], format='%d/%m/%Y', errors='coerce')
-                    df_ate_mes = df_ate_mes[df_ate_mes['data_dt'].dt.to_period('M').astype(str) <= mes]
-                    pos_mes = calcular_posicao(df_ate_mes)
-                    total_mes = 0.0
-                    for _, pr in pos_mes.iterrows():
-                        pm_row = _df_pm[(_df_pm['ano_mes'] == mes) & (_df_pm['ativo'] == pr['ativo'])]
-                        preco_hist = float(pm_row['preco_fechamento'].iloc[0]) if not pm_row.empty else pr['preco_medio']
-                        total_mes += pr['qtd_atual'] * preco_hist
-                    ultimo_total = total_mes
-                else:
-                    total_mes = ultimo_total
-
-                vals_mensais.append({
-                    'mes':    pd.to_datetime(f"{mes}-01"),
-                    'total':  total_mes,
-                    'label':  pd.to_datetime(f"{mes}-01").strftime('%b/%y'),
-                    'atual':  False,
-                })
+            # usar função cacheada — evita recalcular 39× a cada render
+            _vals_cache = calcular_valores_mensais(
+                _df_lanc_raw.to_dict(orient='records'),
+                _df_pm.to_dict(orient='records')
+            )
+            vals_mensais = [{'mes': pd.to_datetime(v['mes']), 'total': v['total'],
+                             'label': pd.to_datetime(v['mes']).strftime('%b/%y'), 'atual': False}
+                            for v in _vals_cache]
 
             # adicionar barra do mês atual com valor de mercado corrente
             vals_mensais.append({
