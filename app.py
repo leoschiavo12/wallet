@@ -1225,8 +1225,29 @@ with aba_detalhe:
         pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
         pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
         c1, c2 = st.columns(2)
-        c1.metric(f"renda fixa  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}".replace('.', ','))
-        c2.metric(f"renda variável  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}".replace('.', ','))
+        c1.metric(f"renda fixa  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}")
+        c2.metric(f"renda variável  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}")
+
+        st.markdown("---")
+
+        # ── linha 3: CDI vs IPCA ──────────────────────────────────────────────
+        # CDI = LFTB11 + FIIs papel CDI
+        # IPCA = Renda+ 2050 + FIIs papel IPCA
+        _df_fii_idx = df[df['Classe'] == 'FII'].copy()
+        _df_fii_idx['indexador'] = _df_fii_idx['Ativo'].map(
+            lambda t: FII_INFO.get(t, {}).get('indexador'))
+
+        total_cdi  = df[df['Ativo'] == 'LFTB11']['Total Atual'].sum() + \
+                     _df_fii_idx[_df_fii_idx['indexador'] == 'CDI']['Total Atual'].sum()
+        total_ipca = df[df['Ativo'] == 'Renda+ 2050']['Total Atual'].sum() + \
+                     _df_fii_idx[_df_fii_idx['indexador'] == 'IPCA']['Total Atual'].sum()
+        total_idx  = total_cdi + total_ipca
+        pct_cdi    = total_cdi  / total_idx * 100 if total_idx > 0 else 0
+        pct_ipca   = total_ipca / total_idx * 100 if total_idx > 0 else 0
+
+        c1, c2 = st.columns(2)
+        c1.metric(f"CDI  ·  {abreviar_rs(total_cdi)}", fmt_pct(pct_cdi))
+        c2.metric(f"IPCA+  ·  {abreviar_rs(total_ipca)}", fmt_pct(pct_ipca))
 
         st.markdown("---")
 
