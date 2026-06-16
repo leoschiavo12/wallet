@@ -899,15 +899,28 @@ with aba_detalhe:
 
         # ── linha 1: total, dividendos, yield corrente ───────────────────────
         total_fii_k = abreviar_rs(total_fii)
-        yield_corrente = (div_total / total_fii * 100) if total_fii > 0 and div_total > 0 else None
+
+        # yield = dividendos_mês_ref / valor_carteira_FIIs_fim_mês_anterior
+        # ex: dividendos de maio → base = valor FIIs em 30/abr
+        _mes_base = f"{ano_ref_f}-{mes_ref_f:02d}"
+        _total_fii_base = 0.0
+        if not _df_pm.empty:
+            for _, _pr in df_fii.iterrows():
+                _pm_row = _df_pm[(_df_pm['ano_mes'] == _mes_base) & (_df_pm['ativo'] == _pr['Ativo'])]
+                if not _pm_row.empty:
+                    _total_fii_base += _pr['Qtd'] * float(_pm_row['preco_fechamento'].iloc[0])
+        if _total_fii_base == 0.0:
+            _total_fii_base = total_fii  # fallback para valor atual
+
+        yield_mensal = (div_total / _total_fii_base * 100) if _total_fii_base > 0 and div_total > 0 else None
 
         c1, c2, c3 = st.columns(3)
         c1.metric("total FIIs", total_fii_k)
         c2.metric(f"dividendos — {meses_pt3[mes_ref_f]}/{ano_ref_f}", formatar_brl(div_total))
-        if yield_corrente:
-            c3.metric("yield corrente", f"{yield_corrente:.2f}%".replace('.', ','))
+        if yield_mensal:
+            c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", f"{yield_mensal:.2f}%".replace('.', ','))
         else:
-            c3.metric("yield corrente", "—")
+            c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", "—")
 
         st.markdown("---")
 
@@ -987,20 +1000,21 @@ with aba_detalhe:
             pm       = pm_fii.get(t, None)
             div_info = div_detalhe.get(t, {})
             div_cota = div_info.get('por_cota', 0.0)
-            yield_m  = (div_cota / preco * 100) if preco > 0 and div_cota > 0 else None
-            yield_a  = ((1 + yield_m/100)**12 - 1)*100 if yield_m else None
+            # YoC = div/cota ÷ preço médio de aquisição (yield on cost)
+            yoc_m = (div_cota / pm * 100) if pm and pm > 0 and div_cota > 0 else None
+            yoc_a = ((1 + yoc_m/100)**12 - 1)*100 if yoc_m else None
             linhas_fii.append({
-                'ativo':        t,
-                'tipo':         info['tipo'],
-                'indexador':    info['indexador'] if info['tipo'] == 'papel' and info['indexador'] else '—',
-                'qtd':          int(row['Qtd']),
-                'preço médio':  pm,
-                'preço atual':  preco,
-                'total':        row['Total Atual'],
-                'part. %':      row['Part. %'],
-                'div/cota':     div_cota if div_cota > 0 else None,
-                'yield mensal': yield_m,
-                'yield anual':  yield_a,
+                'ativo':      t,
+                'tipo':       info['tipo'],
+                'indexador':  info['indexador'] if info['tipo'] == 'papel' and info['indexador'] else '—',
+                'qtd':        int(row['Qtd']),
+                'preço médio': pm,
+                'preço atual': preco,
+                'total':      row['Total Atual'],
+                'part. %':    row['Part. %'],
+                'div/cota':   div_cota if div_cota > 0 else None,
+                'YoC mensal': yoc_m,
+                'YoC anual':  yoc_a,
             })
 
         df_fii_num = pd.DataFrame(linhas_fii).sort_values('total', ascending=False)
@@ -1010,12 +1024,13 @@ with aba_detalhe:
         df_fii_fmt['total']        = df_fii_fmt['total'].apply(formatar_brl)
         df_fii_fmt['part. %']      = df_fii_fmt['part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
         df_fii_fmt['div/cota']     = df_fii_fmt['div/cota'].apply(lambda x: formatar_brl(x) if x else '—')
-        df_fii_fmt['yield mensal'] = df_fii_fmt['yield mensal'].apply(lambda x: f"{x:.2f}%".replace('.', ',') if x else '—')
-        df_fii_fmt['yield anual']  = df_fii_fmt['yield anual'].apply(lambda x: f"{fmt_pct(x)}".replace('.', ',') if x else '—')
+        df_fii_fmt['YoC mensal']   = df_fii_fmt['YoC mensal'].apply(lambda x: f"{x:.2f}%".replace('.', ',') if x else '—')
+        df_fii_fmt['YoC anual']    = df_fii_fmt['YoC anual'].apply(lambda x: fmt_pct(x) if x else '—')
         df_fii_fmt['qtd']          = df_fii_fmt['qtd'].apply(str)
 
-        cfg_fii = {c: st.column_config.TextColumn(c, alignment="center") for c in df_fii_fmt.columns}
-        st.dataframe(df_fii_fmt, use_container_width=True, hide_index=True, column_config=cfg_fii)
+        with st.expander("ver tabela de FIIs", expanded=False):
+            cfg_fii = {c: st.column_config.TextColumn(c, alignment="center") for c in df_fii_fmt.columns}
+            st.dataframe(df_fii_fmt, use_container_width=True, hide_index=True, column_config=cfg_fii)
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: ETFs
