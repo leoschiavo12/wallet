@@ -1712,7 +1712,8 @@ with aba_config:
             st.success(f"✓ {len(_LANC_FALTANTES)} lançamentos inseridos! recarregue o app.")
         except Exception as _e:
             st.error(f"erro: {_e}")
-    if st.button("ver breakdown de dividendos por FII"):
+    if st.button("ver breakdown de dividendos por FII (forçar recálculo)"):
+        calcular_dividendos_historicos.clear()
         _divs_hist, _total_divs_dbg = calcular_dividendos_historicos(
             _df_lanc_raw.to_dict(orient='records')
         )
