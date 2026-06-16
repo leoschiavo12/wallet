@@ -1119,7 +1119,6 @@ with aba_detalhe:
                     f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {formatar_brl(abs(rs))}</span>")
 
         def holding_ponderado_meses(ativo, df_lanc):
-            """holding period ponderado pelo valor investido em cada compra"""
             import datetime
             hoje = datetime.date.today()
             compras = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'].str.lower() == 'compra')].copy()
@@ -1135,6 +1134,56 @@ with aba_detalhe:
                 if pd.notna(row['data_dt'])
             )
             return round(meses_pond, 1)
+
+        # holding médio ponderado da classe
+        _holding_classe = 0.0
+        for _, row in df_etf.iterrows():
+            _h = holding_ponderado_meses(row['Ativo'], _df_lanc_raw)
+            if _h and total_inv_etf > 0:
+                _holding_classe += (_h * row['custo_total'] / total_inv_etf)
+
+        # ── linha 1: resumo da classe + donut ────────────────────────────────
+        col_resumo, col_donut_etf = st.columns([2, 1])
+
+        with col_resumo:
+            c1, c2 = st.columns(2)
+            c1.metric("total ETFs", abreviar_rs(total_etf))
+            c2.metric("total investido", abreviar_rs(total_inv_etf))
+
+            c3, c4 = st.columns(2)
+            c3.markdown(
+                f"<div style='padding-top:8px'>"
+                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização total</div>"
+                f"{tag_var(var_etf_rs, var_etf_pct)}</div>",
+                unsafe_allow_html=True
+            )
+            c4.metric("holding médio (classe)", f"{round(_holding_classe, 1)} meses" if _holding_classe > 0 else "—")
+
+        with col_donut_etf:
+            hover_etf = [
+                f"<b>{row['Ativo']}</b><br>{fmt_pct(row['Total Atual']/total_etf*100)}<br>{formatar_brl(row['Total Atual'])}"
+                for _, row in df_etf.iterrows()
+            ]
+            fig_etf_donut = go.Figure(go.Pie(
+                labels=df_etf['Ativo'].tolist(),
+                values=df_etf['Total Atual'].tolist(),
+                hole=0.6,
+                textinfo='label+percent',
+                textfont=dict(size=10),
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=hover_etf,
+                marker=dict(colors=px.colors.sequential.Blues_r[:len(df_etf)]),
+            ))
+            fig_etf_donut.update_layout(
+                dragmode=False,
+                height=220, showlegend=False,
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(t=10, b=10, l=10, r=10)
+            )
+            st.plotly_chart(fig_etf_donut, use_container_width=True,
+                           config={"displayModeBar": False, "scrollZoom": False})
+
+        st.markdown("---")
 
         # ── cards por ETF ──────────────────────────────────────────────────────
         for _, row in df_etf.sort_values('Total Atual', ascending=False).iterrows():
@@ -1167,47 +1216,6 @@ with aba_detalhe:
 
             st.markdown("---")
 
-        # ── resumo da classe ──────────────────────────────────────────────────
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("total ETFs", abreviar_rs(total_etf))
-        c2.metric("total investido", abreviar_rs(total_inv_etf))
-        c3.markdown(
-            f"<div style='padding-top:8px'>"
-            f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização total</div>"
-            f"{tag_var(var_etf_rs, var_etf_pct)}</div>",
-            unsafe_allow_html=True
-        )
-        # holding médio ponderado da classe (ponderado pelo custo de cada ETF)
-        _holding_classe = 0.0
-        for _, row in df_etf.iterrows():
-            _h = holding_ponderado_meses(row['Ativo'], _df_lanc_raw)
-            if _h and total_inv_etf > 0:
-                _holding_classe += (_h * row['custo_total'] / total_inv_etf)
-        c4.metric("holding médio (classe)", f"{round(_holding_classe, 1)} meses" if _holding_classe > 0 else "—")
-
-        st.markdown("---")
-        st.subheader("distribuição dentro da classe")
-        hover_etf = [
-            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['Total Atual']/total_etf*100)}<br>{formatar_brl(row['Total Atual'])}"
-            for _, row in df_etf.iterrows()
-        ]
-        fig_etf_donut = go.Figure(go.Pie(
-            labels=df_etf['Ativo'].tolist(),
-            values=df_etf['Total Atual'].tolist(),
-            hole=0.6,
-            textinfo='label+percent',
-            textfont=dict(size=11),
-            hovertemplate='%{customdata}<extra></extra>',
-            customdata=hover_etf,
-            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_etf)]),
-        ))
-        fig_etf_donut.update_layout(
-            dragmode=False,
-            height=320, showlegend=False,
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(t=20, b=20, l=20, r=20)
-        )
-        st.plotly_chart(fig_etf_donut, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
         st.info("⚙️ % alvo por ativo será configurado na aba **configurações** — desvios aparecerão aqui quando disponível.", icon="ℹ️")
 
     # ══════════════════════════════════════════════════════════════════════════
