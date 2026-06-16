@@ -788,6 +788,7 @@ with aba_dash:
             domain=dict(x=[0.1, 0.9], y=[0.1, 0.9])
         ))
         fig_donut.update_layout(
+            dragmode=False,
             margin=dict(t=60, b=60, l=60, r=60),
             height=400, showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
@@ -846,6 +847,7 @@ with aba_dash:
                 customdata=df_mensal['hover'].tolist(),
             ))
             fig_mensal.update_layout(
+            dragmode=False,
                 height=400,
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                 showlegend=False, bargap=0.2,
@@ -865,52 +867,6 @@ with aba_dash:
 
     st.markdown('---')
 
-    # ── linha 2: barras horizontais por ativo ────────────────────────────────
-    col_barras, = st.columns([1])
-
-    with col_barras:
-        df_ativo_sorted = df_ativo.sort_values('Part. %', ascending=True)
-
-        hover_barras = [
-            f"<b>{row['Ativo']}</b><br>{str(round(row['Part. %'], 2)).replace('.', ',')}%<br>{formatar_brl(row['Total Atual'])}"
-            for _, row in df_ativo_sorted.iterrows()
-        ]
-
-        fig_ativo = go.Figure()
-        fig_ativo.add_trace(go.Bar(
-            x=df_ativo_sorted['Part. %'],
-            y=df_ativo_sorted['Ativo'],
-            orientation='h',
-            marker_color='#1E88E5',
-            text=df_ativo_sorted['Part. %'].apply(lambda v: f"{fmt_pct(v)}".replace('.', ',')),
-            textposition='outside',
-            textfont=dict(size=10, color='white'),
-            hovertemplate='%{customdata}<extra></extra>',
-            customdata=hover_barras,
-        ))
-        max_pct = df_ativo_sorted['Part. %'].max()
-        # ticks a cada 5%; só incluir o próximo nível se o máximo ultrapassar o atual
-        _step = 5
-        _ultimo_tick = (int(max_pct // _step)) * _step
-        _proximo     = _ultimo_tick + _step
-        # mostrar próximo nível só se barra está dentro de 90% do limite
-        x_max = _proximo if max_pct >= _ultimo_tick * 0.9 else _ultimo_tick
-        x_max_plot = x_max * 1.15  # espaço para o label fora da barra
-        fig_ativo.update_layout(
-            height=max(300, len(df_ativo_sorted) * 28),
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False,
-            xaxis=dict(
-                showgrid=True, gridcolor='#333',
-                range=[0, x_max_plot],
-                ticksuffix='%',
-                dtick=_step,
-            ),
-            yaxis=dict(showgrid=False, tickfont=dict(size=11)),
-            bargap=0.25,
-            margin=dict(t=10, b=10, l=10, r=60)
-        )
-        st.plotly_chart(fig_ativo, use_container_width=True, config={"displayModeBar": False})
 
 with aba_detalhe:
     sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
@@ -1002,11 +958,12 @@ with aba_detalhe:
             marker=dict(colors=px.colors.sequential.Blues_r[:len(df_fii_donut)]),
         ))
         fig_fii_donut.update_layout(
+            dragmode=False,
             height=320, showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             margin=dict(t=20, b=20, l=20, r=20)
         )
-        st.plotly_chart(fig_fii_donut, use_container_width=True)
+        st.plotly_chart(fig_fii_donut, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
 
         st.markdown("---")
 
@@ -1097,11 +1054,12 @@ with aba_detalhe:
             marker=dict(colors=px.colors.sequential.Blues_r[:len(df_etf)]),
         ))
         fig_etf_donut.update_layout(
+            dragmode=False,
             height=320, showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             margin=dict(t=20, b=20, l=20, r=20)
         )
-        st.plotly_chart(fig_etf_donut, use_container_width=True)
+        st.plotly_chart(fig_etf_donut, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
         st.info("⚙️ % alvo por ativo será configurado na aba **configurações** — desvios aparecerão aqui quando disponível.", icon="ℹ️")
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1173,6 +1131,7 @@ with aba_detalhe:
                 hovertemplate="%{x|%d/%m/%Y}<br>R$ %{y:,.0f}<extra></extra>"
             ))
             fig_btc.update_layout(
+            dragmode=False,
                 height=280,
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                 showlegend=False,
@@ -1180,7 +1139,7 @@ with aba_detalhe:
                 yaxis=dict(showgrid=True, gridcolor="#333"),
                 margin=dict(t=10, b=10, l=10, r=10)
             )
-            st.plotly_chart(fig_btc, use_container_width=True)
+            st.plotly_chart(fig_btc, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
             st.caption(f"fonte: {hist_fonte}")
         else:
             st.warning("histórico de preços indisponível — coingecko e yfinance não retornaram dados.")
@@ -1268,6 +1227,42 @@ with aba_detalhe:
         c1, c2 = st.columns(2)
         c1.metric(f"renda fixa  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}".replace('.', ','))
         c2.metric(f"renda variável  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}".replace('.', ','))
+
+        st.markdown("---")
+
+        # ── distribuição por ativo ────────────────────────────────────────────
+        df_ativo_sorted = df_ativo.sort_values('Part. %', ascending=True)
+        hover_barras = [
+            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['Part. %'])}<br>{formatar_brl(row['Total Atual'])}"
+            for _, row in df_ativo_sorted.iterrows()
+        ]
+        fig_ativo = go.Figure()
+        fig_ativo.add_trace(go.Bar(
+            x=df_ativo_sorted['Part. %'],
+            y=df_ativo_sorted['Ativo'],
+            orientation='h',
+            marker_color='#1E88E5',
+            text=df_ativo_sorted['Part. %'].apply(fmt_pct),
+            textposition='outside',
+            textfont=dict(size=10, color='white'),
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_barras,
+        ))
+        _max_pct   = df_ativo_sorted['Part. %'].max()
+        _step      = 5
+        _ult_tick  = (int(_max_pct // _step)) * _step
+        _x_max     = (_ult_tick + _step) if _max_pct >= _ult_tick * 0.9 else _ult_tick
+        fig_ativo.update_layout(
+            height=max(300, len(df_ativo_sorted) * 28),
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            showlegend=False, dragmode=False,
+            xaxis=dict(showgrid=True, gridcolor='#333', range=[0, _x_max * 1.15],
+                       ticksuffix='%', dtick=_step, fixedrange=True),
+            yaxis=dict(showgrid=False, tickfont=dict(size=11), fixedrange=True),
+            bargap=0.25, margin=dict(t=10, b=10, l=10, r=60)
+        )
+        st.plotly_chart(fig_ativo, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False})
 
         st.markdown("---")
 
