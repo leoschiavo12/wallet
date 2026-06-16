@@ -842,51 +842,29 @@ with aba_dash:
             hovertemplate='%{customdata}<extra></extra>',
             customdata=hover_barras,
         ))
-        x_max = df_ativo_sorted['Part. %'].max() * 1.25
+        max_pct = df_ativo_sorted['Part. %'].max()
+        # ticks a cada 5%; só incluir o próximo nível se o máximo ultrapassar o atual
+        _step = 5
+        _ultimo_tick = (int(max_pct // _step)) * _step
+        _proximo     = _ultimo_tick + _step
+        # mostrar próximo nível só se barra está dentro de 90% do limite
+        x_max = _proximo if max_pct >= _ultimo_tick * 0.9 else _ultimo_tick
+        x_max_plot = x_max * 1.15  # espaço para o label fora da barra
         fig_ativo.update_layout(
             height=max(300, len(df_ativo_sorted) * 28),
             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False,
             xaxis=dict(
                 showgrid=True, gridcolor='#333',
-                range=[0, x_max],
+                range=[0, x_max_plot],
                 ticksuffix='%',
+                dtick=_step,
             ),
             yaxis=dict(showgrid=False, tickfont=dict(size=11)),
             bargap=0.25,
             margin=dict(t=10, b=10, l=10, r=60)
         )
         st.plotly_chart(fig_ativo, use_container_width=True, config={"displayModeBar": False})
-
-    # ── evolução acumulada ────────────────────────────────────────────────────
-    st.markdown("---")
-    st.subheader("evolução do patrimônio investido")
-
-    if not _df_lanc_raw.empty:
-        df_evo_raw = _df_lanc_raw.copy()
-        df_evo_raw["data_dt"]   = pd.to_datetime(df_evo_raw["data"], format="%d/%m/%Y", errors="coerce")
-        df_evo_raw["sinal_evo"] = df_evo_raw["tipo"].str.strip().str.lower().map({"compra": 1, "venda": -1}).fillna(0)
-        # usar qtd × preco_unitario para maior precisão (ignora coluna total que pode ter erros)
-        df_evo_raw["valor_evo"] = df_evo_raw["quantidade"] * df_evo_raw["preco_unitario"] * df_evo_raw["sinal_evo"]
-        df_evo = df_evo_raw.groupby("data_dt")["valor_evo"].sum().reset_index().sort_values("data_dt")
-        df_evo["acum"] = df_evo["valor_evo"].cumsum()
-
-        fig_evo = go.Figure()
-        fig_evo.add_trace(go.Scatter(
-            x=df_evo["data_dt"], y=df_evo["acum"],
-            mode="lines+markers",
-            line=dict(color="#1E88E5", width=2),
-            marker=dict(size=5),
-            hovertemplate="%{x|%d/%m/%Y}<br>%{y:,.2f}<extra></extra>"
-        ))
-        fig_evo.update_layout(
-            height=300,
-            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-            showlegend=False,
-            xaxis=dict(showgrid=False),
-            yaxis=dict(showgrid=True, gridcolor="#333")
-        )
-        st.plotly_chart(fig_evo, use_container_width=True, config={"displayModeBar": False})
 
 with aba_detalhe:
     sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
