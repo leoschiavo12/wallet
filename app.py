@@ -135,6 +135,56 @@ def obter_preco_btc_brl():
         pass
     return 0.0
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def calcular_dividendos_historicos(df_lanc_json):
+    """calcula total de dividendos recebidos por FII desde a primeira compra"""
+    import pandas as pd
+    df = pd.DataFrame(df_lanc_json)
+    if df.empty: return {}, 0.0
+
+    df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
+    df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
+
+    resultado = {}
+    total_geral_divs = 0.0
+
+    fiis = df[df['classe'] == 'FII']['ativo'].unique()
+
+    for ativo in fiis:
+        try:
+            tk   = yf.Ticker(f"{ativo}.SA")
+            divs = tk.dividends
+            if divs is None or divs.empty:
+                continue
+
+            # normalizar timezone
+            if divs.index.tz is not None:
+                divs.index = divs.index.tz_localize(None)
+
+            # compras e vendas deste ativo
+            g = df[df['ativo'] == ativo].sort_values('data_dt')
+            primeira_compra = g[g['tipo'].str.lower() == 'compra']['data_dt'].min()
+            if pd.isna(primeira_compra): continue
+
+            # filtrar dividendos após primeira compra
+            divs_filtrados = divs[divs.index >= primeira_compra]
+            if divs_filtrados.empty: continue
+
+            total_ativo = 0.0
+            for data_div, valor_div in divs_filtrados.items():
+                # qtd de cotas na data do dividendo
+                g_ate = g[g['data_dt'] <= data_div]
+                qtd = (g_ate['quantidade'] * g_ate['sinal']).sum()
+                if qtd > 0:
+                    total_ativo += qtd * valor_div
+
+            resultado[ativo] = round(total_ativo, 2)
+            total_geral_divs += total_ativo
+        except:
+            continue
+
+    return resultado, round(total_geral_divs, 2)
+
 def _buscar_historico_btc_brl():
     """busca histórico sem cache — chamada internamente"""
     # tentativa 1: coingecko
@@ -914,13 +964,19 @@ with aba_detalhe:
 
         yield_mensal = (div_total / _total_fii_base * 100) if _total_fii_base > 0 and div_total > 0 else None
 
-        c1, c2, c3 = st.columns(3)
+        # calcular total histórico de dividendos (cacheado 24h)
+        _divs_hist, _total_divs = calcular_dividendos_historicos(
+            _df_lanc_raw.to_dict(orient='records')
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("total FIIs", total_fii_k)
         c2.metric(f"dividendos — {meses_pt3[mes_ref_f]}/{ano_ref_f}", formatar_brl(div_total))
         if yield_mensal:
             c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", f"{yield_mensal:.2f}%".replace('.', ','))
         else:
             c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", "—")
+        c4.metric("dividendos recebidos (total)", formatar_brl(_total_divs))
 
         st.markdown("---")
 
