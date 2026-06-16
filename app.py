@@ -277,6 +277,13 @@ def formatar_brl(valor):
     s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
     return f"R$ {s}"
 
+def fmt_pct(valor):
+    """formata % sem casa decimal se for ,0"""
+    s = f"{valor:.1f}".replace('.', ',')
+    if s.endswith(',0'):
+        s = s[:-2]
+    return f"{s}%"
+
 # ── Tesouro Direto: lê de st.secrets, fallback para valor hardcoded ──────────
 def preco_td_de_secrets(nome, fallback):
     try:
@@ -765,8 +772,8 @@ with aba_dash:
         labels_donut, hover_donut = [], []
         for _, row in df_resumo_classe.iterrows():
             pct    = row['Total Atual'] / total_classe * 100
-            labels_donut.append(f"{row['Classe']}<br>{pct:.1f}%".replace('.', ','))
-            hover_donut.append(f"<b>{row['Classe']}</b><br>{pct:.1f}%<br>{formatar_brl(row['Total Atual'])}".replace('.', ','))
+            labels_donut.append(f"{row['Classe']}<br>{fmt_pct(pct)}".replace('.', ','))
+            hover_donut.append(f"<b>{row['Classe']}</b><br>{fmt_pct(pct)}<br>{formatar_brl(row['Total Atual'])}".replace('.', ','))
 
         fig_donut = go.Figure(go.Pie(
             labels=labels_donut,
@@ -875,7 +882,7 @@ with aba_dash:
             y=df_ativo_sorted['Ativo'],
             orientation='h',
             marker_color='#1E88E5',
-            text=df_ativo_sorted['Part. %'].apply(lambda v: f"{v:.1f}%".replace('.', ',')),
+            text=df_ativo_sorted['Part. %'].apply(lambda v: f"{fmt_pct(v)}".replace('.', ',')),
             textposition='outside',
             textfont=dict(size=10, color='white'),
             hovertemplate='%{customdata}<extra></extra>',
@@ -973,7 +980,7 @@ with aba_detalhe:
             n    = n_tijolo if r['tipo_fii'] == 'tijolo' else n_papel
             sufx = idx_info if r['tipo_fii'] == 'papel' else ""
             col.metric(f"{r['tipo_fii']} ({n})  ·  {abreviar_rs(r['Total Atual'])}{sufx}".replace('.', ','),
-                       f"{pct:.1f}%".replace('.', ','))
+                       f"{fmt_pct(pct)}".replace('.', ','))
 
         st.markdown("---")
 
@@ -981,7 +988,7 @@ with aba_detalhe:
         df_fii_donut = df_fii.sort_values('Total Atual', ascending=False)
         total_fii_donut = df_fii_donut['Total Atual'].sum()
         hover_fii = [
-            f"<b>{row['Ativo']}</b><br>{row['Total Atual']/total_fii_donut*100:.1f}%<br>{formatar_brl(row['Total Atual'])}".replace('.', ',')
+            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['Total Atual']/total_fii_donut*100)}<br>{formatar_brl(row['Total Atual'])}".replace('.', ',')
             for _, row in df_fii_donut.iterrows()
         ]
         fig_fii_donut = go.Figure(go.Pie(
@@ -1047,7 +1054,7 @@ with aba_detalhe:
         df_fii_fmt['part. %']      = df_fii_fmt['part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
         df_fii_fmt['div/cota']     = df_fii_fmt['div/cota'].apply(lambda x: formatar_brl(x) if x else '—')
         df_fii_fmt['yield mensal'] = df_fii_fmt['yield mensal'].apply(lambda x: f"{x:.2f}%".replace('.', ',') if x else '—')
-        df_fii_fmt['yield anual']  = df_fii_fmt['yield anual'].apply(lambda x: f"{x:.1f}%".replace('.', ',') if x else '—')
+        df_fii_fmt['yield anual']  = df_fii_fmt['yield anual'].apply(lambda x: f"{fmt_pct(x)}".replace('.', ',') if x else '—')
         df_fii_fmt['qtd']          = df_fii_fmt['qtd'].apply(str)
 
         cfg_fii = {c: st.column_config.TextColumn(c, alignment="center") for c in df_fii_fmt.columns}
@@ -1068,7 +1075,7 @@ with aba_detalhe:
             'preço':          df_etf_sorted['preco_unit'].apply(formatar_brl).values,
             'total':          df_etf_sorted['Total Atual'].apply(formatar_brl).values,
             'part. carteira': df_etf_sorted['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ',')).values,
-            'part. ETFs':     df_etf_sorted['part_classe_%'].apply(lambda x: f"{x:.1f}%".replace('.', ',')).values,
+            'part. ETFs':     df_etf_sorted['part_classe_%'].apply(lambda x: f"{fmt_pct(x)}".replace('.', ',')).values,
         })
         cfg_etf = {c: st.column_config.TextColumn(c, alignment="center") for c in df_etf_view.columns}
         st.dataframe(df_etf_view, use_container_width=True, hide_index=True, column_config=cfg_etf)
@@ -1076,7 +1083,7 @@ with aba_detalhe:
         st.markdown("---")
         st.subheader("distribuição dentro da classe")
         hover_etf = [
-            f"<b>{row['Ativo']}</b><br>{row['Total Atual']/total_etf*100:.1f}%<br>{formatar_brl(row['Total Atual'])}"
+            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['Total Atual']/total_etf*100)}<br>{formatar_brl(row['Total Atual'])}"
             for _, row in df_etf.iterrows()
         ]
         fig_etf_donut = go.Figure(go.Pie(
@@ -1123,7 +1130,7 @@ with aba_detalhe:
         def fmt_var(v):
             if v is None: return "—"
             sinal = "+" if v >= 0 else ""
-            return f"{sinal}{v:.1f}%".replace('.', ',')
+            return f"{sinal}{fmt_pct(v)}".replace('.', ',')
 
         c1, c2, c3 = st.columns(3)
         c1.metric("quantidade", f"{qtd_btc:.4f}".replace('.', ',') + " BTC")
@@ -1144,9 +1151,9 @@ with aba_detalhe:
             if v is None:
                 cor, texto = "#888888", "—"
             elif v >= 0:
-                cor, texto = "#22c55e", f"+{v:.1f}%".replace('.', ',')
+                cor, texto = "#22c55e", f"+{fmt_pct(v)}".replace('.', ',')
             else:
-                cor, texto = "#ef4444", f"{v:.1f}%".replace('.', ',')
+                cor, texto = "#ef4444", f"{fmt_pct(v)}".replace('.', ',')
             col.markdown(
                 f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px;font-family:inherit'>{label}</div>"
                 f"<div style='font-size:1.6rem;font-weight:700;color:{cor};font-family:inherit'>{texto}</div>",
@@ -1215,7 +1222,7 @@ with aba_detalhe:
             if valorizacao is not None:
                 sinal = "+" if valorizacao >= 0 else ""
                 c7.metric("valorização mark-to-market", formatar_brl(valorizacao),
-                           f"{sinal}{valorizacao_pct:.1f}%".replace('.', ','),
+                           f"{sinal}{fmt_pct(valorizacao_pct)}".replace('.', ','),
                            delta_color="normal" if valorizacao >= 0 else "inverse")
             else:
                 c7.metric("valorização mark-to-market", "—")
@@ -1246,7 +1253,7 @@ with aba_detalhe:
             pct   = val / total_geral * 100 if total_geral > 0 else 0
             flag  = GEO_FLAG.get(pais, '')
             val_k = abreviar_rs(val)
-            cols_geo[i].metric(f"{flag}  ·  {val_k}", f"{pct:.1f}%".replace('.', ','))
+            cols_geo[i].metric(f"{flag}  ·  {val_k}", f"{fmt_pct(pct)}".replace('.', ','))
 
         st.markdown("---")
 
@@ -1259,8 +1266,8 @@ with aba_detalhe:
         pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
         pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
         c1, c2 = st.columns(2)
-        c1.metric(f"renda fixa  ·  {abreviar_rs(total_rf)}", f"{pct_rf:.1f}%".replace('.', ','))
-        c2.metric(f"renda variável  ·  {abreviar_rs(total_rv)}", f"{pct_rv:.1f}%".replace('.', ','))
+        c1.metric(f"renda fixa  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}".replace('.', ','))
+        c2.metric(f"renda variável  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}".replace('.', ','))
 
         st.markdown("---")
 
@@ -1289,7 +1296,7 @@ with aba_detalhe:
                     lambda x: f"+{formatar_brl(x)}" if x >= 0 else f"−{formatar_brl(abs(x))}"
                 ).values,
                 'variação %':      df_view['variacao_pct'].apply(
-                    lambda x: f"{'+' if x >= 0 else ''}{x:.1f}%".replace('.', ',')
+                    lambda x: f"{'+' if x >= 0 else ''}{fmt_pct(x)}".replace('.', ',')
                 ).values,
                 'part. %':         df_view['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.',',')).values,
             })
@@ -1310,9 +1317,9 @@ with aba_detalhe:
             semaforo  = "🟡" if abs(desvio) < 2 else ("🔴" if desvio < 0 else "🟢")
             linhas_resumo.append({
                 'classe':  cls,
-                'alvo':    f"{alvo:.1f}%".replace('.', ','),
-                'atual':   f"{atual_pct:.1f}%".replace('.', ','),
-                'desvio':  f"{'+' if desvio >= 0 else ''}{desvio:.1f}%".replace('.', ','),
+                'alvo':    f"{fmt_pct(alvo)}".replace('.', ','),
+                'atual':   f"{fmt_pct(atual_pct)}".replace('.', ','),
+                'desvio':  f"{'+' if desvio >= 0 else ''}{fmt_pct(desvio)}".replace('.', ','),
                 'status':  semaforo,
                 'total':   formatar_brl(total_cls),
             })
