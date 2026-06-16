@@ -1704,6 +1704,7 @@ with aba_config:
             st.session_state.pop("_df_lanc_raw_cached", None)
             st.session_state.pop("_cache_versao", None)
             st.session_state.pop("_df_pm", None)
+            calcular_dividendos_historicos.clear()
             st.success(f"✓ {len(_LANC_FALTANTES)} lançamentos inseridos! recarregue o app.")
         except Exception as _e:
             st.error(f"erro: {_e}")
