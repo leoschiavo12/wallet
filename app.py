@@ -1660,6 +1660,18 @@ with aba_config:
         st.warning("precos_mensais vazio")
 
     st.markdown("---")
+    st.subheader("diagnóstico — dividendos por FII")
+    if st.button("ver breakdown de dividendos por FII"):
+        _divs_hist, _total_divs_dbg = calcular_dividendos_historicos(
+            _df_lanc_raw.to_dict(orient='records')
+        )
+        _rows_dbg = [{'ativo': k, 'total recebido': formatar_brl(v)}
+                     for k, v in sorted(_divs_hist.items(), key=lambda x: -x[1])]
+        _rows_dbg.append({'ativo': 'TOTAL', 'total recebido': formatar_brl(_total_divs_dbg)})
+        _df_dbg = pd.DataFrame(_rows_dbg)
+        st.dataframe(_df_dbg, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
     st.subheader("teste — dividendos FIIs via yfinance")
     if st.button("testar disponibilidade de histórico de dividendos"):
         _fiis_teste = [r['ativo'] for _, r in _posicao[_posicao['classe'] == 'FII'].iterrows()]
