@@ -1660,7 +1660,53 @@ with aba_config:
         st.warning("precos_mensais vazio")
 
     st.markdown("---")
-    st.subheader("diagnóstico — dividendos por FII")
+    st.subheader("inserir lançamentos históricos faltantes")
+    st.caption("BCFF11, GALG11, MCHF11, VILG11 — ativos vendidos que estavam faltando no histórico")
+
+    _LANC_FALTANTES = [
+        ["06/06/2023","compra","BCFF11","FII","1","69,64","69,64"],
+        ["28/11/2023","venda","BCFF11","FII","1","70,17","70,17"],
+        ["03/05/2023","compra","GALG11","FII","3","8,40","25,20"],
+        ["29/06/2023","compra","GALG11","FII","7","9,23","64,61"],
+        ["28/07/2023","compra","GALG11","FII","10","9,14","91,40"],
+        ["09/01/2024","compra","GALG11","FII","19","9,20","174,80"],
+        ["08/02/2024","venda","GALG11","FII","39","9,13","355,90"],
+        ["17/04/2023","compra","MCHF11","FII","1","8,55","8,55"],
+        ["18/04/2023","compra","MCHF11","FII","1","8,46","8,46"],
+        ["19/04/2023","compra","MCHF11","FII","1","8,40","8,40"],
+        ["20/04/2023","compra","MCHF11","FII","1","8,37","8,37"],
+        ["25/04/2023","compra","MCHF11","FII","1","8,19","8,19"],
+        ["13/06/2023","compra","MCHF11","FII","10","8,94","89,40"],
+        ["09/10/2023","compra","MCHF11","FII","8","9,12","72,96"],
+        ["08/11/2023","compra","MCHF11","FII","1","8,80","8,80"],
+        ["21/12/2023","venda","MCHF11","FII","24","9,06","217,44"],
+        ["29/06/2023","compra","VILG11","FII","1","105,85","105,85"],
+        ["15/01/2024","compra","VILG11","FII","1","93,84","93,84"],
+        ["29/01/2024","compra","VILG11","FII","1","92,52","92,52"],
+        ["19/04/2024","venda","VILG11","FII","3","96,36","289,08"],
+    ]
+
+    with st.expander(f"ver {len(_LANC_FALTANTES)} lançamentos a inserir"):
+        st.dataframe(pd.DataFrame(_LANC_FALTANTES,
+            columns=["data","tipo","ativo","classe","quantidade","preco_unitario","total"]),
+            use_container_width=True, hide_index=True)
+
+    if st.button("inserir lançamentos no Sheets", type="primary"):
+        try:
+            _svc_ins = get_sheets_service()
+            _svc_ins.values().append(
+                spreadsheetId=SHEET_ID,
+                range=f"{SHEET_TAB}!A:G",
+                valueInputOption="USER_ENTERED",
+                body={"values": _LANC_FALTANTES}
+            ).execute()
+            # invalidar cache
+            st.session_state.pop("_df_lanc_raw_cached", None)
+            st.session_state.pop("_cache_versao", None)
+            st.session_state.pop("_df_pm", None)
+            st.success(f"✓ {len(_LANC_FALTANTES)} lançamentos inseridos! recarregue o app.")
+        except Exception as _e:
+            st.error(f"erro: {_e}")
     if st.button("ver breakdown de dividendos por FII"):
         _divs_hist, _total_divs_dbg = calcular_dividendos_historicos(
             _df_lanc_raw.to_dict(orient='records')
