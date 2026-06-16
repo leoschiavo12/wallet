@@ -1241,9 +1241,8 @@ with aba_detalhe:
                      _df_fii_idx[_df_fii_idx['indexador'] == 'CDI']['Total Atual'].sum()
         total_ipca = df[df['Ativo'] == 'Renda+ 2050']['Total Atual'].sum() + \
                      _df_fii_idx[_df_fii_idx['indexador'] == 'IPCA']['Total Atual'].sum()
-        total_idx  = total_cdi + total_ipca
-        pct_cdi    = total_cdi  / total_idx * 100 if total_idx > 0 else 0
-        pct_ipca   = total_ipca / total_idx * 100 if total_idx > 0 else 0
+        pct_cdi    = total_cdi  / total_geral * 100 if total_geral > 0 else 0
+        pct_ipca   = total_ipca / total_geral * 100 if total_geral > 0 else 0
 
         c1, c2 = st.columns(2)
         c1.metric(f"CDI  ·  {abreviar_rs(total_cdi)}", fmt_pct(pct_cdi))
