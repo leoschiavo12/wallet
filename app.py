@@ -1192,27 +1192,21 @@ with aba_detalhe:
             preco       = row['preco_unit']
             total_atual = row['Total Atual']
             custo       = row['custo_total']
-            pm          = row['preco_medio']
             var_rs      = total_atual - custo
             var_pct_e   = var_rs / custo * 100 if custo > 0 else 0
             holding     = holding_ponderado_meses(ativo, _df_lanc_raw)
 
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("ativo", ativo)
             c2.metric("qtd", str(qtd))
             c3.metric("preço atual", formatar_brl(preco))
             c4.metric("total atual", formatar_brl(total_atual))
-
-            c5, c6, c7, c8 = st.columns(4)
-            c5.metric("total investido", formatar_brl(custo))
-            c6.metric("preço médio", formatar_brl(pm))
-            c7.markdown(
-                f"<div style='padding-top:8px'>"
-                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização</div>"
+            c4.markdown(
+                f"<div style='padding-top:4px'>"
                 f"{tag_var(var_rs, var_pct_e)}</div>",
                 unsafe_allow_html=True
             )
-            c8.metric("holding ponderado", f"{holding} meses" if holding else "—")
+            c5.metric("holding ponderado", f"{holding} meses" if holding else "—")
 
             st.markdown("---")
 
