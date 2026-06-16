@@ -724,7 +724,6 @@ with aba_dash:
         st.plotly_chart(fig_donut, use_container_width=True, config={"displayModeBar": False})
 
     with col_mensal:
-        # gráfico mensal com preços históricos
         import calendar as _cal
         import datetime as _dt
         hoje_dt   = _dt.date.today()
@@ -739,7 +738,6 @@ with aba_dash:
         if meses_pm:
             vals_mensais = []
             ultimo_total = 0.0
-            # todos os meses desde o primeiro até o último com dados
             primeiro_mes = meses_pm[0]
             ano0, m0 = int(primeiro_mes[:4]), int(primeiro_mes[5:7])
             ano1, m1 = int(meses_pm[-1][:4]), int(meses_pm[-1][5:7])
@@ -752,46 +750,65 @@ with aba_dash:
 
             for mes in todos_meses:
                 if mes in meses_pm:
-                    ano, mm = int(mes[:4]), int(mes[5:7])
                     df_ate_mes = _df_lanc_raw.copy()
                     df_ate_mes['data_dt'] = pd.to_datetime(df_ate_mes['data'], format='%d/%m/%Y', errors='coerce')
                     df_ate_mes = df_ate_mes[df_ate_mes['data_dt'].dt.to_period('M').astype(str) <= mes]
                     pos_mes = calcular_posicao(df_ate_mes)
                     total_mes = 0.0
                     for _, pr in pos_mes.iterrows():
-                        ativo = pr['ativo']
-                        qtd   = pr['qtd_atual']
-                        pm_row = _df_pm[(_df_pm['ano_mes'] == mes) & (_df_pm['ativo'] == ativo)]
+                        pm_row = _df_pm[(_df_pm['ano_mes'] == mes) & (_df_pm['ativo'] == pr['ativo'])]
                         preco_hist = float(pm_row['preco_fechamento'].iloc[0]) if not pm_row.empty else pr['preco_medio']
-                        total_mes += qtd * preco_hist
+                        total_mes += pr['qtd_atual'] * preco_hist
                     ultimo_total = total_mes
                 else:
-                    total_mes = ultimo_total  # ffill
+                    total_mes = ultimo_total
 
                 vals_mensais.append({
-                    'mes':   pd.to_datetime(f"{mes}-01"),
-                    'total': total_mes,
-                    'label': pd.to_datetime(f"{mes}-01").strftime('%b/%y')
+                    'mes':    pd.to_datetime(f"{mes}-01"),
+                    'total':  total_mes,
+                    'label':  pd.to_datetime(f"{mes}-01").strftime('%b/%y'),
+                    'atual':  False,
                 })
 
+            # adicionar barra do mês atual com valor de mercado corrente
+            vals_mensais.append({
+                'mes':   pd.to_datetime(f"{mes_atual}-01"),
+                'total': total_geral,
+                'label': pd.to_datetime(f"{mes_atual}-01").strftime('%b/%y') + " ●",
+                'atual': True,
+            })
+
             df_mensal = pd.DataFrame(vals_mensais)
+            df_mensal['cor']   = df_mensal['atual'].apply(lambda x: "#64B5F6" if x else "#1E88E5")
             df_mensal['hover'] = df_mensal.apply(
-                lambda r: f"<b>{r['label']}</b><br>{formatar_brl(r['total'])}", axis=1
+                lambda r: f"<b>{r['label'].replace(' ●','')}</b>"
+                          + (" <i>(atual)</i>" if r['atual'] else "")
+                          + f"<br>{formatar_brl(r['total'])}", axis=1
             )
+
+            # próxima meta — próximo múltiplo de 10k acima do máximo
+            _max_val = df_mensal['total'].max()
+            _meta    = (int(_max_val // 10000) + 1) * 10000
+            y_max    = _meta * 1.05
+
             fig_mensal = go.Figure()
             fig_mensal.add_trace(go.Bar(
                 x=df_mensal['mes'], y=df_mensal['total'],
-                marker_color="#1E88E5",
+                marker_color=df_mensal['cor'].tolist(),
                 hovertemplate="%{customdata}<extra></extra>",
                 customdata=df_mensal['hover'].tolist(),
             ))
-            y_max = df_mensal['total'].max() * 1.15
             fig_mensal.update_layout(
                 height=400,
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                 showlegend=False, bargap=0.2,
                 xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45),
-                yaxis=dict(showgrid=True, gridcolor="#333", range=[0, y_max]),
+                yaxis=dict(
+                    showgrid=True, gridcolor="#333",
+                    range=[0, y_max],
+                    tickmode='linear', tick0=0, dtick=10000,
+                    tickformat=",.0f",
+                ),
                 margin=dict(t=10, b=10, l=10, r=10)
             )
             st.plotly_chart(fig_mensal, use_container_width=True, config={"displayModeBar": False})
