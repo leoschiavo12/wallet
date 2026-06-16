@@ -389,83 +389,6 @@ def obter_preco_historico_yfinance(ticker_sa, data_fim):
     except:
         return None
 
-def popular_precos_mensais(df_lanc, df_pm_existente):
-    """verifica meses sem preço e popula via yfinance, retorna df_pm atualizado"""
-    import datetime
-    if df_lanc.empty: return df_pm_existente
-
-    df_lanc = df_lanc.copy()
-    df_lanc['data_dt'] = pd.to_datetime(df_lanc['data'], format='%d/%m/%Y', errors='coerce')
-    hoje = datetime.date.today()
-    mes_atual = f"{hoje.year}-{hoje.month:02d}"
-
-    # meses com lançamentos, exceto o mês atual (ainda não fechou)
-    meses = df_lanc['data_dt'].dropna().dt.to_period('M').unique()
-    meses = [str(m) for m in sorted(meses) if str(m) < mes_atual]
-
-    # ativos presentes por mês
-    ALIAS_B3 = {'GALG11': 'GARE11'}
-    TESOURO  = ['Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro SELIC 2031', 'Tesouro Prefixado 2032']
-    novos = []
-
-    for mes in meses:
-        # ativos com posição naquele mês
-        df_ate = df_lanc[df_lanc['data_dt'].dt.to_period('M').astype(str) <= mes].copy()
-        pos = calcular_posicao(df_ate)
-        if pos.empty: continue
-
-        for _, row in pos.iterrows():
-            ativo = row['ativo']
-            # já existe?
-            if not df_pm_existente.empty:
-                existe = ((df_pm_existente['ano_mes'] == mes) &
-                          (df_pm_existente['ativo']   == ativo)).any()
-                if existe: continue
-
-            # buscar preço
-            import calendar
-            ano, m = int(mes[:4]), int(mes[5:7])
-            ultimo_dia = datetime.date(ano, m, calendar.monthrange(ano, m)[1])
-
-            if ativo == 'BTC':
-                preco = None
-                try:
-                    url = "https://api.coingecko.com/api/v3/coins/bitcoin/history"
-                    r = requests.get(url, params={"date": ultimo_dia.strftime('%d-%m-%Y')}, timeout=10)
-                    if r.status_code == 200:
-                        preco = r.json()['market_data']['current_price']['brl']
-                except: pass
-                if preco is None:
-                    dados = yf.download("BTC-BRL", start=str(ultimo_dia - datetime.timedelta(days=5)),
-                                        end=str(ultimo_dia + datetime.timedelta(days=1)),
-                                        progress=False, auto_adjust=True)
-                    if not dados.empty:
-                        c = dados['Close']
-                        if isinstance(c, pd.DataFrame): c = c.iloc[:,0]
-                        preco = float(c.ffill().dropna().iloc[-1])
-            elif ativo in TESOURO:
-                # usar preço médio de aquisição como proxy
-                comp = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'] == 'compra')]
-                comp_ate = comp[comp['data_dt'].dt.to_period('M').astype(str) <= mes]
-                if not comp_ate.empty and comp_ate['quantidade'].sum() > 0:
-                    preco = (comp_ate['quantidade'] * comp_ate['preco_unitario']).sum() / comp_ate['quantidade'].sum()
-                else:
-                    preco = row['preco_medio']
-            else:
-                ativo_norm = ALIAS_B3.get(ativo, ativo)
-                preco = obter_preco_historico_yfinance(f"{ativo_norm}.SA", ultimo_dia)
-
-            if preco and preco > 0:
-                novos.append([mes, ativo, round(preco, 4)])
-
-    if novos:
-        salvar_precos_mensais(novos)
-        df_novos = pd.DataFrame(novos, columns=PM_HEADERS)
-        df_novos['preco_fechamento'] = pd.to_numeric(df_novos['preco_fechamento'])
-        return pd.concat([df_pm_existente, df_novos], ignore_index=True)
-
-    return df_pm_existente
-
 # ── Google Sheets helpers ─────────────────────────────────────────────────────
 def get_sheets_service():
     creds = service_account.Credentials.from_service_account_info(
@@ -533,6 +456,78 @@ def garantir_cabecalho():
 
 garantir_cabecalho()
 
+def popular_precos_mensais(df_lanc, df_pm_existente):
+    """verifica meses sem preço e popula via yfinance, retorna df_pm atualizado"""
+    import datetime, calendar
+    if df_lanc.empty: return df_pm_existente
+
+    df_lanc = df_lanc.copy()
+    df_lanc['data_dt'] = pd.to_datetime(df_lanc['data'], format='%d/%m/%Y', errors='coerce')
+    hoje = datetime.date.today()
+    mes_atual = f"{hoje.year}-{hoje.month:02d}"
+
+    meses = df_lanc['data_dt'].dropna().dt.to_period('M').unique()
+    meses = [str(m) for m in sorted(meses) if str(m) < mes_atual]
+
+    ALIAS_B3 = {'GALG11': 'GARE11'}
+    TESOURO  = ['Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro SELIC 2031', 'Tesouro Prefixado 2032']
+    novos = []
+
+    for mes in meses:
+        df_ate = df_lanc[df_lanc['data_dt'].dt.to_period('M').astype(str) <= mes].copy()
+        pos = calcular_posicao(df_ate)
+        if pos.empty: continue
+
+        for _, row in pos.iterrows():
+            ativo = row['ativo']
+            if not df_pm_existente.empty:
+                existe = ((df_pm_existente['ano_mes'] == mes) &
+                          (df_pm_existente['ativo']   == ativo)).any()
+                if existe: continue
+
+            ano, m = int(mes[:4]), int(mes[5:7])
+            ultimo_dia = datetime.date(ano, m, calendar.monthrange(ano, m)[1])
+
+            if ativo == 'BTC':
+                preco = None
+                try:
+                    url = "https://api.coingecko.com/api/v3/coins/bitcoin/history"
+                    r = requests.get(url, params={"date": ultimo_dia.strftime('%d-%m-%Y')}, timeout=10)
+                    if r.status_code == 200:
+                        preco = r.json()['market_data']['current_price']['brl']
+                except: pass
+                if preco is None:
+                    try:
+                        dados = yf.download("BTC-BRL", start=str(ultimo_dia - datetime.timedelta(days=5)),
+                                            end=str(ultimo_dia + datetime.timedelta(days=1)),
+                                            progress=False, auto_adjust=True)
+                        if not dados.empty:
+                            c = dados['Close']
+                            if isinstance(c, pd.DataFrame): c = c.iloc[:,0]
+                            preco = float(c.ffill().dropna().iloc[-1])
+                    except: pass
+            elif ativo in TESOURO:
+                comp = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'] == 'compra')]
+                comp_ate = comp[comp['data_dt'].dt.to_period('M').astype(str) <= mes]
+                if not comp_ate.empty and comp_ate['quantidade'].sum() > 0:
+                    preco = (comp_ate['quantidade'] * comp_ate['preco_unitario']).sum() / comp_ate['quantidade'].sum()
+                else:
+                    preco = row['preco_medio']
+            else:
+                ativo_norm = ALIAS_B3.get(ativo, ativo)
+                preco = obter_preco_historico_yfinance(f"{ativo_norm}.SA", ultimo_dia)
+
+            if preco and preco > 0:
+                novos.append([mes, ativo, round(preco, 4)])
+
+    if novos:
+        salvar_precos_mensais(novos)
+        df_novos = pd.DataFrame(novos, columns=PM_HEADERS)
+        df_novos['preco_fechamento'] = pd.to_numeric(df_novos['preco_fechamento'])
+        return pd.concat([df_pm_existente, df_novos], ignore_index=True)
+
+    return df_pm_existente
+
 # ── carregar dados principais ─────────────────────────────────────────────────
 _df_lanc_raw = ler_lancamentos()
 
@@ -598,7 +593,8 @@ MINHA_CARTEIRA = {
 try:
     _df_pm = ler_precos_mensais()
     _df_pm = popular_precos_mensais(_df_lanc_raw, _df_pm)
-except:
+except Exception as _e_pm:
+    st.warning(f"⚠️ erro ao popular preços mensais: {_e_pm}")
     _df_pm = pd.DataFrame(columns=PM_HEADERS)
 
 # ── Classificação dos FIIs ───────────────────────────────────────────────────
