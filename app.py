@@ -933,10 +933,8 @@ with aba_detalhe:
             col  = c1 if r['tipo_fii'] == 'tijolo' else c2
             n    = n_tijolo if r['tipo_fii'] == 'tijolo' else n_papel
             sufx = idx_info if r['tipo_fii'] == 'papel' else ""
-            col.metric(
-                f"{r['tipo_fii']} ({n})  ·  {formatar_brl(r['Total Atual'])}{sufx}",
-                f"{pct:.1f}%".replace('.', ',')
-            )
+            col.metric(f"{r['tipo_fii']} ({n})  ·  R$ {r['Total Atual']/1000:.1f}k{sufx}".replace('.', ','),
+                       f"{pct:.1f}%".replace('.', ','))
 
         st.markdown("---")
 
@@ -1089,9 +1087,9 @@ with aba_detalhe:
             return f"{sinal}{v:.1f}%".replace('.', ',')
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("quantidade", f"{qtd_btc:.6f}".replace('.', ',') + " BTC")
+        c1.metric("quantidade", f"{qtd_btc:.4f}".replace('.', ',') + " BTC")
         c2.metric("preço atual", f"R$ {preco_btc_atual/1000:.0f}k".replace('.', ','))
-        c3.metric("total na carteira", formatar_brl(total_btc))
+        c3.metric("total na carteira", f"R$ {total_btc/1000:.1f}k".replace('.', ','))
 
         st.markdown("---")
 
@@ -1193,7 +1191,7 @@ with aba_detalhe:
     # ══════════════════════════════════════════════════════════════════════════
     with sub_resumo:
         # ── linha 1: exposição geográfica ─────────────────────────────────────
-        GEO_FLAG = {'Brasil': '🇧🇷', 'EUA': '🇺🇸', 'China': '🇨🇳', 'Global (cripto)': '🌐'}
+        GEO_FLAG = {'Brasil': '🇧🇷', 'EUA': '🇺🇸', 'China': '🇨🇳', 'Global (cripto)': '🌍'}
         GEO_ETF  = {'IVVB11': 'EUA', 'DIVO11': 'Brasil', 'PKIN11': 'China', 'LFTB11': 'Brasil'}
         geo_totais = {}
         for _, row in df[df['Classe'] == 'ETF'].iterrows():
@@ -1206,9 +1204,10 @@ with aba_detalhe:
         geo_sorted = sorted(geo_totais.items(), key=lambda x: -x[1])
         cols_geo = st.columns(len(geo_sorted))
         for i, (pais, val) in enumerate(geo_sorted):
-            pct  = val / total_geral * 100 if total_geral > 0 else 0
-            flag = GEO_FLAG.get(pais, '')
-            cols_geo[i].metric(f"{flag} {pais}  ·  {formatar_brl(val)}", f"{pct:.1f}%".replace('.', ','))
+            pct   = val / total_geral * 100 if total_geral > 0 else 0
+            flag  = GEO_FLAG.get(pais, '')
+            val_k = f"R$ {val/1000:.1f}k".replace('.', ',')
+            cols_geo[i].metric(f"{flag}  ·  {val_k}", f"{pct:.1f}%".replace('.', ','))
 
         st.markdown("---")
 
@@ -1218,41 +1217,42 @@ with aba_detalhe:
         pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
         pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
         c1, c2 = st.columns(2)
-        c1.metric(f"renda fixa  ·  {formatar_brl(total_rf)}", f"{pct_rf:.1f}%".replace('.', ','))
-        c2.metric(f"renda variável  ·  {formatar_brl(total_rv)}", f"{pct_rv:.1f}%".replace('.', ','))
+        c1.metric(f"renda fixa  ·  R$ {total_rf/1000:.1f}k".replace('.', ','), f"{pct_rf:.1f}%".replace('.', ','))
+        c2.metric(f"renda variável  ·  R$ {total_rv/1000:.1f}k".replace('.', ','), f"{pct_rv:.1f}%".replace('.', ','))
 
         st.markdown("---")
 
         # ── tabela geral de todos os ativos ──────────────────────────────────
-        def fmt_preco(row):
-            if row['Ativo'] == 'BTC':
-                return f"R$ {row['preco_unit']/1000:.0f}k"
-            s = f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
-            return f"R$ {s}"
+        with st.expander("ver todos os ativos", expanded=False):
+            def fmt_preco(row):
+                if row['Ativo'] == 'BTC':
+                    return f"R$ {row['preco_unit']/1000:.0f}k"
+                s = f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
+                return f"R$ {s}"
 
-        df_view = df.copy().sort_values('Total Atual', ascending=False)
-        df_view['variacao_rs']  = df_view['Total Atual'] - df_view['custo_total']
-        df_view['variacao_pct'] = df_view.apply(
-            lambda r: (r['variacao_rs'] / r['custo_total'] * 100) if r['custo_total'] > 0 else 0, axis=1
-        )
-        df_geral_fmt = pd.DataFrame({
-            'ativo':           df_view['Ativo'].values,
-            'classe':          df_view['Classe'].values,
-            'qtd':             df_view.apply(lambda r: f"{r['Qtd']:.6f}".replace('.',',') if r['Qtd'] < 1 else str(int(r['Qtd'])), axis=1).values,
-            'preço médio':     df_view['preco_medio'].apply(formatar_brl).values,
-            'total investido': df_view['custo_total'].apply(formatar_brl).values,
-            'preço atual':     df_view.apply(fmt_preco, axis=1).values,
-            'total atual':     df_view['Total Atual'].apply(formatar_brl).values,
-            'variação R$':     df_view['variacao_rs'].apply(
-                lambda x: f"+{formatar_brl(x)}" if x >= 0 else f"−{formatar_brl(abs(x))}"
-            ).values,
-            'variação %':      df_view['variacao_pct'].apply(
-                lambda x: f"{'+' if x >= 0 else ''}{x:.1f}%".replace('.', ',')
-            ).values,
-            'part. %':         df_view['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.',',')).values,
-        })
-        cfg_geral = {c: st.column_config.TextColumn(c, alignment="center") for c in df_geral_fmt.columns}
-        st.dataframe(df_geral_fmt, use_container_width=True, hide_index=True, column_config=cfg_geral)
+            df_view = df.copy().sort_values('Total Atual', ascending=False)
+            df_view['variacao_rs']  = df_view['Total Atual'] - df_view['custo_total']
+            df_view['variacao_pct'] = df_view.apply(
+                lambda r: (r['variacao_rs'] / r['custo_total'] * 100) if r['custo_total'] > 0 else 0, axis=1
+            )
+            df_geral_fmt = pd.DataFrame({
+                'ativo':           df_view['Ativo'].values,
+                'classe':          df_view['Classe'].values,
+                'qtd':             df_view.apply(lambda r: f"{r['Qtd']:.6f}".replace('.',',') if r['Qtd'] < 1 else str(int(r['Qtd'])), axis=1).values,
+                'preço médio':     df_view['preco_medio'].apply(formatar_brl).values,
+                'total investido': df_view['custo_total'].apply(formatar_brl).values,
+                'preço atual':     df_view.apply(fmt_preco, axis=1).values,
+                'total atual':     df_view['Total Atual'].apply(formatar_brl).values,
+                'variação R$':     df_view['variacao_rs'].apply(
+                    lambda x: f"+{formatar_brl(x)}" if x >= 0 else f"−{formatar_brl(abs(x))}"
+                ).values,
+                'variação %':      df_view['variacao_pct'].apply(
+                    lambda x: f"{'+' if x >= 0 else ''}{x:.1f}%".replace('.', ',')
+                ).values,
+                'part. %':         df_view['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.',',')).values,
+            })
+            cfg_geral = {c: st.column_config.TextColumn(c, alignment="center") for c in df_geral_fmt.columns}
+            st.dataframe(df_geral_fmt, use_container_width=True, hide_index=True, column_config=cfg_geral)
 
         st.markdown("---")
 
