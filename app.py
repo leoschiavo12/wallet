@@ -187,6 +187,15 @@ def calcular_dividendos_historicos(df_lanc_json):
         except:
             continue
 
+    # somar lançamentos manuais de tipo 'dividendo' (ajustes para fundos sem histórico yfinance)
+    _divs_manuais = df[df['tipo'].str.strip().str.lower() == 'dividendo']
+    for _, row in _divs_manuais.iterrows():
+        ativo = row['ativo']
+        valor = float(row['total']) if pd.notna(row['total']) else 0.0
+        if valor > 0:
+            resultado[ativo] = resultado.get(ativo, 0.0) + valor
+            total_geral_divs += valor
+
     return resultado, round(total_geral_divs, 2)
 
 def _buscar_historico_btc_brl():
@@ -1722,6 +1731,33 @@ with aba_config:
         _rows_dbg.append({'ativo': 'TOTAL', 'total recebido': formatar_brl(_total_divs_dbg)})
         _df_dbg = pd.DataFrame(_rows_dbg)
         st.dataframe(_df_dbg, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.subheader("inserir ajustes de dividendos — fundos encerrados")
+    st.caption("BCFF11, GALG11, MCHF11, VILG11 — yfinance não tem histórico, valores da corretora")
+
+    _AJUSTES_DIV = [
+        ["01/01/2024","dividendo","BCFF11","FII","1","3,36","3,36"],
+        ["01/01/2024","dividendo","GALG11","FII","1","14,38","14,38"],
+        ["01/01/2024","dividendo","MCHF11","FII","1","12,11","12,11"],
+        ["01/01/2024","dividendo","VILG11","FII","1","9,99","9,99"],
+    ]
+
+    if st.button("inserir ajustes de dividendos", type="primary"):
+        try:
+            _svc_adj = get_sheets_service()
+            _svc_adj.values().append(
+                spreadsheetId=SHEET_ID,
+                range=f"{SHEET_TAB}!A:G",
+                valueInputOption="USER_ENTERED",
+                body={"values": _AJUSTES_DIV}
+            ).execute()
+            st.session_state.pop("_df_lanc_raw_cached", None)
+            st.session_state.pop("_cache_versao", None)
+            calcular_dividendos_historicos.clear()
+            st.success("✓ ajustes inseridos! recarregue o app.")
+        except Exception as _e:
+            st.error(f"erro: {_e}")
 
     st.markdown("---")
     st.subheader("teste — dividendos FIIs via yfinance")
