@@ -1106,20 +1106,84 @@ with aba_detalhe:
     # ══════════════════════════════════════════════════════════════════════════
     with sub_etfs:
         df_etf = df[df['Classe'] == 'ETF'].copy()
-        total_etf = df_etf['Total Atual'].sum()
+        total_etf        = df_etf['Total Atual'].sum()
+        total_inv_etf    = df_etf['custo_total'].sum()
+        var_etf_rs       = total_etf - total_inv_etf
+        var_etf_pct      = var_etf_rs / total_inv_etf * 100 if total_inv_etf > 0 else 0
         df_etf['part_classe_%'] = df_etf['Total Atual'] / total_etf * 100
-        df_etf_sorted = df_etf.sort_values('Total Atual', ascending=False)
 
-        df_etf_view = pd.DataFrame({
-            'ativo':          df_etf_sorted['Ativo'].values,
-            'qtd':            df_etf_sorted['Qtd'].apply(lambda x: str(int(x))).values,
-            'preço':          df_etf_sorted['preco_unit'].apply(formatar_brl).values,
-            'total':          df_etf_sorted['Total Atual'].apply(formatar_brl).values,
-            'part. carteira': df_etf_sorted['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ',')).values,
-            'part. ETFs':     df_etf_sorted['part_classe_%'].apply(lambda x: f"{fmt_pct(x)}".replace('.', ',')).values,
-        })
-        cfg_etf = {c: st.column_config.TextColumn(c, alignment="center") for c in df_etf_view.columns}
-        st.dataframe(df_etf_view, use_container_width=True, hide_index=True, column_config=cfg_etf)
+        def tag_var(rs, pct):
+            sinal = "▲" if rs >= 0 else "▼"
+            cor   = "#22c55e" if rs >= 0 else "#ef4444"
+            return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
+                    f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {formatar_brl(abs(rs))}</span>")
+
+        def holding_ponderado_meses(ativo, df_lanc):
+            """holding period ponderado pelo valor investido em cada compra"""
+            import datetime
+            hoje = datetime.date.today()
+            compras = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'].str.lower() == 'compra')].copy()
+            if compras.empty: return None
+            compras['data_dt'] = pd.to_datetime(compras['data'], format='%d/%m/%Y', errors='coerce')
+            compras['valor']   = compras['quantidade'] * compras['preco_unitario']
+            total_val = compras['valor'].sum()
+            if total_val == 0: return None
+            meses_pond = sum(
+                (row['valor'] / total_val) *
+                ((hoje - row['data_dt'].date()).days / 30.44)
+                for _, row in compras.iterrows()
+                if pd.notna(row['data_dt'])
+            )
+            return round(meses_pond, 1)
+
+        # ── cards por ETF ──────────────────────────────────────────────────────
+        for _, row in df_etf.sort_values('Total Atual', ascending=False).iterrows():
+            ativo       = row['Ativo']
+            qtd         = int(row['Qtd'])
+            preco       = row['preco_unit']
+            total_atual = row['Total Atual']
+            custo       = row['custo_total']
+            pm          = row['preco_medio']
+            var_rs      = total_atual - custo
+            var_pct_e   = var_rs / custo * 100 if custo > 0 else 0
+            holding     = holding_ponderado_meses(ativo, _df_lanc_raw)
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("ativo", ativo)
+            c2.metric("qtd", str(qtd))
+            c3.metric("preço atual", formatar_brl(preco))
+            c4.metric("total atual", formatar_brl(total_atual))
+
+            c5, c6, c7, c8 = st.columns(4)
+            c5.metric("total investido", formatar_brl(custo))
+            c6.metric("preço médio", formatar_brl(pm))
+            c7.markdown(
+                f"<div style='padding-top:8px'>"
+                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização</div>"
+                f"{tag_var(var_rs, var_pct_e)}</div>",
+                unsafe_allow_html=True
+            )
+            c8.metric("holding ponderado", f"{holding} meses" if holding else "—")
+
+            st.markdown("---")
+
+        # ── resumo da classe ──────────────────────────────────────────────────
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("total ETFs", abreviar_rs(total_etf))
+        c2.metric("total investido", abreviar_rs(total_inv_etf))
+        c3.markdown(
+            f"<div style='padding-top:8px'>"
+            f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização total</div>"
+            f"{tag_var(var_etf_rs, var_etf_pct)}</div>",
+            unsafe_allow_html=True
+        )
+        # holding médio ponderado da classe (ponderado pelo custo de cada ETF)
+        _holding_classe = 0.0
+        for _, row in df_etf.iterrows():
+            _h = holding_ponderado_meses(row['Ativo'], _df_lanc_raw)
+            if _h and total_inv_etf > 0:
+                _holding_classe += (_h * row['custo_total'] / total_inv_etf)
+        c4.metric("holding médio (classe)", f"{round(_holding_classe, 1)} meses" if _holding_classe > 0 else "—")
 
         st.markdown("---")
         st.subheader("distribuição dentro da classe")
