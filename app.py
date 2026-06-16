@@ -604,9 +604,12 @@ MINHA_CARTEIRA = {
 # popular preços mensais em background (silencioso)
 try:
     _df_pm = ler_precos_mensais()
+    _df_pm_antes = len(_df_pm)
     _df_pm = popular_precos_mensais(_df_lanc_raw, _df_pm)
+    _df_pm_depois = len(_df_pm)
+    st.session_state['_pm_status'] = f"✓ precos_mensais: {_df_pm_antes} → {_df_pm_depois} registros"
 except Exception as _e_pm:
-    st.warning(f"⚠️ erro ao popular preços mensais: {_e_pm}")
+    st.session_state['_pm_status'] = f"✗ erro: {_e_pm}"
     _df_pm = pd.DataFrame(columns=PM_HEADERS)
 
 # ── Classificação dos FIIs ───────────────────────────────────────────────────
@@ -1479,7 +1482,39 @@ with aba_lanc:
 # ── Aba configurações (esqueleto) ─────────────────────────────────────────────
 with aba_config:
     st.subheader("⚙️ configurações")
-    st.caption("esta aba está em construção. aqui você poderá definir % alvo por classe e por ativo, metas financeiras e meta de aportes.")
+    st.caption("esta aba está em construção.")
+
+    st.markdown("---")
+    st.subheader("diagnóstico")
+    st.caption(st.session_state.get('_pm_status', 'aguardando...'))
+
+    if not _df_pm.empty:
+        meses_unicos = sorted(_df_pm['ano_mes'].unique())
+        st.caption(f"meses com preços salvos: {len(meses_unicos)} — de {meses_unicos[0]} a {meses_unicos[-1]}")
+        # verificar meses faltantes
+        import datetime as _dt_cfg
+        _hoje_cfg = _dt_cfg.date.today()
+        _data_min = pd.to_datetime(_df_lanc_raw['data'], format='%d/%m/%Y', errors='coerce').min().date()
+        _mes_ini  = f"{_data_min.year}-{_data_min.month:02d}"
+        _mes_fim  = f"{_hoje_cfg.year}-{(_hoje_cfg.month-1 if _hoje_cfg.month > 1 else 12):02d}"
+        _faltando = []
+        _a, _m = int(_mes_ini[:4]), int(_mes_ini[5:])
+        _af, _mf = int(_mes_fim[:4]), int(_mes_fim[5:])
+        while (_a, _m) <= (_af, _mf):
+            _mes_str = f"{_a}-{_m:02d}"
+            if _mes_str not in meses_unicos:
+                _faltando.append(_mes_str)
+            _m += 1
+            if _m > 12: _m, _a = 1, _a + 1
+        if _faltando:
+            st.warning(f"meses sem preços: {', '.join(_faltando)}")
+        else:
+            st.success("todos os meses cobertos ✓")
+
+        with st.expander("ver tabela precos_mensais"):
+            st.dataframe(_df_pm, use_container_width=True, hide_index=True)
+    else:
+        st.warning("precos_mensais vazio")
 
     st.markdown("---")
     st.markdown("**alocação alvo por classe** *(em breve)*")
