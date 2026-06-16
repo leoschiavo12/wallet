@@ -790,6 +790,7 @@ with aba_dash:
             _max_val = df_mensal['total'].max()
             _meta    = (int(_max_val // 10000) + 1) * 10000
             y_max    = _meta * 1.05
+            _ticks   = list(range(0, int(_meta) + 1, 10000))
 
             fig_mensal = go.Figure()
             fig_mensal.add_trace(go.Bar(
@@ -806,8 +807,9 @@ with aba_dash:
                 yaxis=dict(
                     showgrid=True, gridcolor="#333",
                     range=[0, y_max],
-                    tickmode='linear', tick0=0, dtick=10000,
-                    tickformat=",.0f",
+                    tickmode='array',
+                    tickvals=_ticks,
+                    ticktext=[f"{v//1000:.0f}k" for v in _ticks],
                 ),
                 margin=dict(t=10, b=10, l=10, r=10)
             )
@@ -817,64 +819,43 @@ with aba_dash:
 
     st.markdown('---')
 
-    # ── linha 2: barras por ativo ─────────────────────────────────────────────
+    # ── linha 2: barras horizontais por ativo ────────────────────────────────
     col_barras, = st.columns([1])
 
     with col_barras:
-        max_pct = df_ativo['Part. %'].max()
-        y_max_pct, ticks_pct = gerar_ticks_pct(max_pct, step=5)
-        ticks_pct_show  = [v for v in ticks_pct if v <= max_pct]
-        ticks_rs_labels = [f"R$ {v/100*total_geral:,.0f}".replace(',', '.') for v in ticks_pct_show]
-
-        shapes = []
-        for p in ticks_pct_show[1:]:
-            shapes.append(dict(
-                type='line', xref='paper', x0=0, x1=1,
-                yref='y', y0=p, y1=p,
-                line=dict(color='rgba(255,255,255,0.08)', width=1, dash='dot')
-            ))
+        df_ativo_sorted = df_ativo.sort_values('Part. %', ascending=True)
 
         hover_barras = [
             f"<b>{row['Ativo']}</b><br>{str(round(row['Part. %'], 2)).replace('.', ',')}%<br>{formatar_brl(row['Total Atual'])}"
-            for _, row in df_ativo.iterrows()
+            for _, row in df_ativo_sorted.iterrows()
         ]
 
         fig_ativo = go.Figure()
         fig_ativo.add_trace(go.Bar(
-            x=df_ativo['Ativo'], y=df_ativo['Part. %'],
+            x=df_ativo_sorted['Part. %'],
+            y=df_ativo_sorted['Ativo'],
+            orientation='h',
             marker_color='#1E88E5',
-            text=df_ativo['Ativo'],
-            textposition='outside', textangle=-90,
-            textfont=dict(size=9, color='white'),
-            cliponaxis=False,
+            text=df_ativo_sorted['Part. %'].apply(lambda v: f"{v:.1f}%".replace('.', ',')),
+            textposition='outside',
+            textfont=dict(size=10, color='white'),
             hovertemplate='%{customdata}<extra></extra>',
             customdata=hover_barras,
-            yaxis='y'
         ))
-        fig_ativo.add_trace(go.Scatter(
-            x=[df_ativo['Ativo'].iloc[0]], y=[0],
-            mode='markers', marker=dict(color='rgba(0,0,0,0)', size=0),
-            hoverinfo='skip', showlegend=False, yaxis='y2'
-        ))
+        x_max = df_ativo_sorted['Part. %'].max() * 1.25
         fig_ativo.update_layout(
-            height=400,
+            height=max(300, len(df_ativo_sorted) * 28),
             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False, shapes=shapes,
-            xaxis=dict(showticklabels=False),
-            bargap=0.15,
-            margin=dict(t=10, b=10, l=10, r=10)
+            showlegend=False,
+            xaxis=dict(
+                showgrid=True, gridcolor='#333',
+                range=[0, x_max],
+                ticksuffix='%',
+            ),
+            yaxis=dict(showgrid=False, tickfont=dict(size=11)),
+            bargap=0.25,
+            margin=dict(t=10, b=10, l=10, r=60)
         )
-        fig_ativo.update_yaxes(
-            title_text="", showgrid=True, gridcolor='#333', side='left',
-            range=[0, y_max_pct * 1.2],
-            tickvals=ticks_pct_show,
-            ticktext=[f"{str(v).replace('.', ',')}%" for v in ticks_pct_show]
-        )
-        fig_ativo.update_layout(yaxis2=dict(
-            overlaying='y', side='right', showgrid=False,
-            range=[0, y_max_pct * 1.2],
-            tickvals=ticks_pct_show, ticktext=ticks_rs_labels, title_text=""
-        ))
         st.plotly_chart(fig_ativo, use_container_width=True, config={"displayModeBar": False})
 
     # ── evolução acumulada ────────────────────────────────────────────────────
