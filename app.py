@@ -1604,6 +1604,36 @@ with aba_config:
         st.warning("precos_mensais vazio")
 
     st.markdown("---")
+    st.subheader("teste — dividendos FIIs via yfinance")
+    if st.button("testar disponibilidade de histórico de dividendos"):
+        _fiis_teste = [r['ativo'] for _, r in _posicao[_posicao['classe'] == 'FII'].iterrows()]
+        _resultados = []
+        with st.spinner("buscando..."):
+            for _t in _fiis_teste:
+                try:
+                    _tk   = yf.Ticker(f"{_t}.SA")
+                    _divs = _tk.dividends
+                    if _divs is None or _divs.empty:
+                        _resultados.append({'ativo': _t, 'status': '❌ sem dados', 'pagamentos': 0,
+                                           'primeiro': '—', 'último': '—', 'último valor': '—'})
+                    else:
+                        _resultados.append({
+                            'ativo':        _t,
+                            'status':       '✓ ok',
+                            'pagamentos':   len(_divs),
+                            'primeiro':     str(_divs.index[0].date()),
+                            'último':       str(_divs.index[-1].date()),
+                            'último valor': f"R$ {_divs.iloc[-1]:.4f}",
+                        })
+                except Exception as _e:
+                    _resultados.append({'ativo': _t, 'status': f'❌ {_e}', 'pagamentos': 0,
+                                       'primeiro': '—', 'último': '—', 'último valor': '—'})
+        _df_teste = pd.DataFrame(_resultados)
+        st.dataframe(_df_teste, use_container_width=True, hide_index=True)
+        _ok = len(_df_teste[_df_teste['status'] == '✓ ok'])
+        st.info(f"{_ok}/{len(_fiis_teste)} FIIs com histórico disponível.")
+
+    st.markdown("---")
     st.markdown("**alocação alvo por classe** *(em breve)*")
     st.markdown("**alocação alvo por ativo** *(em breve)*")
     st.markdown("**meta de aporte mensal** *(em breve)*")
