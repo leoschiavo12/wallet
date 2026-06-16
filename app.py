@@ -976,7 +976,8 @@ with aba_detalhe:
             c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", f"{yield_mensal:.2f}%".replace('.', ','))
         else:
             c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", "—")
-        c4.metric("dividendos recebidos (total)", abreviar_rs(_total_divs))
+        c4.metric("dividendos recebidos (total)", abreviar_rs(_total_divs),
+                  delta=formatar_brl(_total_divs), delta_color="off")
 
         st.markdown("---")
 
