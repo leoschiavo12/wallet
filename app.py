@@ -733,7 +733,7 @@ ALVO_CLASSE = {
 aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes", "⚙️ configurações"])
 
 with aba_dash:
-    total_k = f"R$ {total_geral/1000:.1f}k".replace('.', ',')
+    total_k = abreviar_rs(total_geral)
 
     # total investido = custo de todas as compras − total de vendas
     _custo_total = df['custo_total'].sum()
@@ -848,7 +848,7 @@ with aba_dash:
                     range=[0, y_max],
                     tickmode='array',
                     tickvals=_ticks,
-                    ticktext=[f"{v//1000:.0f}k" for v in _ticks],
+                    ticktext=[f"{v//1000:.0f}k" if v > 0 else "0" for v in _ticks],
                 ),
                 margin=dict(t=10, b=10, l=10, r=10)
             )
@@ -935,7 +935,7 @@ with aba_detalhe:
         n_papel   = sum(1 for t in df_fii['Ativo'] if FII_INFO.get(t, {}).get('tipo') == 'papel')
 
         # ── linha 1: total, dividendos, yield corrente ───────────────────────
-        total_fii_k = f"R$ {total_fii/1000:.1f}k".replace('.', ',')
+        total_fii_k = abreviar_rs(total_fii)
         yield_corrente = (div_total / total_fii * 100) if total_fii > 0 and div_total > 0 else None
 
         c1, c2, c3 = st.columns(3)
@@ -972,7 +972,7 @@ with aba_detalhe:
             col  = c1 if r['tipo_fii'] == 'tijolo' else c2
             n    = n_tijolo if r['tipo_fii'] == 'tijolo' else n_papel
             sufx = idx_info if r['tipo_fii'] == 'papel' else ""
-            col.metric(f"{r['tipo_fii']} ({n})  ·  R$ {r['Total Atual']/1000:.1f}k{sufx}".replace('.', ','),
+            col.metric(f"{r['tipo_fii']} ({n})  ·  {abreviar_rs(r['Total Atual'])}{sufx}".replace('.', ','),
                        f"{pct:.1f}%".replace('.', ','))
 
         st.markdown("---")
@@ -1127,8 +1127,8 @@ with aba_detalhe:
 
         c1, c2, c3 = st.columns(3)
         c1.metric("quantidade", f"{qtd_btc:.4f}".replace('.', ',') + " BTC")
-        c2.metric("preço atual", f"R$ {preco_btc_atual/1000:.0f}k".replace('.', ','))
-        c3.metric("total na carteira", f"R$ {total_btc/1000:.1f}k".replace('.', ','))
+        c2.metric("preço atual", abreviar_rs(preco_btc_atual))
+        c3.metric("total na carteira", abreviar_rs(total_btc))
 
         st.markdown("---")
 
@@ -1245,7 +1245,7 @@ with aba_detalhe:
         for i, (pais, val) in enumerate(geo_sorted):
             pct   = val / total_geral * 100 if total_geral > 0 else 0
             flag  = GEO_FLAG.get(pais, '')
-            val_k = f"R$ {val/1000:.1f}k".replace('.', ',')
+            val_k = abreviar_rs(val)
             cols_geo[i].metric(f"{flag}  ·  {val_k}", f"{pct:.1f}%".replace('.', ','))
 
         st.markdown("---")
@@ -1256,8 +1256,8 @@ with aba_detalhe:
         pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
         pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
         c1, c2 = st.columns(2)
-        c1.metric(f"renda fixa  ·  R$ {total_rf/1000:.1f}k".replace('.', ','), f"{pct_rf:.1f}%".replace('.', ','))
-        c2.metric(f"renda variável  ·  R$ {total_rv/1000:.1f}k".replace('.', ','), f"{pct_rv:.1f}%".replace('.', ','))
+        c1.metric(f"renda fixa  ·  {abreviar_rs(total_rf)}", f"{pct_rf:.1f}%".replace('.', ','))
+        c2.metric(f"renda variável  ·  {abreviar_rs(total_rv)}", f"{pct_rv:.1f}%".replace('.', ','))
 
         st.markdown("---")
 
@@ -1265,7 +1265,7 @@ with aba_detalhe:
         with st.expander("ver todos os ativos", expanded=False):
             def fmt_preco(row):
                 if row['Ativo'] == 'BTC':
-                    return f"R$ {row['preco_unit']/1000:.0f}k"
+                    return abreviar_rs(row['preco_unit'])
                 s = f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
                 return f"R$ {s}"
 
