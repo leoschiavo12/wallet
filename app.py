@@ -466,8 +466,20 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
     hoje = datetime.date.today()
     mes_atual = f"{hoje.year}-{hoje.month:02d}"
 
-    meses = df_lanc['data_dt'].dropna().dt.to_period('M').unique()
-    meses = [str(m) for m in sorted(meses) if str(m) < mes_atual]
+    # todos os meses desde o primeiro lançamento até o mês anterior ao atual
+    data_min = df_lanc['data_dt'].dropna().min().date()
+    ano0, m0 = data_min.year, data_min.month
+    ano1, m1 = hoje.year, hoje.month
+    # recuar 1 mês para não incluir o mês atual
+    m1 -= 1
+    if m1 == 0: m1, ano1 = 12, ano1 - 1
+
+    meses = []
+    a, m = ano0, m0
+    while (a, m) <= (ano1, m1):
+        meses.append(f"{a}-{m:02d}")
+        m += 1
+        if m > 12: m, a = 1, a + 1
 
     ALIAS_B3 = {'GALG11': 'GARE11'}
     TESOURO  = ['Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro SELIC 2031', 'Tesouro Prefixado 2032']
