@@ -91,14 +91,18 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
             if divs_ex.empty:
                 continue
 
-            alias_inv = {v: k for k, v in ALIAS.items()}
-            nomes = [fii, fii_norm] + ([alias_inv[fii_norm]] if fii_norm in alias_inv else [])
-
             for data_ex, val_cota in divs_ex.items():
+                # usar só o ticker original (não misturar cotas de aliases diferentes)
                 ops = df_lanc[
-                    (df_lanc['Ativo'].isin(nomes)) &
+                    (df_lanc['Ativo'] == fii) &
                     (df_lanc['data_dt'] <= data_ex)
                 ]
+                # se não achou com nome original, tentar com alias
+                if ops.empty and fii != fii_norm:
+                    ops = df_lanc[
+                        (df_lanc['Ativo'] == fii_norm) &
+                        (df_lanc['data_dt'] <= data_ex)
+                    ]
                 qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
                 if qtd_na_data > 0:
                     val_total = float(val_cota) * qtd_na_data
