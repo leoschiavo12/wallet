@@ -1251,8 +1251,11 @@ with aba_detalhe:
         st.markdown("---")
 
         # ── linha 2: renda fixa vs variável ──────────────────────────────────
-        total_rf = df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
-        total_rv = df[df['Classe'].isin(['ETF','FII','Cripto'])]['Total Atual'].sum()
+        # LFTB11 é ETF de renda fixa (replica Tesouro Selic) — vai para RF
+        _etfs_rf = ['LFTB11']
+        total_rf = df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum() + \
+                   df[df['Ativo'].isin(_etfs_rf)]['Total Atual'].sum()
+        total_rv = df[(df['Classe'].isin(['ETF','FII','Cripto'])) & (~df['Ativo'].isin(_etfs_rf))]['Total Atual'].sum()
         pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
         pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
         c1, c2 = st.columns(2)
