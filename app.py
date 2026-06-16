@@ -502,21 +502,41 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
 
             if ativo == 'BTC':
                 preco = None
+                # tentativa 1: CoinGecko history
                 try:
                     url = "https://api.coingecko.com/api/v3/coins/bitcoin/history"
                     r = requests.get(url, params={"date": ultimo_dia.strftime('%d-%m-%Y')}, timeout=10)
                     if r.status_code == 200:
                         preco = r.json()['market_data']['current_price']['brl']
                 except: pass
-                if preco is None:
+                # tentativa 2: yfinance BTC-BRL direto
+                if not preco:
                     try:
-                        dados = yf.download("BTC-BRL", start=str(ultimo_dia - datetime.timedelta(days=5)),
-                                            end=str(ultimo_dia + datetime.timedelta(days=1)),
+                        start_str = str(ultimo_dia - datetime.timedelta(days=7))
+                        end_str   = str(ultimo_dia + datetime.timedelta(days=1))
+                        dados = yf.download("BTC-BRL", start=start_str, end=end_str,
                                             progress=False, auto_adjust=True)
                         if not dados.empty:
                             c = dados['Close']
                             if isinstance(c, pd.DataFrame): c = c.iloc[:,0]
-                            preco = float(c.ffill().dropna().iloc[-1])
+                            v = float(c.ffill().dropna().iloc[-1])
+                            if v > 1000: preco = v
+                    except: pass
+                # tentativa 3: yfinance BTC-USD × USDBRL
+                if not preco:
+                    try:
+                        start_str = str(ultimo_dia - datetime.timedelta(days=7))
+                        end_str   = str(ultimo_dia + datetime.timedelta(days=1))
+                        btc_usd = yf.download("BTC-USD", start=start_str, end=end_str,
+                                              progress=False, auto_adjust=True)['Close']
+                        usd_brl = yf.download("BRL=X",   start=start_str, end=end_str,
+                                              progress=False, auto_adjust=True)['Close']
+                        if isinstance(btc_usd, pd.DataFrame): btc_usd = btc_usd.iloc[:,0]
+                        if isinstance(usd_brl, pd.DataFrame): usd_brl = usd_brl.iloc[:,0]
+                        btc_brl = (btc_usd * usd_brl).ffill().dropna()
+                        if not btc_brl.empty:
+                            v = float(btc_brl.iloc[-1])
+                            if v > 1000: preco = v
                     except: pass
             elif ativo in TESOURO:
                 comp = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'] == 'compra')]
@@ -528,6 +548,9 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
             else:
                 ativo_norm = ALIAS_B3.get(ativo, ativo)
                 preco = obter_preco_historico_yfinance(f"{ativo_norm}.SA", ultimo_dia)
+                # validar preço mínimo para FIIs (evitar dados corrompidos do yfinance)
+                if preco and preco < 1.0:
+                    preco = None
 
             if preco and preco > 0:
                 novos.append([mes, ativo, round(preco, 4)])
@@ -545,6 +568,13 @@ _df_lanc_raw = ler_lancamentos()
 
 # calcular posição atual
 _posicao = calcular_posicao(_df_lanc_raw)
+
+# diagnóstico VIUR11
+_viur = _df_lanc_raw[_df_lanc_raw['ativo'] == 'VIUR11']
+if not _viur.empty:
+    _sinal_viur = _viur['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
+    _saldo_viur = (_viur['quantidade'] * _sinal_viur).sum()
+    st.session_state['_viur_debug'] = f"VIUR11: {len(_viur)} linhas, saldo={_saldo_viur:.4f}, vendas={_viur[_viur['tipo'].str.lower()=='venda']['quantidade'].tolist()}"
 
 # preços atuais
 _todos_b3 = [r['ativo'] for _, r in _posicao.iterrows()
@@ -1487,6 +1517,8 @@ with aba_config:
     st.markdown("---")
     st.subheader("diagnóstico")
     st.caption(st.session_state.get('_pm_status', 'aguardando...'))
+    if '_viur_debug' in st.session_state:
+        st.caption(st.session_state['_viur_debug'])
 
     if not _df_pm.empty:
         meses_unicos = sorted(_df_pm['ano_mes'].unique())
