@@ -347,6 +347,26 @@ def fmt_pct(valor):
         s = s[:-2]
     return f"{s}%"
 
+def fmt_holding(meses):
+    """formata holding em meses (<12) ou anos (>=12), com vírgula"""
+    if meses is None: return "—"
+    if meses < 12:
+        s = f"{meses:.1f}".replace('.', ',')
+        if s.endswith(',0'): s = s[:-2]
+        return f"{s} meses"
+    else:
+        anos = meses / 12
+        s = f"{anos:.1f}".replace('.', ',')
+        if s.endswith(',0'): s = s[:-2]
+        return f"{s} anos"
+
+def tag_var(rs, pct):
+    """tag colorida de valorização ▲/▼ %  ·  R$"""
+    sinal = "▲" if rs >= 0 else "▼"
+    cor   = "#22c55e" if rs >= 0 else "#ef4444"
+    return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
+            f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {formatar_brl(abs(rs))}</span>")
+
 # ── Tesouro Direto: lê de st.secrets, fallback para valor hardcoded ──────────
 def preco_td_de_secrets(nome, fallback):
     try:
@@ -982,8 +1002,16 @@ with aba_detalhe:
             _df_lanc_raw.to_dict(orient='records')
         )
 
+        _var_fii_rs  = total_fii - df_fii['custo_total'].sum()
+        _var_fii_pct = _var_fii_rs / df_fii['custo_total'].sum() * 100 if df_fii['custo_total'].sum() > 0 else 0
+        _pct_fii_carteira = total_fii / total_geral * 100 if total_geral > 0 else 0
+
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("total FIIs", total_fii_k)
+        c1.metric(f"total FIIs  ·  {fmt_pct(_pct_fii_carteira)}", total_fii_k)
+        c1.markdown(
+            f"<div style='margin-top:-8px'>{tag_var(_var_fii_rs, _var_fii_pct)}</div>",
+            unsafe_allow_html=True
+        )
         c2.metric(f"dividendos — {meses_pt3[mes_ref_f]}/{ano_ref_f}", formatar_brl(div_total))
         if yield_mensal:
             c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", f"{yield_mensal:.2f}%".replace('.', ','))
@@ -1112,12 +1140,6 @@ with aba_detalhe:
         var_etf_pct      = var_etf_rs / total_inv_etf * 100 if total_inv_etf > 0 else 0
         df_etf['part_classe_%'] = df_etf['Total Atual'] / total_etf * 100
 
-        def tag_var(rs, pct):
-            sinal = "▲" if rs >= 0 else "▼"
-            cor   = "#22c55e" if rs >= 0 else "#ef4444"
-            return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
-                    f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {formatar_brl(abs(rs))}</span>")
-
         def holding_ponderado_meses(ativo, df_lanc):
             import datetime
             hoje = datetime.date.today()
@@ -1147,7 +1169,12 @@ with aba_detalhe:
 
         with col_resumo:
             c1, c2, c3 = st.columns(3)
-            c1.metric("total ETFs", abreviar_rs(total_etf))
+            _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
+            c1.metric(f"total ETFs  ·  {fmt_pct(_pct_etf_carteira)}", abreviar_rs(total_etf))
+            c1.markdown(
+                f"<div style='margin-top:-8px'>{tag_var(var_etf_rs, var_etf_pct)}</div>",
+                unsafe_allow_html=True
+            )
             c2.markdown(
                 f"<div style='padding-top:8px'>"
                 f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização total</div>"
@@ -1198,18 +1225,18 @@ with aba_detalhe:
             c1.metric("ativo", ativo)
             c2.metric("qtd", str(qtd))
             c3.metric("preço atual", formatar_brl(preco))
-            c4.metric("total atual", formatar_brl(total_atual))
+            c4.metric("total atual", abreviar_rs(total_atual))
 
             c5, c6, c7, c8 = st.columns(4)
-            c5.metric("total investido", formatar_brl(custo))
-            c6.metric("preço médio", formatar_brl(pm))
+            c5.metric("preço médio", formatar_brl(pm))
+            c6.metric("total investido", abreviar_rs(custo))
             c7.markdown(
                 f"<div style='padding-top:8px'>"
                 f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização</div>"
                 f"{tag_var(var_rs, var_pct_e)}</div>",
                 unsafe_allow_html=True
             )
-            c8.metric("holding ponderado", f"{holding} meses" if holding else "—")
+            c8.metric("holding ponderado", fmt_holding(holding))
 
             st.markdown("---")
 
