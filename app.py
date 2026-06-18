@@ -1146,18 +1146,15 @@ with aba_detalhe:
         col_resumo, col_donut_etf = st.columns([2, 1])
 
         with col_resumo:
-            c1, c2 = st.columns(2)
+            c1, c2, c3 = st.columns(3)
             c1.metric("total ETFs", abreviar_rs(total_etf))
-            c2.metric("total investido", abreviar_rs(total_inv_etf))
-
-            c3, c4 = st.columns(2)
-            c3.markdown(
+            c2.markdown(
                 f"<div style='padding-top:8px'>"
                 f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização total</div>"
                 f"{tag_var(var_etf_rs, var_etf_pct)}</div>",
                 unsafe_allow_html=True
             )
-            c4.metric("holding médio (classe)", f"{round(_holding_classe, 1)} meses" if _holding_classe > 0 else "—")
+            c3.metric("holding médio (classe)", f"{round(_holding_classe, 1)} meses" if _holding_classe > 0 else "—")
 
         with col_donut_etf:
             hover_etf = [
@@ -1192,21 +1189,27 @@ with aba_detalhe:
             preco       = row['preco_unit']
             total_atual = row['Total Atual']
             custo       = row['custo_total']
+            pm          = row['preco_medio']
             var_rs      = total_atual - custo
             var_pct_e   = var_rs / custo * 100 if custo > 0 else 0
             holding     = holding_ponderado_meses(ativo, _df_lanc_raw)
 
-            c1, c2, c3, c4, c5 = st.columns(5)
+            c1, c2, c3, c4 = st.columns(4)
             c1.metric("ativo", ativo)
             c2.metric("qtd", str(qtd))
             c3.metric("preço atual", formatar_brl(preco))
             c4.metric("total atual", formatar_brl(total_atual))
-            c4.markdown(
-                f"<div style='padding-top:4px'>"
+
+            c5, c6, c7, c8 = st.columns(4)
+            c5.metric("total investido", formatar_brl(custo))
+            c6.metric("preço médio", formatar_brl(pm))
+            c7.markdown(
+                f"<div style='padding-top:8px'>"
+                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização</div>"
                 f"{tag_var(var_rs, var_pct_e)}</div>",
                 unsafe_allow_html=True
             )
-            c5.metric("holding ponderado", f"{holding} meses" if holding else "—")
+            c8.metric("holding ponderado", f"{holding} meses" if holding else "—")
 
             st.markdown("---")
 
