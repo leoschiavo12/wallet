@@ -1007,7 +1007,7 @@ with aba_detalhe:
         _pct_fii_carteira = total_fii / total_geral * 100 if total_geral > 0 else 0
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"total FIIs  ·  {fmt_pct(_pct_fii_carteira)}", total_fii_k)
+        c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
         c1.markdown(
             f"<div style='margin-top:-8px'>{tag_var(_var_fii_rs, _var_fii_pct)}</div>",
             unsafe_allow_html=True
@@ -1170,7 +1170,7 @@ with aba_detalhe:
         with col_resumo:
             c1, c2, c3 = st.columns(3)
             _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
-            c1.metric(f"total ETFs  ·  {fmt_pct(_pct_etf_carteira)}", abreviar_rs(total_etf))
+            c1.metric(f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira))
             c1.markdown(
                 f"<div style='margin-top:-8px'>{tag_var(var_etf_rs, var_etf_pct)}</div>",
                 unsafe_allow_html=True
@@ -1226,17 +1226,14 @@ with aba_detalhe:
             c2.metric("qtd", str(qtd))
             c3.metric("preço atual", formatar_brl(preco))
             c4.metric("total atual", abreviar_rs(total_atual))
-
-            c5, c6, c7, c8 = st.columns(4)
-            c5.metric("preço médio", formatar_brl(pm))
-            c6.metric("total investido", abreviar_rs(custo))
-            c7.markdown(
-                f"<div style='padding-top:8px'>"
-                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização</div>"
-                f"{tag_var(var_rs, var_pct_e)}</div>",
+            c4.markdown(
+                f"<div style='margin-top:-8px'>{tag_var(var_rs, var_pct_e)}</div>",
                 unsafe_allow_html=True
             )
-            c8.metric("holding ponderado", fmt_holding(holding))
+
+            c5, c6 = st.columns(2)
+            c5.metric("holding ponderado", fmt_holding(holding))
+            c6.metric("preço médio", formatar_brl(pm))
 
             st.markdown("---")
 
