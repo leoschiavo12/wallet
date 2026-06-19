@@ -368,17 +368,17 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def metric_tag(col, label, valor, rs, pct):
-    """card com label, valor grande e tag de valorização inline"""
+    """card com label + tag inline no topo, valor grande abaixo"""
     sinal = "▲" if rs >= 0 else "▼"
     cor   = "#22c55e" if rs >= 0 else "#ef4444"
     tag   = (f"<span style='color:{cor};font-size:0.72rem;font-weight:600;"
-             f"font-family:inherit;margin-left:8px;vertical-align:middle'>"
+             f"font-family:inherit;margin-left:6px'>"
              f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}</span>")
     col.markdown(
         f"<div style='padding:4px 0'>"
-        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>{label}</div>"
-        f"<div style='font-size:1.5rem;font-weight:700;font-family:inherit;line-height:1.2'>"
-        f"{valor}{tag}</div></div>",
+        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>{label}{tag}</div>"
+        f"<div style='font-size:1.75rem;font-weight:700;font-family:inherit;line-height:1.2'>"
+        f"{valor}</div></div>",
         unsafe_allow_html=True
     )
 
