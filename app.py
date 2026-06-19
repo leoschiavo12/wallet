@@ -368,29 +368,21 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def metric_tag(col, label, valor, rs, pct):
-    """card com label + tag inline no topo, valor grande abaixo"""
+    """st.metric nativo + caption discreta de variação abaixo"""
     sinal = "▲" if rs >= 0 else "▼"
     cor   = "#22c55e" if rs >= 0 else "#ef4444"
-    tag   = (f"<span style='color:{cor};font-size:0.72rem;font-weight:600;margin-left:6px'>"
-             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}</span>")
+    col.metric(label, valor)
     col.markdown(
-        f"<div style='padding:4px 0'>"
-        f"<div style='font-size:0.78rem;color:rgba(250,250,250,0.6);margin-bottom:4px'>{label}{tag}</div>"
-        f"<div style='font-size:1.75rem;font-weight:700;line-height:1.2;font-family:inherit'>"
-        f"{valor}</div></div>",
+        f"<div style='margin-top:-12px;font-size:0.72rem;color:{cor};font-weight:500'>"
+        f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}</div>",
         unsafe_allow_html=True
     )
 
 
 def metric_tag_simples(col, label, valor):
-    """card sem tag de variação — mesma fonte e tamanho que metric_tag"""
-    col.markdown(
-        f"<div style='padding:4px 0'>"
-        f"<div style='font-size:0.78rem;color:rgba(250,250,250,0.6);margin-bottom:4px'>{label}</div>"
-        f"<div style='font-size:1.75rem;font-weight:700;line-height:1.2;font-family:inherit'>"
-        f"{valor}</div></div>",
-        unsafe_allow_html=True
-    )
+    """st.metric simples sem variação"""
+    col.metric(label, valor)
+
 
 # ── Tesouro Direto: lê de st.secrets, fallback para valor hardcoded ──────────
 def preco_td_de_secrets(nome, fallback):
@@ -557,11 +549,21 @@ def salvar_lancamento(row: list):
     import time; time.sleep(1)
     st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
+def _get_sheet_id(svc, nome_aba):
+    """retorna o sheetId numérico real da aba pelo nome"""
+    meta = svc.get(spreadsheetId=SHEET_ID, fields="sheets.properties").execute()
+    for s in meta.get("sheets", []):
+        p = s.get("properties", {})
+        if p.get("title") == nome_aba:
+            return p["sheetId"]
+    raise ValueError(f"aba '{nome_aba}' não encontrada no spreadsheet")
+
 def deletar_lancamento(idx_linha_sheet: int):
     svc = get_sheets_service()
+    sheet_id_real = _get_sheet_id(svc, SHEET_TAB)
     start = idx_linha_sheet - 1
     body = {"requests": [{"deleteDimension": {"range": {
-        "sheetId": 0, "dimension": "ROWS",
+        "sheetId": sheet_id_real, "dimension": "ROWS",
         "startIndex": start, "endIndex": start + 1
     }}}]}
     svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
