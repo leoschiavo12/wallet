@@ -367,31 +367,16 @@ def tag_var(rs, pct):
     return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
-def _metric_html(col, label, valor, tag_html=""):
-    """card HTML que imita st.metric com tag opcional inline no label"""
-    col.markdown(
-        f"<div style='line-height:1;padding-bottom:8px'>"
-        f"<p style='font-size:0.875rem;margin:0 0 4px 0;"
-        f"color:rgba(250,250,250,0.6)'>{label}{tag_html}</p>"
-        f"<p style='font-size:2.25rem;font-weight:700;margin:0;line-height:1.1'>"
-        f"{valor}</p></div>",
-        unsafe_allow_html=True
-    )
-
-def _tag_var(rs, pct):
-    sinal = "▼" if rs < 0 else "▲"
-    cor   = "#ef4444" if rs < 0 else "#22c55e"
-    _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
-    return (f"<span style='color:{cor};font-size:0.75rem;font-weight:600;"
-            f"margin-left:6px'>· {sinal} {_pct_str}</span>")
-
 def metric_tag(col, label, valor, rs, pct):
-    """card com label + tag colorida inline"""
-    _metric_html(col, label, valor, _tag_var(rs, pct))
+    """dois st.metric nativos: valor principal + valorização"""
+    sinal    = "▲" if rs >= 0 else "▼"
+    _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
+    sub1, sub2 = col.columns([1.1, 0.9])
+    sub1.metric(label, valor)
+    sub2.metric(f"valorização", f"{sinal} {_pct_str}")
 
 def metric_tag_simples(col, label, valor):
-    """card HTML simples sem tag — mesma fonte do metric_tag"""
-    _metric_html(col, label, valor)
+    col.metric(label, valor)
 
 
 # ── Tesouro Direto: lê de st.secrets, fallback para valor hardcoded ──────────
@@ -1237,7 +1222,7 @@ with aba_detalhe:
             c1.metric("ativo", ativo)
             c2.metric("qtd", str(qtd))
             c3.metric("preço atual", formatar_brl(preco))
-            _metric_html(c4, "total atual", abreviar_rs(total_atual), _tag_var(var_rs, var_pct_e))
+            metric_tag(c4, "total atual", abreviar_rs(total_atual), var_rs, var_pct_e)
 
             c5, c6 = st.columns(2)
             c5.metric("holding ponderado", fmt_holding(holding))
