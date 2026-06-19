@@ -16,14 +16,7 @@ st.markdown("""
     <style>
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
-        [data-testid="stMetricDelta"] svg { display: none !important; }
-        [data-testid="stMetricDelta"] > div {
-            background: none !important;
-            padding: 0 !important;
-            border-radius: 0 !important;
-            font-size: 0.85rem !important;
-            font-weight: 500 !important;
-        }
+        [data-testid="stMetricDelta"] { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -375,18 +368,18 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def metric_tag(col, label, valor, rs, pct):
-    """valor principal + card valorização com delta colorido sem fundo"""
-    _rs_str  = ("" if rs >= 0 else "-") + abreviar_rs(abs(rs))
-    _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
-    sub1, sub2 = col.columns([1.1, 0.9])
-    sub1.metric(label, valor)
-    sub2.metric(_rs_str, _rs_str, delta=_pct_str,
-                delta_color="normal" if rs >= 0 else "inverse")
-
-def metric_tag_simples(col, label, valor):
-    """st.metric nativo simples — sem variação"""
-    col.metric(label, valor)
-
+    """card com label + tag inline no topo, valor grande abaixo"""
+    sinal = "▲" if rs >= 0 else "▼"
+    cor   = "#22c55e" if rs >= 0 else "#ef4444"
+    tag   = (f"<span style='color:{cor};font-size:0.72rem;font-weight:600;margin-left:6px'>"
+             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}</span>")
+    col.markdown(
+        f"<div style='padding:4px 0'>"
+        f"<div style='font-size:0.78rem;color:rgba(250,250,250,0.6);margin-bottom:4px'>{label}{tag}</div>"
+        f"<div style='font-size:1.75rem;font-weight:700;line-height:1.2'>"
+        f"{valor}</div></div>",
+        unsafe_allow_html=True
+    )
 
 # ── Tesouro Direto: lê de st.secrets, fallback para valor hardcoded ──────────
 def preco_td_de_secrets(nome, fallback):
@@ -553,21 +546,11 @@ def salvar_lancamento(row: list):
     import time; time.sleep(1)
     st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
-def _get_sheet_id(svc, nome_aba):
-    """retorna o sheetId numérico real da aba pelo nome"""
-    meta = svc.get(spreadsheetId=SHEET_ID, fields="sheets.properties").execute()
-    for s in meta.get("sheets", []):
-        p = s.get("properties", {})
-        if p.get("title") == nome_aba:
-            return p["sheetId"]
-    raise ValueError(f"aba '{nome_aba}' não encontrada no spreadsheet")
-
 def deletar_lancamento(idx_linha_sheet: int):
     svc = get_sheets_service()
-    sheet_id_real = _get_sheet_id(svc, SHEET_TAB)
     start = idx_linha_sheet - 1
     body = {"requests": [{"deleteDimension": {"range": {
-        "sheetId": sheet_id_real, "dimension": "ROWS",
+        "sheetId": 0, "dimension": "ROWS",
         "startIndex": start, "endIndex": start + 1
     }}}]}
     svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
@@ -864,7 +847,17 @@ with aba_dash:
     c1, c2 = st.columns([1, 1])
     c1.metric("patrimônio", total_k)
 
-    metric_tag(c2, f"vs total investido  ·  {formatar_brl(_custo_total)}", formatar_brl(_var_val), _var_val, _var_pct)
+    _sinal = "▲" if _var_val >= 0 else "▼"
+    _cor   = "#22c55e" if _var_val >= 0 else "#ef4444"
+    _pct_fmt = f"{_var_pct:+.1f}%".replace('.', ',')
+    _rs_fmt  = formatar_brl(abs(_var_val))
+    c2.markdown(
+        f"<div style='padding-top:8px'>"
+        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>vs total investido  ·  {formatar_brl(_custo_total)}</div>"
+        f"<div style='font-size:1.15rem;font-weight:700;color:{_cor};font-family:inherit'>"
+        f"{_sinal} {_pct_fmt}  ·  {_rs_fmt}</div></div>",
+        unsafe_allow_html=True
+    )
 
     st.markdown('---')
 
@@ -1029,11 +1022,12 @@ with aba_detalhe:
 
         c1, c2, c3, c4 = st.columns(4)
         metric_tag(c1, f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira), _var_fii_rs, _var_fii_pct)
-        _yield_str = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
-        _label_mes = f"{meses_pt3[mes_ref_f]}/{ano_ref_f}"
-        metric_tag_simples(c2, f"dividendos — {_label_mes}", formatar_brl(div_total))
-        metric_tag_simples(c3, f"yield — {_label_mes}", _yield_str)
-        metric_tag_simples(c4, "dividendos recebidos (total)", abreviar_rs(_total_divs))
+        c2.metric(f"dividendos — {meses_pt3[mes_ref_f]}/{ano_ref_f}", formatar_brl(div_total))
+        if yield_mensal:
+            c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", f"{yield_mensal:.2f}%".replace('.', ','))
+        else:
+            c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", "—")
+        c4.metric("dividendos recebidos (total)", abreviar_rs(_total_divs))
 
         st.markdown("---")
 
@@ -1184,10 +1178,16 @@ with aba_detalhe:
         col_resumo, col_donut_etf = st.columns([2, 1])
 
         with col_resumo:
-            c1, c2 = st.columns(2)
+            c1, c2, c3 = st.columns(3)
             _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
             metric_tag(c1, f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira), var_etf_rs, var_etf_pct)
-            c2.metric("holding médio (classe)", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
+            c2.markdown(
+                f"<div style='padding-top:8px'>"
+                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização total</div>"
+                f"{tag_var(var_etf_rs, var_etf_pct)}</div>",
+                unsafe_allow_html=True
+            )
+            c3.metric("holding médio (classe)", f"{round(_holding_classe, 1)} meses" if _holding_classe > 0 else "—")
 
         with col_donut_etf:
             hover_etf = [
@@ -1231,15 +1231,11 @@ with aba_detalhe:
             c1.metric("ativo", ativo)
             c2.metric("qtd", str(qtd))
             c3.metric("preço atual", formatar_brl(preco))
-            c4.metric("total atual", abreviar_rs(total_atual))
+            metric_tag(c4, "total atual", abreviar_rs(total_atual), var_rs, var_pct_e)
 
-            c5, c6, c7 = st.columns(3)
+            c5, c6 = st.columns(2)
             c5.metric("holding ponderado", fmt_holding(holding))
             c6.metric("preço médio", formatar_brl(pm))
-            _rs_e_str  = ("" if var_rs >= 0 else "-") + abreviar_rs(abs(var_rs))
-            _pct_e_str = ("+" if var_pct_e >= 0 else "") + fmt_pct(var_pct_e)
-            c7.metric(_rs_e_str, _rs_e_str, delta=_pct_e_str,
-                      delta_color="normal" if var_rs >= 0 else "inverse")
 
             st.markdown("---")
 
