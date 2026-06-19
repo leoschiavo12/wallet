@@ -368,16 +368,15 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def metric_tag(col, label, valor, rs, pct):
-    """st.metric nativo + tag ▲/▼ discreta ao lado do valor via markdown sobreposto"""
+    """dois st.metric nativos lado a lado dentro de col: valor principal + variação"""
     sinal = "▲" if rs >= 0 else "▼"
-    cor   = "#22c55e" if rs >= 0 else "#ef4444"
-    tag   = f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}"
-    col.metric(label, valor)
-    col.markdown(
-        f"<div style='margin-top:-42px;margin-left:0px;padding-bottom:16px;"
-        f"font-size:0.72rem;color:{cor};font-weight:500'>{tag}</div>",
-        unsafe_allow_html=True
-    )
+    _pct_str = f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}"
+    _rs_lbl  = f"valorização  ·  {abreviar_rs(abs(rs))}"
+    sub1, sub2 = col.columns([1.1, 0.9])
+    sub1.metric(label, valor)
+    sub2.metric(_rs_lbl, _pct_str,
+                delta_color="normal" if rs >= 0 else "inverse",
+                delta=None)
 
 def metric_tag_simples(col, label, valor):
     """st.metric nativo simples — sem variação"""
