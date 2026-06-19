@@ -368,19 +368,21 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def metric_tag(col, label, valor, rs, pct):
-    """st.metric nativo + caption discreta de variação abaixo"""
+    """card com label+tag inline · valor grande em HTML com fonte matched ao st.metric"""
     sinal = "▲" if rs >= 0 else "▼"
     cor   = "#22c55e" if rs >= 0 else "#ef4444"
-    col.metric(label, valor)
+    tag   = (f"<span style='color:{cor};font-size:0.72rem;font-weight:500;margin-left:6px'>"
+             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}</span>")
     col.markdown(
-        f"<div style='margin-top:-12px;font-size:0.72rem;color:{cor};font-weight:500'>"
-        f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}</div>",
+        f"<div style='padding:4px 0 2px 0'>"
+        f"<div style='font-size:0.875rem;color:rgba(250,250,250,0.6);margin-bottom:2px'>{label}{tag}</div>"
+        f"<div style='font-size:2rem;font-weight:700;letter-spacing:-0.02em;line-height:1.1'>"
+        f"{valor}</div></div>",
         unsafe_allow_html=True
     )
 
-
 def metric_tag_simples(col, label, valor):
-    """st.metric simples sem variação"""
+    """st.metric nativo simples — sem variação"""
     col.metric(label, valor)
 
 
@@ -860,17 +862,7 @@ with aba_dash:
     c1, c2 = st.columns([1, 1])
     c1.metric("patrimônio", total_k)
 
-    _sinal = "▲" if _var_val >= 0 else "▼"
-    _cor   = "#22c55e" if _var_val >= 0 else "#ef4444"
-    _pct_fmt = f"{_var_pct:+.1f}%".replace('.', ',')
-    _rs_fmt  = formatar_brl(abs(_var_val))
-    c2.markdown(
-        f"<div style='padding-top:8px'>"
-        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>vs total investido  ·  {formatar_brl(_custo_total)}</div>"
-        f"<div style='font-size:1.15rem;font-weight:700;color:{_cor};font-family:inherit'>"
-        f"{_sinal} {_pct_fmt}  ·  {_rs_fmt}</div></div>",
-        unsafe_allow_html=True
-    )
+    metric_tag(c2, f"vs total investido  ·  {formatar_brl(_custo_total)}", formatar_brl(_var_val), _var_val, _var_pct)
 
     st.markdown('---')
 
@@ -1190,16 +1182,10 @@ with aba_detalhe:
         col_resumo, col_donut_etf = st.columns([2, 1])
 
         with col_resumo:
-            c1, c2, c3 = st.columns(3)
+            c1, c2 = st.columns(2)
             _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
             metric_tag(c1, f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira), var_etf_rs, var_etf_pct)
-            c2.markdown(
-                f"<div style='padding-top:8px'>"
-                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização total</div>"
-                f"{tag_var(var_etf_rs, var_etf_pct)}</div>",
-                unsafe_allow_html=True
-            )
-            c3.metric("holding médio (classe)", f"{round(_holding_classe, 1)} meses" if _holding_classe > 0 else "—")
+            c2.metric("holding médio (classe)", f"{round(_holding_classe, 1)} meses" if _holding_classe > 0 else "—")
 
         with col_donut_etf:
             hover_etf = [
@@ -1246,7 +1232,7 @@ with aba_detalhe:
             metric_tag(c4, "total atual", abreviar_rs(total_atual), var_rs, var_pct_e)
 
             c5, c6 = st.columns(2)
-            c5.metric("holding ponderado", fmt_holding(holding))
+            c5.metric("holding médio", fmt_holding(holding))
             c6.metric("preço médio", formatar_brl(pm))
 
             st.markdown("---")
