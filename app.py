@@ -368,16 +368,14 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def metric_tag(col, label, valor, rs, pct):
-    """card com label+tag inline · valor grande em HTML com fonte matched ao st.metric"""
+    """st.metric nativo + tag ▲/▼ discreta ao lado do valor via markdown sobreposto"""
     sinal = "▲" if rs >= 0 else "▼"
     cor   = "#22c55e" if rs >= 0 else "#ef4444"
-    tag   = (f"<span style='color:{cor};font-size:0.72rem;font-weight:500;margin-left:6px'>"
-             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}</span>")
+    tag   = f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}"
+    col.metric(label, valor)
     col.markdown(
-        f"<div style='padding:4px 0 2px 0'>"
-        f"<div style='font-size:0.875rem;color:rgba(250,250,250,0.6);margin-bottom:2px'>{label}{tag}</div>"
-        f"<div style='font-size:2rem;font-weight:700;letter-spacing:-0.02em;line-height:1.1'>"
-        f"{valor}</div></div>",
+        f"<div style='margin-top:-42px;margin-left:0px;padding-bottom:16px;"
+        f"font-size:0.72rem;color:{cor};font-weight:500'>{tag}</div>",
         unsafe_allow_html=True
     )
 
@@ -1232,7 +1230,7 @@ with aba_detalhe:
             metric_tag(c4, "total atual", abreviar_rs(total_atual), var_rs, var_pct_e)
 
             c5, c6 = st.columns(2)
-            c5.metric("holding médio", fmt_holding(holding))
+            c5.metric("holding ponderado", fmt_holding(holding))
             c6.metric("preço médio", formatar_brl(pm))
 
             st.markdown("---")
