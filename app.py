@@ -16,6 +16,14 @@ st.markdown("""
     <style>
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
+        [data-testid="stMetricDelta"] svg { display: none !important; }
+        [data-testid="stMetricDelta"] > div {
+            background: none !important;
+            padding: 0 !important;
+            border-radius: 0 !important;
+            font-size: 0.85rem !important;
+            font-weight: 500 !important;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -367,14 +375,13 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def metric_tag(col, label, valor, rs, pct):
-    """valor principal + card valorização como texto simples"""
-    sinal    = "▲" if rs >= 0 else "▼"
+    """valor principal + card valorização com delta colorido sem fundo"""
+    _rs_str  = ("" if rs >= 0 else "-") + abreviar_rs(abs(rs))
     _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
-    _rs_str  = ("+" if rs >= 0 else "-") + abreviar_rs(abs(rs))
-    _var_str = f"{sinal} {_pct_str}  ·  {_rs_str}"
     sub1, sub2 = col.columns([1.1, 0.9])
     sub1.metric(label, valor)
-    sub2.metric("valorização", _var_str)
+    sub2.metric(_rs_str, _rs_str, delta=_pct_str,
+                delta_color="normal" if rs >= 0 else "inverse")
 
 def metric_tag_simples(col, label, valor):
     """st.metric nativo simples — sem variação"""
@@ -1229,10 +1236,10 @@ with aba_detalhe:
             c5, c6, c7 = st.columns(3)
             c5.metric("holding ponderado", fmt_holding(holding))
             c6.metric("preço médio", formatar_brl(pm))
-            _sinal_e   = "▲" if var_rs >= 0 else "▼"
+            _rs_e_str  = ("" if var_rs >= 0 else "-") + abreviar_rs(abs(var_rs))
             _pct_e_str = ("+" if var_pct_e >= 0 else "") + fmt_pct(var_pct_e)
-            _rs_e_str  = ("+" if var_rs >= 0 else "-") + abreviar_rs(abs(var_rs))
-            c7.metric("valorização", f"{_sinal_e} {_pct_e_str}  ·  {_rs_e_str}")
+            c7.metric(_rs_e_str, _rs_e_str, delta=_pct_e_str,
+                      delta_color="normal" if var_rs >= 0 else "inverse")
 
             st.markdown("---")
 
