@@ -376,7 +376,18 @@ def metric_tag(col, label, valor, rs, pct):
     col.markdown(
         f"<div style='padding:4px 0'>"
         f"<div style='font-size:0.78rem;color:rgba(250,250,250,0.6);margin-bottom:4px'>{label}{tag}</div>"
-        f"<div style='font-size:1.75rem;font-weight:700;line-height:1.2'>"
+        f"<div style='font-size:1.75rem;font-weight:700;line-height:1.2;font-family:inherit'>"
+        f"{valor}</div></div>",
+        unsafe_allow_html=True
+    )
+
+
+def metric_tag_simples(col, label, valor):
+    """card sem tag de variação — mesma fonte e tamanho que metric_tag"""
+    col.markdown(
+        f"<div style='padding:4px 0'>"
+        f"<div style='font-size:0.78rem;color:rgba(250,250,250,0.6);margin-bottom:4px'>{label}</div>"
+        f"<div style='font-size:1.75rem;font-weight:700;line-height:1.2;font-family:inherit'>"
         f"{valor}</div></div>",
         unsafe_allow_html=True
     )
@@ -1022,12 +1033,11 @@ with aba_detalhe:
 
         c1, c2, c3, c4 = st.columns(4)
         metric_tag(c1, f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira), _var_fii_rs, _var_fii_pct)
-        c2.metric(f"dividendos — {meses_pt3[mes_ref_f]}/{ano_ref_f}", formatar_brl(div_total))
-        if yield_mensal:
-            c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", f"{yield_mensal:.2f}%".replace('.', ','))
-        else:
-            c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", "—")
-        c4.metric("dividendos recebidos (total)", abreviar_rs(_total_divs))
+        _yield_str = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
+        _label_mes = f"{meses_pt3[mes_ref_f]}/{ano_ref_f}"
+        metric_tag_simples(c2, f"dividendos — {_label_mes}", formatar_brl(div_total))
+        metric_tag_simples(c3, f"yield — {_label_mes}", _yield_str)
+        metric_tag_simples(c4, "dividendos recebidos (total)", abreviar_rs(_total_divs))
 
         st.markdown("---")
 
