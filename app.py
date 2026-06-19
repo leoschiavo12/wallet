@@ -365,7 +365,22 @@ def tag_var(rs, pct):
     sinal = "▲" if rs >= 0 else "▼"
     cor   = "#22c55e" if rs >= 0 else "#ef4444"
     return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
-            f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {formatar_brl(abs(rs))}</span>")
+            f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
+
+def metric_tag(col, label, valor, rs, pct):
+    """card com label, valor grande e tag de valorização inline"""
+    sinal = "▲" if rs >= 0 else "▼"
+    cor   = "#22c55e" if rs >= 0 else "#ef4444"
+    tag   = (f"<span style='color:{cor};font-size:0.72rem;font-weight:600;"
+             f"font-family:inherit;margin-left:8px;vertical-align:middle'>"
+             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}</span>")
+    col.markdown(
+        f"<div style='padding:4px 0'>"
+        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>{label}</div>"
+        f"<div style='font-size:1.5rem;font-weight:700;font-family:inherit;line-height:1.2'>"
+        f"{valor}{tag}</div></div>",
+        unsafe_allow_html=True
+    )
 
 # ── Tesouro Direto: lê de st.secrets, fallback para valor hardcoded ──────────
 def preco_td_de_secrets(nome, fallback):
@@ -1007,11 +1022,7 @@ with aba_detalhe:
         _pct_fii_carteira = total_fii / total_geral * 100 if total_geral > 0 else 0
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
-        c1.markdown(
-            f"<div style='margin-top:-8px'>{tag_var(_var_fii_rs, _var_fii_pct)}</div>",
-            unsafe_allow_html=True
-        )
+        metric_tag(c1, f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira), _var_fii_rs, _var_fii_pct)
         c2.metric(f"dividendos — {meses_pt3[mes_ref_f]}/{ano_ref_f}", formatar_brl(div_total))
         if yield_mensal:
             c3.metric(f"yield — {meses_pt3[mes_ref_f]}/{ano_ref_f}", f"{yield_mensal:.2f}%".replace('.', ','))
@@ -1170,11 +1181,7 @@ with aba_detalhe:
         with col_resumo:
             c1, c2, c3 = st.columns(3)
             _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
-            c1.metric(f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira))
-            c1.markdown(
-                f"<div style='margin-top:-8px'>{tag_var(var_etf_rs, var_etf_pct)}</div>",
-                unsafe_allow_html=True
-            )
+            metric_tag(c1, f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira), var_etf_rs, var_etf_pct)
             c2.markdown(
                 f"<div style='padding-top:8px'>"
                 f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>valorização total</div>"
@@ -1225,11 +1232,7 @@ with aba_detalhe:
             c1.metric("ativo", ativo)
             c2.metric("qtd", str(qtd))
             c3.metric("preço atual", formatar_brl(preco))
-            c4.metric("total atual", abreviar_rs(total_atual))
-            c4.markdown(
-                f"<div style='margin-top:-8px'>{tag_var(var_rs, var_pct_e)}</div>",
-                unsafe_allow_html=True
-            )
+            metric_tag(c4, "total atual", abreviar_rs(total_atual), var_rs, var_pct_e)
 
             c5, c6 = st.columns(2)
             c5.metric("holding ponderado", fmt_holding(holding))
