@@ -14,6 +14,7 @@ st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
 st.markdown("""
     <style>
+        html, body, [class*="css"] { font-size: 14px !important; }
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
         [data-testid="stMetricDelta"] { display: none !important; }
@@ -367,15 +368,13 @@ def tag_var(rs, pct):
     return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
-def metric_tag(col, label, valor, rs, pct):
-    """card principal (st.metric nativo) + card valorização HTML colorido"""
+def card_valorizacao(col, rs, pct):
+    """card HTML de valorização: label=valorização · R$ X, valor grande colorido"""
     sinal    = "▲" if rs >= 0 else "▼"
     cor      = "#22c55e" if rs >= 0 else "#ef4444"
     _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
-    _rs_str  = abreviar_rs(abs(rs))
-    sub1, sub2 = col.columns([1.1, 0.9])
-    sub1.metric(label, valor)
-    sub2.markdown(
+    _rs_str  = ("-" if rs < 0 else "") + abreviar_rs(abs(rs))
+    col.markdown(
         f"<div style='padding-top:4px'>"
         f"<p style='font-size:0.875rem;color:rgba(250,250,250,0.6);margin:0 0 6px 0'>"
         f"valorização · {_rs_str}</p>"
@@ -383,6 +382,10 @@ def metric_tag(col, label, valor, rs, pct):
         f"{sinal} {_pct_str}</p></div>",
         unsafe_allow_html=True
     )
+
+def metric_tag(col, label, valor, rs, pct):
+    """st.metric nativo — col já é a coluna certa"""
+    col.metric(label, valor)
 
 def metric_tag_simples(col, label, valor):
     col.metric(label, valor)
@@ -864,7 +867,7 @@ with aba_dash:
     c1, c2 = st.columns([1, 1])
     c1.metric("patrimônio", total_k)
 
-    metric_tag(c2, f"vs total investido  ·  {formatar_brl(_custo_total)}", formatar_brl(_var_val), _var_val, _var_pct)
+    card_valorizacao(c2, _var_val, _var_pct)
 
     st.markdown('---')
 
@@ -1027,13 +1030,14 @@ with aba_detalhe:
         _var_fii_pct = _var_fii_rs / df_fii['custo_total'].sum() * 100 if df_fii['custo_total'].sum() > 0 else 0
         _pct_fii_carteira = total_fii / total_geral * 100 if total_geral > 0 else 0
 
-        c1, c2, c3, c4 = st.columns(4)
-        metric_tag(c1, f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira), _var_fii_rs, _var_fii_pct)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
+        card_valorizacao(c2, _var_fii_rs, _var_fii_pct)
         _yield_str = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
         _label_mes = f"{meses_pt3[mes_ref_f]}/{ano_ref_f}"
-        metric_tag_simples(c2, f"dividendos — {_label_mes}", formatar_brl(div_total))
-        metric_tag_simples(c3, f"yield — {_label_mes}", _yield_str)
-        metric_tag_simples(c4, "dividendos recebidos (total)", abreviar_rs(_total_divs))
+        c3.metric(f"dividendos — {_label_mes}", formatar_brl(div_total))
+        c4.metric(f"yield — {_label_mes}", _yield_str)
+        c5.metric("dividendos recebidos (total)", abreviar_rs(_total_divs))
 
         st.markdown("---")
 
@@ -1184,10 +1188,11 @@ with aba_detalhe:
         col_resumo, col_donut_etf = st.columns([2, 1])
 
         with col_resumo:
-            c1, c2 = st.columns(2)
+            c1, c2, c3 = st.columns(3)
             _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
-            metric_tag(c1, f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira), var_etf_rs, var_etf_pct)
-            c2.metric("holding médio (classe)", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
+            c1.metric(f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira))
+            card_valorizacao(c2, var_etf_rs, var_etf_pct)
+            c3.metric("holding médio (classe)", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
 
         with col_donut_etf:
             hover_etf = [
@@ -1231,11 +1236,12 @@ with aba_detalhe:
             c1.metric("ativo", ativo)
             c2.metric("qtd", str(qtd))
             c3.metric("preço atual", formatar_brl(preco))
-            metric_tag(c4, "total atual", abreviar_rs(total_atual), var_rs, var_pct_e)
+            c4.metric("total atual", abreviar_rs(total_atual))
 
-            c5, c6 = st.columns(2)
+            c5, c6, c7 = st.columns(3)
             c5.metric("holding ponderado", fmt_holding(holding))
             c6.metric("preço médio", formatar_brl(pm))
+            card_valorizacao(c7, var_rs, var_pct_e)
 
             st.markdown("---")
 
