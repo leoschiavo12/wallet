@@ -1275,10 +1275,20 @@ with aba_detalhe:
             sinal = "+" if v >= 0 else ""
             return f"{sinal}{fmt_pct(v)}".replace('.', ',')
 
-        c1, c2, c3 = st.columns(3)
+        _btc_custo = float(_btc_pos['custo_total'].iloc[0]) if not _btc_pos.empty else 0.0
+        _btc_pm    = float(_btc_pos['preco_medio'].iloc[0]) if not _btc_pos.empty else 0.0
+        _btc_var_rs  = total_btc - _btc_custo
+        _btc_var_pct = (_btc_var_rs / _btc_custo * 100) if _btc_custo > 0 else 0.0
+
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("quantidade", f"{qtd_btc:.4f}".replace('.', ',') + " BTC")
         c2.metric("preço atual", abreviar_rs(preco_btc_atual))
-        c3.metric("total na carteira", abreviar_rs(total_btc))
+        c3.metric("total atual", abreviar_rs(total_btc))
+        card_valorizacao(c4, _btc_var_rs, _btc_var_pct)
+
+        c5, c6 = st.columns(2)
+        c5.metric("total investido", abreviar_rs(_btc_custo))
+        c6.metric("preço médio", abreviar_rs(_btc_pm))
 
         st.markdown("---")
 
@@ -1356,20 +1366,17 @@ with aba_detalhe:
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("ativo",               ativo)
-            c2.metric("quantidade (títulos)", str(qtd))
-            c3.metric("preço atual (PU)",     formatar_brl(preco_atual))
-            c4.metric("total atual (venda)",  formatar_brl(total_atual))
+            c2.metric("quantidade", str(qtd))
+            c3.metric("preço atual",     formatar_brl(preco_atual))
+            c4.metric("total atual",  formatar_brl(total_atual))
 
             c5, c6, c7 = st.columns(3)
             c5.metric("total investido",  formatar_brl(total_investido) if total_investido > 0 else "—")
             c6.metric("preço médio pago", formatar_brl(pm) if pm > 0 else "—")
-            if valorizacao is not None:
-                sinal = "+" if valorizacao >= 0 else ""
-                c7.metric("valorização mark-to-market", formatar_brl(valorizacao),
-                           f"{sinal}{fmt_pct(valorizacao_pct)}".replace('.', ','),
-                           delta_color="normal" if valorizacao >= 0 else "inverse")
+            if valorizacao is not None and valorizacao_pct is not None:
+                card_valorizacao(c7, valorizacao, valorizacao_pct)
             else:
-                c7.metric("valorização mark-to-market", "—")
+                c7.metric("valorização", "—")
 
             if 'preco_renda_auto' in st.session_state:
                 st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
