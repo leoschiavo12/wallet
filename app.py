@@ -16,7 +16,6 @@ st.markdown("""
     <style>
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
-        [data-testid="stMetricDelta"] { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
 
