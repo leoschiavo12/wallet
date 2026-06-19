@@ -368,12 +368,12 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def metric_tag(col, label, valor, rs, pct):
-    """valor principal + card de valorização com delta colorido pelo Streamlit"""
+    """valor principal + card valorização: label=R$ X, value=R$ X (grande), delta=+% colorido"""
     _pct_str = f"{'+' if pct>=0 else ''}{fmt_pct(pct)}"
     _rs_str  = abreviar_rs(abs(rs))
     sub1, sub2 = col.columns([1.1, 0.9])
     sub1.metric(label, valor)
-    sub2.metric("valorização", _pct_str, delta=_rs_str,
+    sub2.metric(_rs_str, _rs_str, delta=_pct_str,
                 delta_color="normal" if rs >= 0 else "inverse")
 
 def metric_tag_simples(col, label, valor):
@@ -1229,8 +1229,9 @@ with aba_detalhe:
             c5, c6, c7 = st.columns(3)
             c5.metric("holding ponderado", fmt_holding(holding))
             c6.metric("preço médio", formatar_brl(pm))
-            _pct_str = f"{'+' if var_pct_e>=0 else ''}{fmt_pct(var_pct_e)}"
-            c7.metric("valorização", _pct_str, delta=abreviar_rs(abs(var_rs)),
+            _pct_e_str = f"{'+' if var_pct_e>=0 else ''}{fmt_pct(var_pct_e)}"
+            _rs_e_str  = abreviar_rs(abs(var_rs))
+            c7.metric(_rs_e_str, _rs_e_str, delta=_pct_e_str,
                       delta_color="normal" if var_rs >= 0 else "inverse")
 
             st.markdown("---")
