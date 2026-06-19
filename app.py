@@ -371,13 +371,12 @@ def metric_tag(col, label, valor, rs, pct):
     """card com label + tag inline no topo, valor grande abaixo"""
     sinal = "▲" if rs >= 0 else "▼"
     cor   = "#22c55e" if rs >= 0 else "#ef4444"
-    tag   = (f"<span style='color:{cor};font-size:0.72rem;font-weight:600;"
-             f"font-family:inherit;margin-left:6px'>"
+    tag   = (f"<span style='color:{cor};font-size:0.72rem;font-weight:600;margin-left:6px'>"
              f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)} · {abreviar_rs(abs(rs))}</span>")
     col.markdown(
         f"<div style='padding:4px 0'>"
-        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px'>{label}{tag}</div>"
-        f"<div style='font-size:1.75rem;font-weight:700;font-family:inherit;line-height:1.2'>"
+        f"<div style='font-size:0.78rem;color:rgba(250,250,250,0.6);margin-bottom:4px'>{label}{tag}</div>"
+        f"<div style='font-size:1.75rem;font-weight:700;line-height:1.2'>"
         f"{valor}</div></div>",
         unsafe_allow_html=True
     )
@@ -1677,17 +1676,31 @@ with aba_lanc:
                 min_value=1, max_value=n, step=1, value=1,
                 key="idx_del_input"
             )
-            # buscar a linha real no Sheets pelo # selecionado
             sel = df_hist[df_hist["#"] == int(idx_del)]
             if not sel.empty:
-                row_prev   = sel.iloc[0]
-                pos_sheet  = int(row_prev["_sheet_row"])
+                row_prev = sel.iloc[0]
                 st.caption(f"selecionado: {row_prev['data']} · {row_prev['ativo']} · {row_prev['tipo']} · qtd {row_prev['quantidade']}")
-                st.caption(f"⚙️ debug: linha real no Sheets = {pos_sheet}, startIndex = {pos_sheet - 1}")
                 if st.button("excluir", type="secondary"):
                     try:
-                        deletar_lancamento(pos_sheet)
-                        st.success(f"excluído!")
+                        # buscar linha real no Sheets pelo conteúdo (data + ativo + tipo)
+                        svc_del = get_sheets_service()
+                        res_del = svc_del.values().get(
+                            spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G"
+                        ).execute()
+                        rows_del = res_del.get("values", [])
+                        linha_real = None
+                        for i, r in enumerate(rows_del):
+                            if (len(r) >= 4 and
+                                r[0] == row_prev['data'] and
+                                r[2] == row_prev['ativo'] and
+                                r[1] == row_prev['tipo']):
+                                linha_real = i  # 0-based para deleteDimension
+                                break
+                        if linha_real is not None:
+                            deletar_lancamento(linha_real + 1)  # +1 para converter para 1-based
+                            st.success("excluído!")
+                        else:
+                            st.error("linha não encontrada no Sheets — verifique os dados.")
                     except Exception as e:
                         st.error(f"erro: {e}")
                     st.rerun(scope="fragment")
