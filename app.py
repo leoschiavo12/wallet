@@ -368,12 +368,12 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def metric_tag(col, label, valor, rs, pct):
-    """valor principal + card valorização: label=R$ X, value=R$ X (grande), delta=+% colorido"""
+    """valor principal + card valorização: label=valorização, value=R$ Xk, delta=+% colorido"""
     _pct_str = f"{'+' if pct>=0 else ''}{fmt_pct(pct)}"
     _rs_str  = abreviar_rs(abs(rs))
     sub1, sub2 = col.columns([1.1, 0.9])
     sub1.metric(label, valor)
-    sub2.metric(_rs_str, _rs_str, delta=_pct_str,
+    sub2.metric("valorização", _rs_str, delta=_pct_str,
                 delta_color="normal" if rs >= 0 else "inverse")
 
 def metric_tag_simples(col, label, valor):
@@ -1180,7 +1180,7 @@ with aba_detalhe:
             c1, c2 = st.columns(2)
             _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
             metric_tag(c1, f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira), var_etf_rs, var_etf_pct)
-            c2.metric("holding médio (classe)", f"{round(_holding_classe, 1)} meses" if _holding_classe > 0 else "—")
+            c2.metric("holding médio (classe)", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
 
         with col_donut_etf:
             hover_etf = [
@@ -1231,7 +1231,7 @@ with aba_detalhe:
             c6.metric("preço médio", formatar_brl(pm))
             _pct_e_str = f"{'+' if var_pct_e>=0 else ''}{fmt_pct(var_pct_e)}"
             _rs_e_str  = abreviar_rs(abs(var_rs))
-            c7.metric(_rs_e_str, _rs_e_str, delta=_pct_e_str,
+            c7.metric("valorização", _rs_e_str, delta=_pct_e_str,
                       delta_color="normal" if var_rs >= 0 else "inverse")
 
             st.markdown("---")
