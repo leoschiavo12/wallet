@@ -367,27 +367,31 @@ def tag_var(rs, pct):
     return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
-def metric_tag(col, label, valor, rs, pct):
-    """card único: label + tag colorida inline, valor grande com fonte do st.metric"""
-    sinal = "▼" if rs < 0 else "▲"
-    cor   = "#ef4444" if rs < 0 else "#22c55e"
-    _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
-    _rs_str  = abreviar_rs(abs(rs))
-    tag = (f"<span style='color:{cor};font-size:0.75rem;font-weight:600;"
-           f"margin-left:6px'>{sinal} {_pct_str} · {_rs_str}</span>")
+def _metric_html(col, label, valor, tag_html=""):
+    """card HTML que imita st.metric com tag opcional inline no label"""
     col.markdown(
-        f"<div style='line-height:1'>"
-        f"<p style='font-size:0.875rem;color:rgba(49,51,63,0.6);margin:0 0 4px 0;"
-        f"font-family:var(--font);color:rgba(250,250,250,0.6)'>{label}{tag}</p>"
-        f"<p style='font-size:2.25rem;font-weight:700;margin:0;line-height:1.1;"
-        f"font-family:var(--font)'>{valor}</p>"
-        f"</div>",
+        f"<div style='line-height:1;padding-bottom:8px'>"
+        f"<p style='font-size:0.875rem;margin:0 0 4px 0;"
+        f"color:rgba(250,250,250,0.6)'>{label}{tag_html}</p>"
+        f"<p style='font-size:2.25rem;font-weight:700;margin:0;line-height:1.1'>"
+        f"{valor}</p></div>",
         unsafe_allow_html=True
     )
 
+def _tag_var(rs, pct):
+    sinal = "▼" if rs < 0 else "▲"
+    cor   = "#ef4444" if rs < 0 else "#22c55e"
+    _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
+    return (f"<span style='color:{cor};font-size:0.75rem;font-weight:600;"
+            f"margin-left:6px'>· {sinal} {_pct_str}</span>")
+
+def metric_tag(col, label, valor, rs, pct):
+    """card com label + tag colorida inline"""
+    _metric_html(col, label, valor, _tag_var(rs, pct))
+
 def metric_tag_simples(col, label, valor):
-    """st.metric nativo simples — sem variação"""
-    col.metric(label, valor)
+    """card HTML simples sem tag — mesma fonte do metric_tag"""
+    _metric_html(col, label, valor)
 
 
 # ── Tesouro Direto: lê de st.secrets, fallback para valor hardcoded ──────────
@@ -1233,25 +1237,11 @@ with aba_detalhe:
             c1.metric("ativo", ativo)
             c2.metric("qtd", str(qtd))
             c3.metric("preço atual", formatar_brl(preco))
-            c4.metric("total atual", abreviar_rs(total_atual))
+            _metric_html(c4, "total atual", abreviar_rs(total_atual), _tag_var(var_rs, var_pct_e))
 
-            c5, c6, c7 = st.columns(3)
+            c5, c6 = st.columns(2)
             c5.metric("holding ponderado", fmt_holding(holding))
             c6.metric("preço médio", formatar_brl(pm))
-            _sinal_e  = "▼" if var_rs < 0 else "▲"
-            _cor_e    = "#ef4444" if var_rs < 0 else "#22c55e"
-            _pct_e_str = ("+" if var_pct_e >= 0 else "") + fmt_pct(var_pct_e)
-            _rs_e_str  = abreviar_rs(abs(var_rs))
-            _tag_e = (f"<span style='color:{_cor_e};font-size:0.75rem;font-weight:600;"
-                      f"margin-left:6px'>{_sinal_e} {_pct_e_str} · {_rs_e_str}</span>")
-            c7.markdown(
-                f"<div style='line-height:1'>"
-                f"<p style='font-size:0.875rem;margin:0 0 4px 0;"
-                f"color:rgba(250,250,250,0.6)'>valorização{_tag_e}</p>"
-                f"<p style='font-size:2.25rem;font-weight:700;margin:0;line-height:1.1'>"
-                f"{_rs_e_str}</p></div>",
-                unsafe_allow_html=True
-            )
 
             st.markdown("---")
 
