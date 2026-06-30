@@ -1276,12 +1276,14 @@ with aba_detalhe:
         _btc_var_rs  = total_btc - _btc_custo
         _btc_var_pct = (_btc_var_rs / _btc_custo * 100) if _btc_custo > 0 else 0.0
 
-        _btc_qtd_str = f"{qtd_btc:.4f}".replace('.', ',')
-        c1, c2, c3, c4 = st.columns(4)
+        _btc_qtd_str  = f"{qtd_btc:.4f}".replace('.', ',')
+        _btc_holding  = holding_ponderado_meses('BTC', _df_lanc_raw)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("ativo", "BTC")
         c2.metric(f"preço  ·  (~{abreviar_rs(_btc_pm)})", abreviar_rs(preco_btc_atual))
         card_valorizacao(c3, _btc_var_rs, _btc_var_pct)
         c4.metric(f"total  ·  ({_btc_qtd_str})", abreviar_rs(total_btc))
+        c5.metric("holding ponderado", fmt_holding(_btc_holding))
 
         st.markdown("---")
 
@@ -1359,7 +1361,7 @@ with aba_detalhe:
 
             _qtd_fmt = f"{qtd:.2f}".replace(".", ",") if qtd != int(qtd) else str(int(qtd))
             _pm_fmt  = formatar_brl(pm) if pm > 0 else "—"
-            c1, c2, c3, c4, c5 = st.columns(5)
+            c1, c2, c3, c4 = st.columns(4)
             c1.metric("ativo", ativo)
             c2.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
             if valorizacao is not None and valorizacao_pct is not None:
@@ -1367,7 +1369,6 @@ with aba_detalhe:
             else:
                 c3.metric("valorização", "—")
             c4.metric(f"total  ·  ({_qtd_fmt})", formatar_brl(total_atual))
-            c5.metric(f"investido", formatar_brl(total_investido) if total_investido > 0 else "—")
 
             if 'preco_renda_auto' in st.session_state:
                 st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
