@@ -1222,7 +1222,7 @@ with aba_detalhe:
         # ── cards por ETF ──────────────────────────────────────────────────────
         for _, row in df_etf.sort_values('Total Atual', ascending=False).iterrows():
             ativo       = row['Ativo']
-            qtd         = int(row['Qtd'])
+            qtd         = float(row['Qtd'])
             preco       = row['preco_unit']
             total_atual = row['Total Atual']
             custo       = row['custo_total']
@@ -1348,7 +1348,7 @@ with aba_detalhe:
         lanc_all = _df_lanc_raw
         for _, row in df_td.iterrows():
             ativo       = row['Ativo']
-            qtd         = int(row['Qtd'])
+            qtd         = float(row['Qtd'])
             preco_atual = row['preco_unit']
             total_atual = row['Total Atual']
 
