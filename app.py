@@ -1642,7 +1642,7 @@ with aba_lanc:
                             for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm"]:
                                 st.session_state.pop(_k, None)
                             st.session_state["abrir_form_aporte"] = False
-                            st.rerun()
+                            st.rerun(scope="app")
                         else:
                             st.warning("preencha quantidade e preço.")
                 with cb:
