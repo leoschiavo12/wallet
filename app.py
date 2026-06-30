@@ -553,7 +553,6 @@ def salvar_lancamento(row: list):
         spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G",
         valueInputOption="USER_ENTERED", body={"values": [row_fmt]}
     ).execute()
-    import time; time.sleep(1)
     st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
 def _get_sheet_id(svc, nome_aba):
@@ -751,7 +750,6 @@ _df_lanc_raw = st.session_state["_df_lanc_raw_cached"]
 
 # calcular posição atual
 _posicao = calcular_posicao(_df_lanc_raw)
-st.sidebar.write("🔍 Renda+ posição:", _posicao[_posicao['ativo'].str.contains('Renda', na=False)])
 
 # remover diagnóstico VIUR11 (não mais necessário)
 
@@ -1367,7 +1365,8 @@ with aba_detalhe:
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("ativo",               ativo)
-            c2.metric("quantidade", str(qtd))
+            _qtd_fmt = f"{qtd:.2f}".replace(".", ",") if qtd != int(qtd) else str(int(qtd))
+            c2.metric("quantidade", _qtd_fmt)
             c3.metric("preço atual",     formatar_brl(preco_atual))
             c4.metric("total atual",  formatar_brl(total_atual))
 
@@ -1495,7 +1494,7 @@ with aba_detalhe:
             df_geral_fmt = pd.DataFrame({
                 'ativo':           df_view['Ativo'].values,
                 'classe':          df_view['Classe'].values,
-                'qtd':             df_view.apply(lambda r: f"{r['Qtd']:.6f}".replace('.',',') if r['Qtd'] < 1 else str(int(r['Qtd'])), axis=1).values,
+                'qtd':             df_view.apply(lambda r: f"{r['Qtd']:.6f}".replace('.',',') if r['Qtd'] < 1 else (f"{r['Qtd']:.2f}".replace('.',',') if r['Classe'] == 'Tesouro Direto' else str(int(r['Qtd']))), axis=1).values,
                 'preço médio':     df_view['preco_medio'].apply(formatar_brl).values,
                 'total investido': df_view['custo_total'].apply(formatar_brl).values,
                 'preço atual':     df_view.apply(fmt_preco, axis=1).values,
@@ -1639,9 +1638,6 @@ with aba_lanc:
                                 f_tipo, f_ativo, f_classe,
                                 float(f_qtd), float(f_preco), float(round(f_total, 2))
                             ])
-                            import time; time.sleep(1.5)
-                            for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm"]:
-                                st.session_state.pop(_k, None)
                             st.session_state["abrir_form_aporte"] = False
                             st.rerun(scope="app")
                         else:
