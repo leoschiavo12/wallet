@@ -378,7 +378,7 @@ def card_valorizacao(col, rs, pct):
         f"<div style='padding-top:4px'>"
         f"<p style='font-size:0.875rem;color:rgba(250,250,250,0.6);margin:0 0 6px 0'>"
         f"valorização · {_rs_str}</p>"
-        f"<p style='font-size:1.75rem;font-weight:700;color:{cor};margin:0;line-height:1.1'>"
+        f"<p style='font-size:1.75rem;font-weight:500;color:{cor};margin:0;line-height:1.1'>"
         f"{sinal} {_pct_str}</p></div>",
         unsafe_allow_html=True
     )
@@ -1233,7 +1233,8 @@ with aba_detalhe:
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("ativo", ativo)
-            c2.metric("qtd", str(qtd))
+            _qtd_str = str(int(qtd)) if qtd == int(qtd) else f"{qtd:.2f}".replace('.', ',')
+            c2.metric("qtd", _qtd_str)
             c3.metric("preço atual", formatar_brl(preco))
             c4.metric("total atual", abreviar_rs(total_atual))
 
