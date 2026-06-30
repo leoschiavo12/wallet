@@ -1234,13 +1234,12 @@ with aba_detalhe:
             c1, c2, c3, c4 = st.columns([2, 1, 2, 2])
             c1.metric("ativo", ativo)
             _qtd_str = str(int(qtd)) if qtd == int(qtd) else f"{qtd:.2f}".replace('.', ',')
-            c2.metric("qtd", _qtd_str)
+            c2.metric(f"pm · {formatar_brl(pm)}", _qtd_str)
             c3.metric("preço atual", formatar_brl(preco))
             c4.metric("total atual", abreviar_rs(total_atual))
 
-            _, c6, c7, c8 = st.columns([2, 1, 2, 2])
-            c6.metric("holding ponderado", fmt_holding(holding))
-            c7.metric("preço médio", formatar_brl(pm))
+            _, _, c7, c8 = st.columns([2, 1, 2, 2])
+            c7.metric("holding ponderado", fmt_holding(holding))
             card_valorizacao(c8, var_rs, var_pct_e)
 
             st.markdown("---")
