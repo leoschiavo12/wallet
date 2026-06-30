@@ -1231,15 +1231,14 @@ with aba_detalhe:
             var_pct_e   = var_rs / custo * 100 if custo > 0 else 0
             holding     = holding_ponderado_meses(ativo, _df_lanc_raw)
 
-            c1, c2, c3, c4 = st.columns([2, 1, 2, 2])
-            c1.metric("ativo", ativo)
+            c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
             _qtd_str = str(int(qtd)) if qtd == int(qtd) else f"{qtd:.2f}".replace('.', ',')
-            c2.metric(f"pm · {formatar_brl(pm)}", _qtd_str)
-            c3.metric("preço atual", formatar_brl(preco))
-            c4.metric("total atual", abreviar_rs(total_atual))
+            c1.metric("ativo", ativo)
+            c2.metric("holding ponderado", fmt_holding(holding))
+            c3.metric(f"preço atual  ·  pm {formatar_brl(pm)}", formatar_brl(preco))
+            c4.metric(f"total atual  ·  qtd {_qtd_str}", abreviar_rs(total_atual))
 
-            _, _, c7, c8 = st.columns([2, 1, 2, 2])
-            c7.metric("holding ponderado", fmt_holding(holding))
+            _, _, c7, c8 = st.columns([2, 2, 2, 2])
             card_valorizacao(c8, var_rs, var_pct_e)
 
             st.markdown("---")
