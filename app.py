@@ -751,6 +751,7 @@ _df_lanc_raw = st.session_state["_df_lanc_raw_cached"]
 
 # calcular posição atual
 _posicao = calcular_posicao(_df_lanc_raw)
+st.sidebar.write("🔍 Renda+ posição:", _posicao[_posicao['ativo'].str.contains('Renda', na=False)])
 
 # remover diagnóstico VIUR11 (não mais necessário)
 
