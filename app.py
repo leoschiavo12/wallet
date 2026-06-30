@@ -1639,15 +1639,13 @@ with aba_lanc:
                                 float(f_qtd), float(f_preco), float(round(f_total, 2))
                             ])
                             st.session_state["abrir_form_aporte"] = False
-                            st.rerun(scope="fragment")
-                            st.session_state["abrir_form_aporte"] = False
-                            st.rerun(scope="fragment")
+                            st.rerun()
                         else:
                             st.warning("preencha quantidade e preço.")
                 with cb:
                     if st.button("✕ cancelar"):
                         st.session_state["abrir_form_aporte"] = False
-                        st.rerun(scope="fragment")
+                        st.rerun()
 
         st.markdown("---")
 
