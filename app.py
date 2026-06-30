@@ -1359,9 +1359,10 @@ with aba_detalhe:
             valorizacao     = total_atual - total_investido if total_investido > 0 else None
             valorizacao_pct = (valorizacao / total_investido * 100) if total_investido > 0 and valorizacao else None
 
-            _qtd_fmt = f"{qtd:.2f}".replace(".", ",") if qtd != int(qtd) else str(int(qtd))
-            _pm_fmt  = formatar_brl(pm) if pm > 0 else "—"
-            c1, c2, c3, c4 = st.columns(4)
+            _qtd_fmt    = f"{qtd:.2f}".replace(".", ",") if qtd != int(qtd) else str(int(qtd))
+            _pm_fmt     = formatar_brl(pm) if pm > 0 else "—"
+            _td_holding = holding_ponderado_meses(ativo, _df_lanc_raw)
+            c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("ativo", ativo)
             c2.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
             if valorizacao is not None and valorizacao_pct is not None:
@@ -1369,6 +1370,7 @@ with aba_detalhe:
             else:
                 c3.metric("valorização", "—")
             c4.metric(f"total  ·  ({_qtd_fmt})", formatar_brl(total_atual))
+            c5.metric("holding ponderado", fmt_holding(_td_holding))
 
             if 'preco_renda_auto' in st.session_state:
                 st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
