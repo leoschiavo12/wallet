@@ -1276,15 +1276,12 @@ with aba_detalhe:
         _btc_var_rs  = total_btc - _btc_custo
         _btc_var_pct = (_btc_var_rs / _btc_custo * 100) if _btc_custo > 0 else 0.0
 
+        _btc_qtd_str = f"{qtd_btc:.4f}".replace('.', ',')
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("quantidade", f"{qtd_btc:.4f}".replace('.', ',') + " BTC")
-        c2.metric("preço atual", abreviar_rs(preco_btc_atual))
-        c3.metric("total atual", abreviar_rs(total_btc))
-        card_valorizacao(c4, _btc_var_rs, _btc_var_pct)
-
-        c5, c6 = st.columns(2)
-        c5.metric("total investido", abreviar_rs(_btc_custo))
-        c6.metric("preço médio", abreviar_rs(_btc_pm))
+        c1.metric("ativo", "BTC")
+        c2.metric(f"preço  ·  (~{abreviar_rs(_btc_pm)})", abreviar_rs(preco_btc_atual))
+        card_valorizacao(c3, _btc_var_rs, _btc_var_pct)
+        c4.metric(f"total  ·  ({_btc_qtd_str})", abreviar_rs(total_btc))
 
         st.markdown("---")
 
@@ -1360,20 +1357,17 @@ with aba_detalhe:
             valorizacao     = total_atual - total_investido if total_investido > 0 else None
             valorizacao_pct = (valorizacao / total_investido * 100) if total_investido > 0 and valorizacao else None
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("ativo",               ativo)
             _qtd_fmt = f"{qtd:.2f}".replace(".", ",") if qtd != int(qtd) else str(int(qtd))
-            c2.metric("quantidade", _qtd_fmt)
-            c3.metric("preço atual",     formatar_brl(preco_atual))
-            c4.metric("total atual",  formatar_brl(total_atual))
-
-            c5, c6, c7 = st.columns(3)
-            c5.metric("total investido",  formatar_brl(total_investido) if total_investido > 0 else "—")
-            c6.metric("preço médio pago", formatar_brl(pm) if pm > 0 else "—")
+            _pm_fmt  = formatar_brl(pm) if pm > 0 else "—"
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("ativo", ativo)
+            c2.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
             if valorizacao is not None and valorizacao_pct is not None:
-                card_valorizacao(c7, valorizacao, valorizacao_pct)
+                card_valorizacao(c3, valorizacao, valorizacao_pct)
             else:
-                c7.metric("valorização", "—")
+                c3.metric("valorização", "—")
+            c4.metric(f"total  ·  ({_qtd_fmt})", formatar_brl(total_atual))
+            c5.metric(f"investido", formatar_brl(total_investido) if total_investido > 0 else "—")
 
             if 'preco_renda_auto' in st.session_state:
                 st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
