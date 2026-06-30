@@ -1486,6 +1486,10 @@ with aba_detalhe:
                 s = f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
                 return f"R$ {s}"
 
+            _renda_row = df[df['Ativo'] == 'Renda+ 2050']
+            if not _renda_row.empty:
+                r = _renda_row.iloc[0]
+                st.sidebar.write("Qtd:", r['Qtd'], "Classe:", r['Classe'])
             df_view = df.copy().sort_values('Total Atual', ascending=False)
             df_view['variacao_rs']  = df_view['Total Atual'] - df_view['custo_total']
             df_view['variacao_pct'] = df_view.apply(
