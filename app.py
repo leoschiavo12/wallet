@@ -1486,10 +1486,6 @@ with aba_detalhe:
                 s = f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
                 return f"R$ {s}"
 
-            _renda_row = df[df['Ativo'] == 'Renda+ 2050']
-            if not _renda_row.empty:
-                r = _renda_row.iloc[0]
-                st.sidebar.write("Qtd:", r['Qtd'], "Classe:", r['Classe'])
             df_view = df.copy().sort_values('Total Atual', ascending=False)
             df_view['variacao_rs']  = df_view['Total Atual'] - df_view['custo_total']
             df_view['variacao_pct'] = df_view.apply(
@@ -1498,7 +1494,11 @@ with aba_detalhe:
             df_geral_fmt = pd.DataFrame({
                 'ativo':           df_view['Ativo'].values,
                 'classe':          df_view['Classe'].values,
-                'qtd':             df_view.apply(lambda r: f"{r['Qtd']:.6f}".replace('.',',') if r['Qtd'] < 1 else (f"{r['Qtd']:.2f}".replace('.',',') if r['Classe'] == 'Tesouro Direto' else str(int(r['Qtd']))), axis=1).values,
+                'qtd':             df_view.apply(lambda r: (
+                    f"{float(r['Qtd']):.6f}".replace('.',',') if float(r['Qtd']) < 1
+                    else f"{float(r['Qtd']):.2f}".replace('.',',') if r['Classe'] == 'Tesouro Direto'
+                    else str(int(float(r['Qtd'])))
+                ), axis=1).values,
                 'preço médio':     df_view['preco_medio'].apply(formatar_brl).values,
                 'total investido': df_view['custo_total'].apply(formatar_brl).values,
                 'preço atual':     df_view.apply(fmt_preco, axis=1).values,
