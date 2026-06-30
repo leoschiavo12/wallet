@@ -1638,6 +1638,9 @@ with aba_lanc:
                                 f_tipo, f_ativo, f_classe,
                                 float(f_qtd), float(f_preco), float(round(f_total, 2))
                             ])
+                            import time; time.sleep(1.5)
+                            for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm"]:
+                                st.session_state.pop(_k, None)
                             st.session_state["abrir_form_aporte"] = False
                             st.rerun()
                         else:
