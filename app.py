@@ -93,17 +93,17 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
                 continue
 
             for data_ex, val_cota in divs_ex.items():
-                st.sidebar.write(f"DEBUG {fii}: data_ex={data_ex}, val={val_cota}")
+                # normalizar data_ex para só data (sem horário) e usar <=
+                # para capturar quem detinha na data-base (inclusive)
+                data_ex_date = pd.Timestamp(data_ex).normalize()
                 ops = df_lanc[
                     (df_lanc['Ativo'] == fii) &
-                    (df_lanc['data_dt'] < data_ex)
+                    (df_lanc['data_dt'].dt.normalize() <= data_ex_date)
                 ]
-                st.sidebar.write(f"DEBUG {fii}: ops encontradas={len(ops)}, qtd={( ops['Quantidade'] * ops['Tipo'].str.lower().map({'compra':1,'venda':-1}).fillna(0) ).sum() if not ops.empty else 0}")
-                # se não achou com nome original, tentar com alias
                 if ops.empty and fii != fii_norm:
                     ops = df_lanc[
                         (df_lanc['Ativo'] == fii_norm) &
-                        (df_lanc['data_dt'] < data_ex)
+                        (df_lanc['data_dt'].dt.normalize() <= data_ex_date)
                     ]
                 qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
                 if qtd_na_data > 0:
