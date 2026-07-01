@@ -52,7 +52,7 @@ def obter_precos_b3(tickers_lista):
         return {t.upper(): 0.0 for t in tickers_lista}
 
 @st.cache_data(ttl=3600)
-def obter_dividendos_mes_anterior(df_lancamentos_json):
+def obter_dividendos_mes_anterior(df_lancamentos_json, _v=2):
     import pandas as pd
     from datetime import date
     hoje    = date.today()
@@ -1063,7 +1063,7 @@ with aba_detalhe:
                      7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
 
         lanc_json = _lanc_json_cached()
-        div_total, div_detalhe = obter_dividendos_mes_anterior(lanc_json)
+        div_total, div_detalhe = obter_dividendos_mes_anterior(lanc_json, _v=2)
 
         df_fii = df[df['Classe'] == 'FII'].copy()
         total_fii = df_fii['Total Atual'].sum()
