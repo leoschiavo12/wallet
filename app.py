@@ -549,6 +549,10 @@ def salvar_configuracoes(cfg: dict):
     """salva dict {ativo: alvo_pct} no Sheets, sobrescrevendo tudo"""
     try:
         svc = get_sheets_service()
+        # limpar aba antes de reescrever
+        svc.values().clear(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_CFG}!A:B"
+        ).execute()
         values = [["ativo", "alvo_pct"]]
         for ativo, alvo in cfg.items():
             values.append([ativo, alvo])
@@ -558,15 +562,6 @@ def salvar_configuracoes(cfg: dict):
             valueInputOption="USER_ENTERED",
             body={"values": values}
         ).execute()
-        # limpar linhas extras
-        total_linhas = len(values)
-        sheet_id_real = _get_sheet_id(svc, SHEET_CFG)
-        svc.batchUpdate(spreadsheetId=SHEET_ID, body={"requests": [
-            {"deleteDimension": {"range": {
-                "sheetId": sheet_id_real, "dimension": "ROWS",
-                "startIndex": total_linhas, "endIndex": 1000
-            }}}
-        ]}).execute()
         return True
     except Exception as e:
         st.error(f"erro ao salvar: {e}")
