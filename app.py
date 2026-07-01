@@ -535,21 +535,34 @@ def ler_configuracoes():
         if len(rows) <= 1:
             return {}
         cfg = {}
+        def _pf(s):
+            try: return float(str(s).replace(',', '.')) if s else None
+            except: return None
         for row in rows[1:]:
-            if len(row) >= 2:
-                try:
-                    ativo = row[0].strip()
-                    def _pf(s): return float(str(s).replace(',', '.')) if s else None
-                    cfg[ativo] = {
-                        'min':  _pf(row[1]) if len(row) > 1 else None,
-                        'alvo': _pf(row[2]) if len(row) > 2 else None,
-                        'max':  _pf(row[3]) if len(row) > 3 else None,
-                    }
-                except:
-                    pass
+            if not row: continue
+            ativo = row[0].strip()
+            if len(row) == 2:
+                # formato antigo: ativo | alvo_pct
+                cfg[ativo] = {'min': None, 'alvo': _pf(row[1]), 'max': None}
+            elif len(row) >= 3:
+                # formato novo: ativo | min | alvo | max
+                cfg[ativo] = {
+                    'min':  _pf(row[1]),
+                    'alvo': _pf(row[2]),
+                    'max':  _pf(row[3]) if len(row) > 3 else None,
+                }
         return cfg
     except:
         return {}
+
+def _get_banda(cfg, ativo):
+    """retorna dict {min, alvo, max} tolerante a formato antigo (float) e novo (dict)"""
+    v = cfg.get(ativo, {})
+    if isinstance(v, dict):
+        return v
+    if isinstance(v, (int, float)):
+        return {'min': None, 'alvo': float(v), 'max': None}
+    return {}
 
 def salvar_configuracoes(cfg: dict):
     """salva dict {ativo: {min, alvo, max}} no Sheets"""
@@ -1149,7 +1162,7 @@ with aba_detalhe:
         _max_pct_fii = df_fii_bar['pct'].max()
         _step_fii    = 1
         _x_max_fii   = max(_max_pct_fii * 1.25, _media_fii * 1.5)
-        _banda_fii_cfg = _cfg_alvos.get("__FIIs__", {}) or {}
+        _banda_fii_cfg = _get_banda(_cfg_alvos, "__FIIs__")
         _alvo_fii_total = _banda_fii_cfg.get('alvo') or 0
         _min_fii_total  = _banda_fii_cfg.get('min') or 0
         _max_fii_total  = _banda_fii_cfg.get('max') or 0
@@ -1308,7 +1321,7 @@ with aba_detalhe:
         ))
         # banda + alvo por ativo
         for i, row in df_etf_bar.reset_index(drop=True).iterrows():
-            _banda_etf = (_cfg_alvos.get(row['Ativo'], {}) or {})
+            _banda_etf = _get_banda(_cfg_alvos, row['Ativo'])
             _alvo_e = _banda_etf.get('alvo')
             _min_e  = _banda_etf.get('min')
             _max_e  = _banda_etf.get('max')
@@ -1882,7 +1895,8 @@ with aba_config:
         except: return None
 
     def _fmt_v(cfg_ativo, campo):
-        v = cfg_ativo.get(campo) if isinstance(cfg_ativo, dict) else None
+        banda = _get_banda({"_": cfg_ativo}, "_") if not isinstance(cfg_ativo, dict) else cfg_ativo
+        v = banda.get(campo)
         return f"{v:.1f}".replace('.', ',') if v is not None else ""
 
     def _inputs_banda(container, ativo, cfg):
@@ -1899,8 +1913,8 @@ with aba_config:
 
     # ── resumo por classe (topo) ──────────────────────────────────────────────
     if _alvos_edit:
-        def _alvo_c(ativo): return (_alvos_edit.get(ativo, {}) or {}).get('alvo') or 0
-        _alvo_fii_cl = (_alvos_edit.get("__FIIs__", {}) or {}).get('alvo') or 0
+        def _alvo_c(ativo): return _get_banda(_alvos_edit, ativo).get('alvo') or 0
+        _alvo_fii_cl = _get_banda(_alvos_edit, '__FIIs__').get('alvo') or 0
         _soma_etfs_r = sum(_alvo_c(a) for a in _etfs_cfg)
         _soma_td_r   = sum(_alvo_c(a) for a in _td_cfg)
         _soma_cri_r  = sum(_alvo_c(a) for a in _cripto_cfg)
