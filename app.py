@@ -1096,6 +1096,56 @@ with aba_detalhe:
 
         st.markdown("---")
 
+        # ── gráfico de barras por FII com linha de média ─────────────────────
+        df_fii_bar = df_fii.copy()
+        df_fii_bar['pct'] = df_fii_bar['Total Atual'] / total_geral * 100
+        df_fii_bar = df_fii_bar.sort_values('pct', ascending=True)
+        _n_fiis    = len(df_fii_bar)
+        _media_fii = df_fii_bar['pct'].sum() / _n_fiis if _n_fiis > 0 else 0
+
+        hover_fii_bar = [
+            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['pct'])}<br>{formatar_brl(row['Total Atual'])}"
+            for _, row in df_fii_bar.iterrows()
+        ]
+        fig_fii_bar = go.Figure()
+        fig_fii_bar.add_trace(go.Bar(
+            x=df_fii_bar['pct'],
+            y=df_fii_bar['Ativo'],
+            orientation='h',
+            marker_color='#1E88E5',
+            text=df_fii_bar['pct'].apply(fmt_pct),
+            textposition='outside',
+            textfont=dict(size=10, color='white'),
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_fii_bar,
+        ))
+        _max_pct_fii = df_fii_bar['pct'].max()
+        _step_fii    = 1
+        _x_max_fii   = max(_max_pct_fii * 1.25, _media_fii * 1.5)
+        fig_fii_bar.add_shape(
+            type='line', x0=_media_fii, x1=_media_fii, y0=-0.5, y1=_n_fiis - 0.5,
+            line=dict(color='rgba(255,255,255,0.35)', width=1.5, dash='dot')
+        )
+        fig_fii_bar.add_annotation(
+            x=_media_fii, y=_n_fiis - 0.5,
+            text=f"média {fmt_pct(_media_fii)}",
+            showarrow=False, xanchor='left', xshift=6,
+            font=dict(size=10, color='rgba(255,255,255,0.5)')
+        )
+        fig_fii_bar.update_layout(
+            height=max(300, _n_fiis * 28),
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            showlegend=False, dragmode=False,
+            xaxis=dict(showgrid=True, gridcolor='#333', range=[0, _x_max_fii],
+                       ticksuffix='%', fixedrange=True),
+            yaxis=dict(showgrid=False, tickfont=dict(size=11), fixedrange=True),
+            bargap=0.25, margin=dict(t=20, b=10, l=10, r=60)
+        )
+        st.plotly_chart(fig_fii_bar, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False})
+
+        st.markdown("---")
+
         # calcular preço médio por FII dos lançamentos
         lanc_df = _df_lanc_raw
         pm_fii = {}
