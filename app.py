@@ -1148,17 +1148,19 @@ with aba_detalhe:
         _max_pct_fii = df_fii_bar['pct'].max()
         _step_fii    = 1
         _x_max_fii   = max(_max_pct_fii * 1.25, _media_fii * 1.5)
-        _meta_fii = 2.5
-        fig_fii_bar.add_shape(
-            type='line', x0=_meta_fii, x1=_meta_fii, y0=-0.5, y1=_n_fiis - 0.5,
-            line=dict(color='rgba(255,255,255,0.6)', width=2.5, dash='dot')
-        )
-        fig_fii_bar.add_annotation(
-            x=_meta_fii, y=_n_fiis - 0.5,
-            text=f"meta {fmt_pct(_meta_fii)}",
-            showarrow=False, xanchor='left', xshift=6,
-            font=dict(size=10, color='rgba(255,255,255,0.6)')
-        )
+        _alvo_fii_total = _cfg_alvos.get("__FIIs__", 0.0)
+        _meta_fii = (_alvo_fii_total / _n_fiis) if _n_fiis > 0 and _alvo_fii_total > 0 else None
+        if _meta_fii:
+            fig_fii_bar.add_shape(
+                type='line', x0=_meta_fii, x1=_meta_fii, y0=-0.5, y1=_n_fiis - 0.5,
+                line=dict(color='rgba(255,255,255,0.6)', width=2.5, dash='dot')
+            )
+            fig_fii_bar.add_annotation(
+                x=_meta_fii, y=_n_fiis - 0.5,
+                text=f"meta {fmt_pct(_meta_fii)}",
+                showarrow=False, xanchor='left', xshift=6,
+                font=dict(size=10, color='rgba(255,255,255,0.6)')
+            )
         fig_fii_bar.update_layout(
             height=max(300, _n_fiis * 28),
             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
@@ -1261,38 +1263,60 @@ with aba_detalhe:
                 _holding_classe += (_h * row['custo_total'] / total_inv_etf)
 
         # ── linha 1: resumo da classe + donut ────────────────────────────────
-        col_resumo, col_donut_etf = st.columns([2, 1])
+        c1, c2, c3 = st.columns(3)
+        _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
+        c1.metric(f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira))
+        card_valorizacao(c2, var_etf_rs, var_etf_pct)
+        c3.metric("holding médio (classe)", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
 
-        with col_resumo:
-            c1, c2, c3 = st.columns(3)
-            _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
-            c1.metric(f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira))
-            card_valorizacao(c2, var_etf_rs, var_etf_pct)
-            c3.metric("holding médio (classe)", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
 
-        with col_donut_etf:
-            hover_etf = [
-                f"<b>{row['Ativo']}</b><br>{fmt_pct(row['Total Atual']/total_etf*100)}<br>{formatar_brl(row['Total Atual'])}"
-                for _, row in df_etf.iterrows()
-            ]
-            fig_etf_donut = go.Figure(go.Pie(
-                labels=df_etf['Ativo'].tolist(),
-                values=df_etf['Total Atual'].tolist(),
-                hole=0.6,
-                textinfo='label+percent',
-                textfont=dict(size=10),
-                hovertemplate='%{customdata}<extra></extra>',
-                customdata=hover_etf,
-                marker=dict(colors=px.colors.sequential.Blues_r[:len(df_etf)]),
-            ))
-            fig_etf_donut.update_layout(
-                dragmode=False,
-                height=220, showlegend=False,
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                margin=dict(t=10, b=10, l=10, r=10)
-            )
-            st.plotly_chart(fig_etf_donut, use_container_width=True,
-                           config={"displayModeBar": False, "scrollZoom": False})
+
+        st.markdown("---")
+
+        # ── gráfico de barras ETF com alvos por ativo ─────────────────────────
+        df_etf_bar = df_etf.copy()
+        df_etf_bar['pct'] = df_etf_bar['Total Atual'] / total_geral * 100
+        df_etf_bar = df_etf_bar.sort_values('pct', ascending=True)
+        _n_etfs = len(df_etf_bar)
+
+        hover_etf_bar = [
+            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['pct'])}<br>{formatar_brl(row['Total Atual'])}"
+            for _, row in df_etf_bar.iterrows()
+        ]
+        fig_etf_bar = go.Figure()
+        fig_etf_bar.add_trace(go.Bar(
+            x=df_etf_bar['pct'],
+            y=df_etf_bar['Ativo'],
+            orientation='h',
+            marker_color='#1E88E5',
+            text=df_etf_bar['pct'].apply(fmt_pct),
+            textposition='outside',
+            textfont=dict(size=10, color='white'),
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_etf_bar,
+        ))
+        # linha de alvo por ativo (segmento horizontal)
+        for i, row in df_etf_bar.reset_index(drop=True).iterrows():
+            _alvo_etf_ativo = _cfg_alvos.get(row['Ativo'], None)
+            if _alvo_etf_ativo:
+                fig_etf_bar.add_shape(
+                    type='line',
+                    x0=_alvo_etf_ativo, x1=_alvo_etf_ativo,
+                    y0=i - 0.4, y1=i + 0.4,
+                    line=dict(color='rgba(255,255,255,0.8)', width=2.5, dash='dot')
+                )
+        _x_max_etf = max(df_etf_bar['pct'].max(), max((_cfg_alvos.get(a,0) for a in df_etf_bar['Ativo']), default=0)) * 1.25
+        fig_etf_bar.update_layout(
+            height=max(200, _n_etfs * 50),
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            showlegend=False, dragmode=False,
+            xaxis=dict(showgrid=True, gridcolor='#333', range=[0, _x_max_etf],
+                       ticksuffix='%', fixedrange=True),
+            yaxis=dict(showgrid=False, tickfont=dict(size=11), fixedrange=True),
+            bargap=0.3, margin=dict(t=10, b=10, l=10, r=60)
+        )
+        st.plotly_chart(fig_etf_bar, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False})
 
         st.markdown("---")
 
@@ -1827,85 +1851,81 @@ with aba_lanc:
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
-    _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
-    _fiis_cfg   = [a for a in _ativos_cfg if a in FII_INFO]
-    _etfs_cfg   = [a for a in _ativos_cfg if a in ['IVVB11','DIVO11','PKIN11','LFTB11']]
-    _outros_cfg = [a for a in _ativos_cfg if a not in _fiis_cfg and a not in _etfs_cfg
-                   and a not in ['Tesouro Selic 2031', 'Tesouro SELIC 2031']]
-    _alvos_edit = dict(st.session_state.get("cfg_alvos", {}))
-    _n_fiis_cfg = len(_fiis_cfg)
+    _ativos_cfg  = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
+    _fiis_cfg    = [a for a in _ativos_cfg if a in FII_INFO]
+    _etfs_cfg    = [a for a in _ativos_cfg if a in ['IVVB11','DIVO11','PKIN11','LFTB11']]
+    _td_cfg      = [a for a in _ativos_cfg if a in ['Renda+ 2050'] ]
+    _cripto_cfg  = [a for a in _ativos_cfg if a in ['BTC']]
+    _alvos_edit  = dict(st.session_state.get("cfg_alvos", {}))
+    _n_fiis_cfg  = len(_fiis_cfg)
 
     def _parse_alvo(s):
         try: return float(str(s).replace(',', '.').strip())
         except: return None
 
-    # ── formulário ───────────────────────────────────────────────────────────
-    st.markdown("#### alvos por ativo")
-    st.caption("insira os valores em % do total da carteira. a soma deve fechar em 100%.")
+    def _fmt_v(v):
+        return f"{v:.1f}".replace('.', ',') if isinstance(v, (int, float)) and v > 0 else ""
 
+    # ── resumo por classe (topo) ──────────────────────────────────────────────
+    if _alvos_edit:
+        _alvo_fii_cl  = _alvos_edit.get("__FIIs__", 0.0)
+        _soma_etfs_r  = sum(_alvos_edit.get(a, 0) for a in _etfs_cfg)
+        _soma_td_r    = sum(_alvos_edit.get(a, 0) for a in _td_cfg)
+        _soma_cri_r   = sum(_alvos_edit.get(a, 0) for a in _cripto_cfg)
+        _soma_total_r = _soma_etfs_r + _alvo_fii_cl + _soma_td_r + _soma_cri_r
+        _cor_r = "🟢" if abs(_soma_total_r - 100) < 0.01 else "🔴"
+        st.caption(f"{_cor_r} soma: **{_soma_total_r:.1f}%**")
+        _res_classes = {"ETFs": _soma_etfs_r, "FIIs": _alvo_fii_cl,
+                        "Tesouro Direto": _soma_td_r, "Cripto": _soma_cri_r}
+        _cols_rc = st.columns(4)
+        for i, (k, v) in enumerate(_res_classes.items()):
+            _cols_rc[i].metric(k, fmt_pct(v))
+        if _n_fiis_cfg > 0 and _alvo_fii_cl > 0:
+            st.caption(f"→ cada FII: {fmt_pct(_alvo_fii_cl / _n_fiis_cfg)} ({_n_fiis_cfg} ativos)")
+        st.markdown("---")
+
+    # ── formulário ───────────────────────────────────────────────────────────
+    st.caption("insira os valores em % do total da carteira. a soma deve fechar em 100%.")
     with st.form("form_cfg"):
         st.markdown("**ETFs**")
         _cols_etf = st.columns(len(_etfs_cfg)) if _etfs_cfg else []
         _inputs_etf = {}
         for i, a in enumerate(_etfs_cfg):
-            v = _alvos_edit.get(a, "")
-            _v_str = f"{v:.1f}".replace('.', ',') if isinstance(v, float) and v > 0 else ""
-            _inputs_etf[a] = _cols_etf[i].text_input(a, value=_v_str, placeholder="ex: 20,0")
+            _inputs_etf[a] = _cols_etf[i].text_input(a, value=_fmt_v(_alvos_edit.get(a,0)), placeholder="ex: 20,0")
 
         st.markdown("**FIIs** *(alvo da classe — dividido igualmente entre os {n} ativos)*".format(n=_n_fiis_cfg))
-        _v_fii = _alvos_edit.get("__FIIs__", "")
-        _v_fii_str = f"{_v_fii:.1f}".replace('.', ',') if isinstance(_v_fii, float) and _v_fii > 0 else ""
-        _input_fii = st.text_input("FIIs (classe)", value=_v_fii_str, placeholder="ex: 25,0")
+        _input_fii = st.text_input("FIIs (classe)", value=_fmt_v(_alvos_edit.get("__FIIs__",0)), placeholder="ex: 25,0")
 
-        st.markdown("**outros**")
-        _cols_out = st.columns(len(_outros_cfg)) if _outros_cfg else []
-        _inputs_out = {}
-        for i, a in enumerate(_outros_cfg):
-            v = _alvos_edit.get(a, "")
-            _v_str = f"{v:.1f}".replace('.', ',') if isinstance(v, float) and v > 0 else ""
-            _inputs_out[a] = _cols_out[i].text_input(a, value=_v_str, placeholder="ex: 10,0")
+        st.markdown("**Tesouro Direto**")
+        _cols_td = st.columns(len(_td_cfg)) if _td_cfg else []
+        _inputs_td = {}
+        for i, a in enumerate(_td_cfg):
+            _inputs_td[a] = _cols_td[i].text_input(a, value=_fmt_v(_alvos_edit.get(a,0)), placeholder="ex: 20,0")
+
+        st.markdown("**Cripto**")
+        _cols_cri = st.columns(len(_cripto_cfg)) if _cripto_cfg else []
+        _inputs_cri = {}
+        for i, a in enumerate(_cripto_cfg):
+            _inputs_cri[a] = _cols_cri[i].text_input(a, value=_fmt_v(_alvos_edit.get(a,0)), placeholder="ex: 10,0")
 
         _salvar = st.form_submit_button("salvar")
         if _salvar:
             _cfg_nova = {}
             _ok = True
-            for a, inp in _inputs_etf.items():
-                v = _parse_alvo(inp)
-                if v is None: st.error(f"valor inválido para {a}"); _ok = False
-                else: _cfg_nova[a] = v
+            for grp in [_inputs_etf, _inputs_td, _inputs_cri]:
+                for a, inp in grp.items():
+                    v = _parse_alvo(inp)
+                    if v is None: st.error(f"valor inválido para {a}"); _ok = False
+                    else: _cfg_nova[a] = v
             v_fii = _parse_alvo(_input_fii)
             if v_fii is None: st.error("valor inválido para FIIs"); _ok = False
             else: _cfg_nova["__FIIs__"] = v_fii
-            for a, inp in _inputs_out.items():
-                v = _parse_alvo(inp)
-                if v is None: st.error(f"valor inválido para {a}"); _ok = False
-                else: _cfg_nova[a] = v
             if _ok:
-                _soma_nova = sum(_cfg_nova[k] for k in _cfg_nova if k != "__FIIs__") + _cfg_nova.get("__FIIs__", 0)
+                _soma_nova = sum(v for k,v in _cfg_nova.items() if k != "__FIIs__") + _cfg_nova.get("__FIIs__", 0)
                 if abs(_soma_nova - 100) > 0.01:
-                    st.error(f"soma dos alvos: {_soma_nova:.1f}% — ajuste para fechar em 100%")
+                    st.error(f"soma: {_soma_nova:.1f}% — ajuste para fechar em 100%")
                 else:
                     if salvar_configuracoes(_cfg_nova):
                         st.session_state["cfg_alvos"] = _cfg_nova
                         st.success("configurações salvas.")
                         st.rerun(scope="app")
-
-    st.markdown("---")
-
-    # ── resumo ───────────────────────────────────────────────────────────────
-    if _alvos_edit:
-        st.markdown("#### resumo dos alvos")
-        _alvo_fii_cl = _alvos_edit.get("__FIIs__", 0.0)
-        _soma_etfs   = sum(_alvos_edit.get(a, 0) for a in _etfs_cfg)
-        _resumo = {}
-        for a in _etfs_cfg: _resumo[a] = _alvos_edit.get(a, 0)
-        _resumo['FIIs'] = _alvo_fii_cl
-        for a in _outros_cfg: _resumo[a] = _alvos_edit.get(a, 0)
-        _soma_total = sum(_resumo.values())
-        _cor = "🟢" if abs(_soma_total - 100) < 0.01 else "🔴"
-        st.caption(f"{_cor} soma: **{_soma_total:.1f}%**")
-        _cols_r = st.columns(len(_resumo))
-        for i, (k, v) in enumerate(_resumo.items()):
-            _cols_r[i].metric(k, fmt_pct(v))
-        if _n_fiis_cfg > 0 and _alvo_fii_cl > 0:
-            st.caption(f"→ cada FII: {fmt_pct(_alvo_fii_cl / _n_fiis_cfg)} ({_n_fiis_cfg} ativos)")
