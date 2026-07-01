@@ -97,12 +97,12 @@ def obter_dividendos_mes_anterior(df_lancamentos_json, _v=2):
                     data_ex_date = pd.Timestamp(data_ex).normalize()
                     ops = df_lanc[
                         (df_lanc['Ativo'] == fii) &
-                        (df_lanc['data_dt'].dt.normalize() <= data_ex_date)
+                        (df_lanc['data_dt'].dt.normalize() < data_ex_date)
                     ]
                     if ops.empty and fii != fii_norm:
                         ops = df_lanc[
                             (df_lanc['Ativo'] == fii_norm) &
-                            (df_lanc['data_dt'].dt.normalize() <= data_ex_date)
+                            (df_lanc['data_dt'].dt.normalize() < data_ex_date)
                         ]
                     qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
                     if fii == 'MXRF11':
