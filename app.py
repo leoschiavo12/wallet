@@ -1070,33 +1070,7 @@ with aba_detalhe:
         st.markdown("---")
 
         # donut distribuição por ativo dentro dos FIIs
-        df_fii_donut = df_fii.sort_values('Total Atual', ascending=False)
-        total_fii_donut = df_fii_donut['Total Atual'].sum()
-        hover_fii = [
-            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['Total Atual']/total_fii_donut*100)}<br>{formatar_brl(row['Total Atual'])}".replace('.', ',')
-            for _, row in df_fii_donut.iterrows()
-        ]
-        fig_fii_donut = go.Figure(go.Pie(
-            labels=df_fii_donut['Ativo'].tolist(),
-            values=df_fii_donut['Total Atual'].tolist(),
-            hole=0.6,
-            textinfo='label+percent',
-            textfont=dict(size=11),
-            hovertemplate='%{customdata}<extra></extra>',
-            customdata=hover_fii,
-            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_fii_donut)]),
-        ))
-        fig_fii_donut.update_layout(
-            dragmode=False,
-            height=320, showlegend=False,
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(t=20, b=20, l=20, r=20)
-        )
-        st.plotly_chart(fig_fii_donut, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
-
-        st.markdown("---")
-
-        # ── gráfico de barras por FII com linha de média ─────────────────────
+        # ── gráfico de barras por FII com linha de meta e média ────────────
         df_fii_bar = df_fii.copy()
         df_fii_bar['pct'] = df_fii_bar['Total Atual'] / total_geral * 100
         df_fii_bar = df_fii_bar.sort_values('pct', ascending=True)
@@ -1122,15 +1096,16 @@ with aba_detalhe:
         _max_pct_fii = df_fii_bar['pct'].max()
         _step_fii    = 1
         _x_max_fii   = max(_max_pct_fii * 1.25, _media_fii * 1.5)
+        _meta_fii = 2.5
         fig_fii_bar.add_shape(
-            type='line', x0=_media_fii, x1=_media_fii, y0=-0.5, y1=_n_fiis - 0.5,
-            line=dict(color='rgba(255,255,255,0.35)', width=1.5, dash='dot')
+            type='line', x0=_meta_fii, x1=_meta_fii, y0=-0.5, y1=_n_fiis - 0.5,
+            line=dict(color='rgba(255,255,255,0.6)', width=2.5, dash='dot')
         )
         fig_fii_bar.add_annotation(
-            x=_media_fii, y=_n_fiis - 0.5,
-            text=f"média {fmt_pct(_media_fii)}",
+            x=_meta_fii, y=_n_fiis - 0.5,
+            text=f"meta {fmt_pct(_meta_fii)}",
             showarrow=False, xanchor='left', xshift=6,
-            font=dict(size=10, color='rgba(255,255,255,0.5)')
+            font=dict(size=10, color='rgba(255,255,255,0.6)')
         )
         fig_fii_bar.update_layout(
             height=max(300, _n_fiis * 28),
