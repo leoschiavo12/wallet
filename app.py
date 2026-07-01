@@ -1061,16 +1061,31 @@ with aba_detalhe:
         total_fii_k = abreviar_rs(total_fii)
 
         # yield = dividendos_mês_ref / valor_carteira_FIIs_fim_mês_anterior
-        # ex: dividendos de maio → base = valor FIIs em 30/abr
+        # denominador do yield = valor dos FIIs no fechamento do mês de referência
+        # usando quantidade calculada pelos lançamentos até o último dia do mês ref
+        # evita que compras após data ex (mas no mesmo mês) distorçam o yield
         _mes_base = f"{ano_ref_f}-{mes_ref_f:02d}"
+        import calendar as _cal
+        _ultimo_dia_ref = pd.Timestamp(ano_ref_f, mes_ref_f,
+                          _cal.monthrange(ano_ref_f, mes_ref_f)[1])
         _total_fii_base = 0.0
-        if not _df_pm.empty:
-            for _, _pr in df_fii.iterrows():
-                _pm_row = _df_pm[(_df_pm['ano_mes'] == _mes_base) & (_df_pm['ativo'] == _pr['Ativo'])]
-                if not _pm_row.empty:
-                    _total_fii_base += _pr['Qtd'] * float(_pm_row['preco_fechamento'].iloc[0])
+        if not _df_pm.empty and not _df_lanc_raw.empty:
+            for _, _pm_row_g in _df_pm[_df_pm['ano_mes'] == _mes_base].iterrows():
+                _ativo_pm = _pm_row_g['ativo']
+                if _ativo_pm not in [r['Ativo'] for _, r in df_fii.iterrows()]:
+                    continue
+                # quantidade no último dia do mês ref pelos lançamentos
+                _ops_ref = _df_lanc_raw[
+                    (_df_lanc_raw['ativo'] == _ativo_pm) &
+                    (pd.to_datetime(_df_lanc_raw['data'], format='%d/%m/%Y', errors='coerce')
+                     .dt.normalize() <= _ultimo_dia_ref)
+                ]
+                _sinal_ref = _ops_ref['tipo'].map({'compra': 1, 'venda': -1}).fillna(0)
+                _qtd_ref = (_ops_ref['quantidade'] * _sinal_ref).sum()
+                if _qtd_ref > 0:
+                    _total_fii_base += _qtd_ref * float(_pm_row_g['preco_fechamento'])
         if _total_fii_base == 0.0:
-            _total_fii_base = total_fii  # fallback para valor atual
+            _total_fii_base = total_fii  # fallback
 
         yield_mensal = (div_total / _total_fii_base * 100) if _total_fii_base > 0 and div_total > 0 else None
 
@@ -1572,10 +1587,37 @@ with aba_detalhe:
             hovertemplate='%{customdata}<extra></extra>',
             customdata=hover_barras,
         ))
+        # alvos por ativo: banda + linha
+        for i, row in df_ativo_sorted.reset_index(drop=True).iterrows():
+            _ativo_n = row['Ativo']
+            # FIIs usam alvo da classe dividido
+            if _ativo_n in FII_INFO:
+                _banda_c = _get_banda(_cfg_alvos, '__FIIs__')
+                _n_f = len([a for a in _posicao['ativo'] if a in FII_INFO])
+                _alvo_i = (_banda_c.get('alvo') or 0) / _n_f if _n_f > 0 else None
+                _min_i  = (_banda_c.get('min')  or 0) / _n_f if _n_f > 0 else None
+                _max_i  = (_banda_c.get('max')  or 0) / _n_f if _n_f > 0 else None
+            else:
+                _banda_c = _get_banda(_cfg_alvos, _ativo_n)
+                _alvo_i  = _banda_c.get('alvo')
+                _min_i   = _banda_c.get('min')
+                _max_i   = _banda_c.get('max')
+            if _min_i and _max_i:
+                fig_ativo.add_shape(
+                    type='rect', x0=_min_i, x1=_max_i, y0=i-0.4, y1=i+0.4,
+                    fillcolor='rgba(255,255,255,0.04)', line=dict(color='rgba(255,255,255,0.15)', width=1)
+                )
+            if _alvo_i:
+                fig_ativo.add_shape(
+                    type='line', x0=_alvo_i, x1=_alvo_i, y0=i-0.4, y1=i+0.4,
+                    line=dict(color='#ffffff', width=2, dash='dash')
+                )
+        _all_max = [(_get_banda(_cfg_alvos, r['Ativo']).get('max') or 0) for _, r in df_ativo_sorted.iterrows()]
         _max_pct   = df_ativo_sorted['Part. %'].max()
         _step      = 5
         _ult_tick  = (int(_max_pct // _step)) * _step
-        _x_max     = (_ult_tick + _step) if _max_pct >= _ult_tick * 0.9 else _ult_tick
+        _x_max     = max((_ult_tick + _step) if _max_pct >= _ult_tick * 0.9 else _ult_tick,
+                         max(_all_max, default=0) * 1.1)
         fig_ativo.update_layout(
             height=max(300, len(df_ativo_sorted) * 28),
             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
