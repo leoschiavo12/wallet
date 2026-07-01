@@ -94,15 +94,17 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
 
             for data_ex, val_cota in divs_ex.items():
                 # usar só o ticker original (não misturar cotas de aliases diferentes)
+                # data_ex do yfinance é o dia seguinte à data-base (ex-date)
+                # quem vendeu NA data_ex ainda recebia (vendeu ex), então usar < data_ex
                 ops = df_lanc[
                     (df_lanc['Ativo'] == fii) &
-                    (df_lanc['data_dt'] <= data_ex)
+                    (df_lanc['data_dt'] < data_ex)
                 ]
                 # se não achou com nome original, tentar com alias
                 if ops.empty and fii != fii_norm:
                     ops = df_lanc[
                         (df_lanc['Ativo'] == fii_norm) &
-                        (df_lanc['data_dt'] <= data_ex)
+                        (df_lanc['data_dt'] < data_ex)
                     ]
                 qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
                 if qtd_na_data > 0:
