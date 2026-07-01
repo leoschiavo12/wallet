@@ -1827,77 +1827,85 @@ with aba_lanc:
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
-    # lista de ativos da carteira atual
-    _ativos_cfg   = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
-    _fiis_cfg     = [a for a in _ativos_cfg if a in FII_INFO]
-    _etfs_cfg     = [a for a in _ativos_cfg if a in ['IVVB11','DIVO11','PKIN11','LFTB11']]
-    _outros_cfg   = [a for a in _ativos_cfg if a not in _fiis_cfg and a not in _etfs_cfg]
-
-    _alvos_edit   = dict(st.session_state.get("cfg_alvos", {}))
-
-    # ── resumo atual ─────────────────────────────────────────────────────────
-    st.markdown("#### resumo da carteira")
-    _soma_alvos = sum(_alvos_edit.values()) if _alvos_edit else 0.0
+    _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
+    _fiis_cfg   = [a for a in _ativos_cfg if a in FII_INFO]
+    _etfs_cfg   = [a for a in _ativos_cfg if a in ['IVVB11','DIVO11','PKIN11','LFTB11']]
+    _outros_cfg = [a for a in _ativos_cfg if a not in _fiis_cfg and a not in _etfs_cfg
+                   and a not in ['Tesouro Selic 2031', 'Tesouro SELIC 2031']]
+    _alvos_edit = dict(st.session_state.get("cfg_alvos", {}))
     _n_fiis_cfg = len(_fiis_cfg)
-    _alvo_fii_classe = _alvos_edit.get("__FIIs__", 0.0)
-    _alvo_fii_ind    = _alvo_fii_classe / _n_fiis_cfg if _n_fiis_cfg > 0 else 0.0
 
-    _resumo_classes = {}
-    for a in _etfs_cfg:
-        _resumo_classes['ETFs'] = _resumo_classes.get('ETFs', 0) + _alvos_edit.get(a, 0)
-    _resumo_classes['FIIs']           = _alvo_fii_classe
-    _resumo_classes['Renda+ 2050']    = _alvos_edit.get('Renda+ 2050', 0)
-    _resumo_classes['BTC']            = _alvos_edit.get('BTC', 0)
-    _resumo_classes['Tesouro Selic']  = _alvos_edit.get('Tesouro Selic 2031', 0)
+    def _parse_alvo(s):
+        try: return float(str(s).replace(',', '.').strip())
+        except: return None
 
-    _cor_soma = "🟢" if abs(_soma_alvos - 100) < 0.01 else ("🟡" if abs(_soma_alvos - 100) < 5 else "🔴")
-    st.caption(f"{_cor_soma} soma dos alvos: **{_soma_alvos:.1f}%** (meta: 100%)")
-
-    _cols_res = st.columns(len(_resumo_classes))
-    for i, (classe, pct) in enumerate(_resumo_classes.items()):
-        _cols_res[i].metric(classe, fmt_pct(pct))
-
-    st.markdown("---")
-
-    # ── formulário de edição ─────────────────────────────────────────────────
+    # ── formulário ───────────────────────────────────────────────────────────
     st.markdown("#### alvos por ativo")
+    st.caption("insira os valores em % do total da carteira. a soma deve fechar em 100%.")
 
     with st.form("form_cfg"):
         st.markdown("**ETFs**")
-        _cols_etf = st.columns(len(_etfs_cfg)) if _etfs_cfg else [st]
-        _novos_etf = {}
+        _cols_etf = st.columns(len(_etfs_cfg)) if _etfs_cfg else []
+        _inputs_etf = {}
         for i, a in enumerate(_etfs_cfg):
-            v = _alvos_edit.get(a, 0.0)
-            _novos_etf[a] = _cols_etf[i].number_input(a, min_value=0.0, max_value=100.0,
-                                                        value=float(v), step=0.5, format="%.1f")
+            v = _alvos_edit.get(a, "")
+            _v_str = f"{v:.1f}".replace('.', ',') if isinstance(v, float) and v > 0 else ""
+            _inputs_etf[a] = _cols_etf[i].text_input(a, value=_v_str, placeholder="ex: 20,0")
 
-        st.markdown("**FIIs** *(alvo da classe — dividido igualmente entre os ativos)*")
-        _alvo_fii_novo = st.number_input("FIIs (classe)", min_value=0.0, max_value=100.0,
-                                          value=float(_alvo_fii_classe), step=0.5, format="%.1f")
-        if _n_fiis_cfg > 0:
-            st.caption(f"→ {fmt_pct(_alvo_fii_novo / _n_fiis_cfg)} por FII ({_n_fiis_cfg} ativos)")
+        st.markdown("**FIIs** *(alvo da classe — dividido igualmente entre os {n} ativos)*".format(n=_n_fiis_cfg))
+        _v_fii = _alvos_edit.get("__FIIs__", "")
+        _v_fii_str = f"{_v_fii:.1f}".replace('.', ',') if isinstance(_v_fii, float) and _v_fii > 0 else ""
+        _input_fii = st.text_input("FIIs (classe)", value=_v_fii_str, placeholder="ex: 25,0")
 
         st.markdown("**outros**")
-        _cols_out = st.columns(len(_outros_cfg)) if _outros_cfg else [st]
-        _novos_out = {}
+        _cols_out = st.columns(len(_outros_cfg)) if _outros_cfg else []
+        _inputs_out = {}
         for i, a in enumerate(_outros_cfg):
-            v = _alvos_edit.get(a, 0.0)
-            _novos_out[a] = _cols_out[i].number_input(a, min_value=0.0, max_value=100.0,
-                                                        value=float(v), step=0.5, format="%.1f")
+            v = _alvos_edit.get(a, "")
+            _v_str = f"{v:.1f}".replace('.', ',') if isinstance(v, float) and v > 0 else ""
+            _inputs_out[a] = _cols_out[i].text_input(a, value=_v_str, placeholder="ex: 10,0")
 
-        _soma_nova = sum(_novos_etf.values()) + _alvo_fii_novo + sum(_novos_out.values())
-        if abs(_soma_nova - 100) > 0.01:
-            st.warning(f"⚠️ soma dos alvos: {_soma_nova:.1f}% — ajuste para fechar em 100%")
-        else:
-            st.success(f"✅ soma: {_soma_nova:.1f}%")
-
-        _salvar = st.form_submit_button("💾 salvar configurações")
+        _salvar = st.form_submit_button("salvar")
         if _salvar:
-            _cfg_nova = {**_novos_etf, "__FIIs__": _alvo_fii_novo, **_novos_out}
-            if abs(_soma_nova - 100) > 0.01:
-                st.error(f"soma dos alvos é {_soma_nova:.1f}% — corrija antes de salvar.")
-            else:
-                if salvar_configuracoes(_cfg_nova):
-                    st.session_state["cfg_alvos"] = _cfg_nova
-                    st.success("configurações salvas.")
-                    st.rerun(scope="app")
+            _cfg_nova = {}
+            _ok = True
+            for a, inp in _inputs_etf.items():
+                v = _parse_alvo(inp)
+                if v is None: st.error(f"valor inválido para {a}"); _ok = False
+                else: _cfg_nova[a] = v
+            v_fii = _parse_alvo(_input_fii)
+            if v_fii is None: st.error("valor inválido para FIIs"); _ok = False
+            else: _cfg_nova["__FIIs__"] = v_fii
+            for a, inp in _inputs_out.items():
+                v = _parse_alvo(inp)
+                if v is None: st.error(f"valor inválido para {a}"); _ok = False
+                else: _cfg_nova[a] = v
+            if _ok:
+                _soma_nova = sum(_cfg_nova[k] for k in _cfg_nova if k != "__FIIs__") + _cfg_nova.get("__FIIs__", 0)
+                if abs(_soma_nova - 100) > 0.01:
+                    st.error(f"soma dos alvos: {_soma_nova:.1f}% — ajuste para fechar em 100%")
+                else:
+                    if salvar_configuracoes(_cfg_nova):
+                        st.session_state["cfg_alvos"] = _cfg_nova
+                        st.success("configurações salvas.")
+                        st.rerun(scope="app")
+
+    st.markdown("---")
+
+    # ── resumo ───────────────────────────────────────────────────────────────
+    if _alvos_edit:
+        st.markdown("#### resumo dos alvos")
+        _alvo_fii_cl = _alvos_edit.get("__FIIs__", 0.0)
+        _soma_etfs   = sum(_alvos_edit.get(a, 0) for a in _etfs_cfg)
+        _resumo = {}
+        for a in _etfs_cfg: _resumo[a] = _alvos_edit.get(a, 0)
+        _resumo['FIIs'] = _alvo_fii_cl
+        for a in _outros_cfg: _resumo[a] = _alvos_edit.get(a, 0)
+        _soma_total = sum(_resumo.values())
+        _cor = "🟢" if abs(_soma_total - 100) < 0.01 else "🔴"
+        st.caption(f"{_cor} soma: **{_soma_total:.1f}%**")
+        _cols_r = st.columns(len(_resumo))
+        for i, (k, v) in enumerate(_resumo.items()):
+            _cols_r[i].metric(k, fmt_pct(v))
+        if _n_fiis_cfg > 0 and _alvo_fii_cl > 0:
+            st.caption(f"→ cada FII: {fmt_pct(_alvo_fii_cl / _n_fiis_cfg)} ({_n_fiis_cfg} ativos)")
