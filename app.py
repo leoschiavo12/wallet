@@ -527,10 +527,10 @@ SHEET_CFG  = "configuracoes"
 HEADERS    = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
 
 def ler_configuracoes():
-    """lê alvos do Sheets: retorna dict {ativo: alvo_pct}"""
+    """lê alvos do Sheets: retorna dict {ativo: {min, alvo, max}}"""
     try:
         svc = get_sheets_service()
-        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_CFG}!A:B").execute()
+        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_CFG}!A:D").execute()
         rows = res.get("values", [])
         if len(rows) <= 1:
             return {}
@@ -538,29 +538,35 @@ def ler_configuracoes():
         for row in rows[1:]:
             if len(row) >= 2:
                 try:
-                    cfg[row[0].strip()] = float(str(row[1]).replace(',', '.'))
+                    ativo = row[0].strip()
+                    def _pf(s): return float(str(s).replace(',', '.')) if s else None
+                    cfg[ativo] = {
+                        'min':  _pf(row[1]) if len(row) > 1 else None,
+                        'alvo': _pf(row[2]) if len(row) > 2 else None,
+                        'max':  _pf(row[3]) if len(row) > 3 else None,
+                    }
                 except:
                     pass
         return cfg
-    except Exception as e:
+    except:
         return {}
 
 def salvar_configuracoes(cfg: dict):
-    """salva dict {ativo: alvo_pct} no Sheets, sobrescrevendo tudo"""
+    """salva dict {ativo: {min, alvo, max}} no Sheets"""
     try:
         svc = get_sheets_service()
-        # limpar aba antes de reescrever
-        svc.values().clear(
-            spreadsheetId=SHEET_ID, range=f"{SHEET_CFG}!A:B"
-        ).execute()
-        values = [["ativo", "alvo_pct"]]
-        for ativo, alvo in cfg.items():
-            values.append([ativo, alvo])
+        svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_CFG}!A:D").execute()
+        values = [["ativo", "alvo_min", "alvo_pct", "alvo_max"]]
+        for ativo, banda in cfg.items():
+            values.append([
+                ativo,
+                banda.get('min', ''),
+                banda.get('alvo', ''),
+                banda.get('max', ''),
+            ])
         svc.values().update(
-            spreadsheetId=SHEET_ID,
-            range=f"{SHEET_CFG}!A1",
-            valueInputOption="USER_ENTERED",
-            body={"values": values}
+            spreadsheetId=SHEET_ID, range=f"{SHEET_CFG}!A1",
+            valueInputOption="USER_ENTERED", body={"values": values}
         ).execute()
         return True
     except Exception as e:
@@ -1143,16 +1149,26 @@ with aba_detalhe:
         _max_pct_fii = df_fii_bar['pct'].max()
         _step_fii    = 1
         _x_max_fii   = max(_max_pct_fii * 1.25, _media_fii * 1.5)
-        _alvo_fii_total = _cfg_alvos.get("__FIIs__", 0.0)
-        _meta_fii = (_alvo_fii_total / _n_fiis) if _n_fiis > 0 and _alvo_fii_total > 0 else None
+        _banda_fii_cfg = _cfg_alvos.get("__FIIs__", {}) or {}
+        _alvo_fii_total = _banda_fii_cfg.get('alvo') or 0
+        _min_fii_total  = _banda_fii_cfg.get('min') or 0
+        _max_fii_total  = _banda_fii_cfg.get('max') or 0
+        _meta_fii  = _alvo_fii_total / _n_fiis if _n_fiis > 0 and _alvo_fii_total > 0 else None
+        _min_fii_i = _min_fii_total  / _n_fiis if _n_fiis > 0 and _min_fii_total  > 0 else None
+        _max_fii_i = _max_fii_total  / _n_fiis if _n_fiis > 0 and _max_fii_total  > 0 else None
+        if _min_fii_i and _max_fii_i:
+            fig_fii_bar.add_shape(
+                type='rect', x0=_min_fii_i, x1=_max_fii_i, y0=-0.5, y1=_n_fiis - 0.5,
+                fillcolor='rgba(255,255,255,0.06)', line=dict(width=0)
+            )
         if _meta_fii:
             fig_fii_bar.add_shape(
                 type='line', x0=_meta_fii, x1=_meta_fii, y0=-0.5, y1=_n_fiis - 0.5,
-                line=dict(color='rgba(255,255,255,0.6)', width=2.5, dash='dot')
+                line=dict(color='rgba(255,255,255,0.6)', width=2, dash='dot')
             )
             fig_fii_bar.add_annotation(
                 x=_meta_fii, y=_n_fiis - 0.5,
-                text=f"meta {fmt_pct(_meta_fii)}",
+                text=f"alvo {fmt_pct(_meta_fii)}",
                 showarrow=False, xanchor='left', xshift=6,
                 font=dict(size=10, color='rgba(255,255,255,0.6)')
             )
@@ -1290,17 +1306,24 @@ with aba_detalhe:
             hovertemplate='%{customdata}<extra></extra>',
             customdata=hover_etf_bar,
         ))
-        # linha de alvo por ativo (segmento horizontal)
+        # banda + alvo por ativo
         for i, row in df_etf_bar.reset_index(drop=True).iterrows():
-            _alvo_etf_ativo = _cfg_alvos.get(row['Ativo'], None)
-            if _alvo_etf_ativo:
+            _banda_etf = (_cfg_alvos.get(row['Ativo'], {}) or {})
+            _alvo_e = _banda_etf.get('alvo')
+            _min_e  = _banda_etf.get('min')
+            _max_e  = _banda_etf.get('max')
+            if _min_e and _max_e:
                 fig_etf_bar.add_shape(
-                    type='line',
-                    x0=_alvo_etf_ativo, x1=_alvo_etf_ativo,
-                    y0=i - 0.4, y1=i + 0.4,
-                    line=dict(color='rgba(255,255,255,0.8)', width=2.5, dash='dot')
+                    type='rect', x0=_min_e, x1=_max_e, y0=i-0.4, y1=i+0.4,
+                    fillcolor='rgba(255,255,255,0.08)', line=dict(width=0)
                 )
-        _x_max_etf = max(df_etf_bar['pct'].max(), max((_cfg_alvos.get(a,0) for a in df_etf_bar['Ativo']), default=0)) * 1.25
+            if _alvo_e:
+                fig_etf_bar.add_shape(
+                    type='line', x0=_alvo_e, x1=_alvo_e, y0=i-0.4, y1=i+0.4,
+                    line=dict(color='rgba(255,255,255,0.8)', width=2, dash='dot')
+                )
+        _all_alvos_etf = [(_cfg_alvos.get(a,{}) or {}).get('max') or 0 for a in df_etf_bar['Ativo']]
+        _x_max_etf = max(df_etf_bar['pct'].max(), max(_all_alvos_etf, default=0)) * 1.25
         fig_etf_bar.update_layout(
             height=max(200, _n_etfs * 50),
             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
@@ -1846,79 +1869,113 @@ with aba_lanc:
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
-    _ativos_cfg  = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
-    _fiis_cfg    = [a for a in _ativos_cfg if a in FII_INFO]
-    _etfs_cfg    = [a for a in _ativos_cfg if a in ['IVVB11','DIVO11','PKIN11','LFTB11']]
-    _td_cfg      = [a for a in _ativos_cfg if a in ['Renda+ 2050'] ]
-    _cripto_cfg  = [a for a in _ativos_cfg if a in ['BTC']]
-    _alvos_edit  = dict(st.session_state.get("cfg_alvos", {}))
-    _n_fiis_cfg  = len(_fiis_cfg)
+    _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
+    _fiis_cfg   = [a for a in _ativos_cfg if a in FII_INFO]
+    _etfs_cfg   = [a for a in _ativos_cfg if a in ['IVVB11','DIVO11','PKIN11','LFTB11']]
+    _td_cfg     = [a for a in _ativos_cfg if a in ['Renda+ 2050']]
+    _cripto_cfg = [a for a in _ativos_cfg if a in ['BTC']]
+    _alvos_edit = dict(st.session_state.get("cfg_alvos", {}))
+    _n_fiis_cfg = len(_fiis_cfg)
 
     def _parse_alvo(s):
         try: return float(str(s).replace(',', '.').strip())
         except: return None
 
-    def _fmt_v(v):
-        return f"{v:.1f}".replace('.', ',') if isinstance(v, (int, float)) and v > 0 else ""
+    def _fmt_v(cfg_ativo, campo):
+        v = cfg_ativo.get(campo) if isinstance(cfg_ativo, dict) else None
+        return f"{v:.1f}".replace('.', ',') if v is not None else ""
+
+    def _inputs_banda(container, ativo, cfg):
+        """renderiza 3 colunas mín/alvo/máx para um ativo"""
+        _banda = cfg.get(ativo, {})
+        c1, c2, c3 = container.columns(3)
+        c1.caption("mín")
+        c2.caption("alvo")
+        c3.caption("máx")
+        _min  = c1.text_input(f"{ativo}_min",  value=_fmt_v(_banda, 'min'),  label_visibility="collapsed", placeholder="ex: 18,0", key=f"min_{ativo}")
+        _alvo = c2.text_input(f"{ativo}_alvo", value=_fmt_v(_banda, 'alvo'), label_visibility="collapsed", placeholder="ex: 20,0", key=f"alvo_{ativo}")
+        _max  = c3.text_input(f"{ativo}_max",  value=_fmt_v(_banda, 'max'),  label_visibility="collapsed", placeholder="ex: 22,0", key=f"max_{ativo}")
+        return _min, _alvo, _max
 
     # ── resumo por classe (topo) ──────────────────────────────────────────────
     if _alvos_edit:
-        _alvo_fii_cl  = _alvos_edit.get("__FIIs__", 0.0)
-        _soma_etfs_r  = sum(_alvos_edit.get(a, 0) for a in _etfs_cfg)
-        _soma_td_r    = sum(_alvos_edit.get(a, 0) for a in _td_cfg)
-        _soma_cri_r   = sum(_alvos_edit.get(a, 0) for a in _cripto_cfg)
+        def _alvo_c(ativo): return (_alvos_edit.get(ativo, {}) or {}).get('alvo') or 0
+        _alvo_fii_cl = (_alvos_edit.get("__FIIs__", {}) or {}).get('alvo') or 0
+        _soma_etfs_r = sum(_alvo_c(a) for a in _etfs_cfg)
+        _soma_td_r   = sum(_alvo_c(a) for a in _td_cfg)
+        _soma_cri_r  = sum(_alvo_c(a) for a in _cripto_cfg)
         _soma_total_r = _soma_etfs_r + _alvo_fii_cl + _soma_td_r + _soma_cri_r
         _cor_r = "🟢" if abs(_soma_total_r - 100) < 0.01 else "🔴"
-        st.caption(f"{_cor_r} soma: **{_soma_total_r:.1f}%**")
-        _res_classes = {"ETFs": _soma_etfs_r, "FIIs": _alvo_fii_cl,
-                        "Tesouro Direto": _soma_td_r, "Cripto": _soma_cri_r}
+        st.caption(f"{_cor_r} soma dos alvos: **{_soma_total_r:.1f}%**")
         _cols_rc = st.columns(4)
-        for i, (k, v) in enumerate(_res_classes.items()):
-            _cols_rc[i].metric(k, fmt_pct(v))
+        _cols_rc[0].metric("ETFs", fmt_pct(_soma_etfs_r))
+        _cols_rc[1].metric("FIIs", fmt_pct(_alvo_fii_cl))
+        _cols_rc[2].metric("Tesouro Direto", fmt_pct(_soma_td_r))
+        _cols_rc[3].metric("Cripto", fmt_pct(_soma_cri_r))
         if _n_fiis_cfg > 0 and _alvo_fii_cl > 0:
             st.caption(f"→ cada FII: {fmt_pct(_alvo_fii_cl / _n_fiis_cfg)} ({_n_fiis_cfg} ativos)")
         st.markdown("---")
 
     # ── formulário ───────────────────────────────────────────────────────────
-    st.caption("insira os valores em % do total da carteira. a soma deve fechar em 100%.")
+    st.caption("valores em % do total da carteira · a soma dos alvos deve fechar em 100%")
     with st.form("form_cfg"):
         st.markdown("**ETFs**")
-        _cols_etf = st.columns(len(_etfs_cfg)) if _etfs_cfg else []
-        _inputs_etf = {}
-        for i, a in enumerate(_etfs_cfg):
-            _inputs_etf[a] = _cols_etf[i].text_input(a, value=_fmt_v(_alvos_edit.get(a,0)), placeholder="ex: 20,0")
+        _inp_etf = {}
+        for a in _etfs_cfg:
+            st.markdown(f"*{a}*")
+            _inp_etf[a] = _inputs_banda(st, a, _alvos_edit)
 
         st.markdown("**FIIs** *(alvo da classe — dividido igualmente entre os {n} ativos)*".format(n=_n_fiis_cfg))
-        _input_fii = st.text_input("FIIs (classe)", value=_fmt_v(_alvos_edit.get("__FIIs__",0)), placeholder="ex: 25,0")
+        _banda_fii = _alvos_edit.get("__FIIs__", {}) or {}
+        _cf1, _cf2, _cf3 = st.columns(3)
+        _cf1.caption("mín"); _cf2.caption("alvo"); _cf3.caption("máx")
+        _fii_min  = _cf1.text_input("fii_min",  value=_fmt_v(_banda_fii,'min'),  label_visibility="collapsed", placeholder="ex: 22,0", key="min___FIIs__")
+        _fii_alvo = _cf2.text_input("fii_alvo", value=_fmt_v(_banda_fii,'alvo'), label_visibility="collapsed", placeholder="ex: 25,0", key="alvo___FIIs__")
+        _fii_max  = _cf3.text_input("fii_max",  value=_fmt_v(_banda_fii,'max'),  label_visibility="collapsed", placeholder="ex: 28,0", key="max___FIIs__")
 
         st.markdown("**Tesouro Direto**")
-        _cols_td = st.columns(len(_td_cfg)) if _td_cfg else []
-        _inputs_td = {}
-        for i, a in enumerate(_td_cfg):
-            _inputs_td[a] = _cols_td[i].text_input(a, value=_fmt_v(_alvos_edit.get(a,0)), placeholder="ex: 20,0")
+        _inp_td = {}
+        for a in _td_cfg:
+            st.markdown(f"*{a}*")
+            _inp_td[a] = _inputs_banda(st, a, _alvos_edit)
 
         st.markdown("**Cripto**")
-        _cols_cri = st.columns(len(_cripto_cfg)) if _cripto_cfg else []
-        _inputs_cri = {}
-        for i, a in enumerate(_cripto_cfg):
-            _inputs_cri[a] = _cols_cri[i].text_input(a, value=_fmt_v(_alvos_edit.get(a,0)), placeholder="ex: 10,0")
+        _inp_cri = {}
+        for a in _cripto_cfg:
+            st.markdown(f"*{a}*")
+            _inp_cri[a] = _inputs_banda(st, a, _alvos_edit)
 
         _salvar = st.form_submit_button("salvar")
         if _salvar:
             _cfg_nova = {}
             _ok = True
-            for grp in [_inputs_etf, _inputs_td, _inputs_cri]:
-                for a, inp in grp.items():
-                    v = _parse_alvo(inp)
-                    if v is None: st.error(f"valor inválido para {a}"); _ok = False
-                    else: _cfg_nova[a] = v
-            v_fii = _parse_alvo(_input_fii)
-            if v_fii is None: st.error("valor inválido para FIIs"); _ok = False
-            else: _cfg_nova["__FIIs__"] = v_fii
+            def _parse_banda(mn, al, mx, nome):
+                vmin  = _parse_alvo(mn)
+                valvo = _parse_alvo(al)
+                vmax  = _parse_alvo(mx)
+                if al.strip() and valvo is None:
+                    st.error(f"valor inválido para {nome}"); return None, False
+                if mn.strip() and vmin is None:
+                    st.error(f"mín inválido para {nome}"); return None, False
+                if mx.strip() and vmax is None:
+                    st.error(f"máx inválido para {nome}"); return None, False
+                return {'min': vmin, 'alvo': valvo, 'max': vmax}, True
+
+            for grp in [_inp_etf, _inp_td, _inp_cri]:
+                for a, (mn, al, mx) in grp.items():
+                    banda, ok = _parse_banda(mn, al, mx, a)
+                    if not ok: _ok = False
+                    else: _cfg_nova[a] = banda
+
+            banda_fii, ok_fii = _parse_banda(_fii_min, _fii_alvo, _fii_max, "FIIs")
+            if not ok_fii: _ok = False
+            else: _cfg_nova["__FIIs__"] = banda_fii
+
             if _ok:
-                _soma_nova = sum(v for k,v in _cfg_nova.items() if k != "__FIIs__") + _cfg_nova.get("__FIIs__", 0)
-                if abs(_soma_nova - 100) > 0.01:
-                    st.error(f"soma: {_soma_nova:.1f}% — ajuste para fechar em 100%")
+                _soma_alvos = sum((v.get('alvo') or 0) for k,v in _cfg_nova.items() if k != "__FIIs__")
+                _soma_alvos += (_cfg_nova.get("__FIIs__", {}) or {}).get('alvo') or 0
+                if abs(_soma_alvos - 100) > 0.01:
+                    st.error(f"soma dos alvos: {_soma_alvos:.1f}% — ajuste para fechar em 100%")
                 else:
                     if salvar_configuracoes(_cfg_nova):
                         st.session_state["cfg_alvos"] = _cfg_nova
