@@ -52,7 +52,7 @@ def obter_precos_b3(tickers_lista):
         return {t.upper(): 0.0 for t in tickers_lista}
 
 @st.cache_data(ttl=3600)
-def obter_dividendos_mes_anterior(df_lancamentos_json, _v=2):
+def obter_dividendos_mes_anterior(df_lancamentos_json):
     import pandas as pd
     from datetime import date
     hoje    = date.today()
@@ -95,20 +95,12 @@ def obter_dividendos_mes_anterior(df_lancamentos_json, _v=2):
             for data_ex, val_cota in divs_ex.items():
                 try:
                     data_ex_date = pd.Timestamp(data_ex).normalize()
+                    ticker_ops = fii if fii in df_lanc['Ativo'].values else fii_norm
                     ops = df_lanc[
-                        (df_lanc['Ativo'] == fii) &
+                        (df_lanc['Ativo'] == ticker_ops) &
                         (df_lanc['data_dt'].dt.normalize() < data_ex_date)
                     ]
-                    if ops.empty and fii != fii_norm:
-                        ops = df_lanc[
-                            (df_lanc['Ativo'] == fii_norm) &
-                            (df_lanc['data_dt'].dt.normalize() < data_ex_date)
-                        ]
                     qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
-                    if fii == 'MXRF11':
-                        st.sidebar.write(f"MXRF11 data_ex_date={data_ex_date} qtd={qtd_na_data} ops={len(ops)}")
-                        for _, r in ops.iterrows():
-                            st.sidebar.write(f"  {r['Data']} {r['Tipo']} {r['Quantidade']} sinal={r['sinal']}")
                     if qtd_na_data > 0:
                         val_total = float(val_cota) * qtd_na_data
                         if fii_norm not in detalhes:
@@ -116,8 +108,8 @@ def obter_dividendos_mes_anterior(df_lancamentos_json, _v=2):
                         detalhes[fii_norm]['por_cota'] += float(val_cota)
                         detalhes[fii_norm]['total']    += val_total
                         total += val_total
-                except Exception as e:
-                    st.sidebar.write(f"ERRO {fii}: {e}")
+                except:
+                    continue
         except:
             continue
 
@@ -823,7 +815,6 @@ if "cfg_alvos" not in st.session_state:
     st.session_state["cfg_alvos"] = ler_configuracoes()
 _cfg_alvos = st.session_state["cfg_alvos"]
 
-# remover diagnóstico VIUR11 (não mais necessário)
 
 # preços atuais — cacheados por 1h via @st.cache_data em obter_precos_b3
 _todos_b3 = [r['ativo'] for _, r in _posicao.iterrows()
@@ -914,15 +905,6 @@ FII_INFO = {
     'VGIR11': {'tipo': 'papel',   'indexador': 'CDI'},
     'MCCI11': {'tipo': 'papel',   'indexador': 'IPCA'},
     'KNCR11': {'tipo': 'papel',   'indexador': 'CDI'},
-}
-
-# ── Configurações de alocação alvo (será migrado para aba configs no futuro) ─
-ALVO_CLASSE = {
-    'ETF':            40.0,
-    'FII':            25.0,
-    'Tesouro Direto': 20.0,
-    'Cripto':         10.0,
-    # Tesouro Selic 2031 = 0% (sendo zerado)
 }
 
 aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes", "⚙️ configurações"])
@@ -1068,7 +1050,7 @@ with aba_detalhe:
                      7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
 
         lanc_json = _lanc_json_cached()
-        div_total, div_detalhe = obter_dividendos_mes_anterior(lanc_json, _v=2)
+        div_total, div_detalhe = obter_dividendos_mes_anterior(lanc_json)
 
         df_fii = df[df['Classe'] == 'FII'].copy()
         total_fii = df_fii['Total Atual'].sum()
@@ -1648,20 +1630,35 @@ with aba_detalhe:
 
 
         # ── alocação por classe ───────────────────────────────────────────────
-        st.subheader("alocação por classe")
+        _alvo_por_classe = {}
+        if _cfg_alvos:
+            _etfs_list = ['IVVB11','DIVO11','PKIN11','LFTB11']
+            _alvo_por_classe['ETF']            = sum((_get_banda(_cfg_alvos, a).get('alvo') or 0) for a in _etfs_list)
+            _alvo_por_classe['FII']            = (_get_banda(_cfg_alvos, '__FIIs__').get('alvo') or 0)
+            _alvo_por_classe['Tesouro Direto'] = (_get_banda(_cfg_alvos, 'Renda+ 2050').get('alvo') or 0)
+            _alvo_por_classe['Cripto']         = (_get_banda(_cfg_alvos, 'BTC').get('alvo') or 0)
+
         linhas_resumo = []
-        for cls, alvo in ALVO_CLASSE.items():
+        for cls in ['ETF', 'FII', 'Tesouro Direto', 'Cripto']:
             total_cls = df[df['Classe'] == cls]['Total Atual'].sum()
             atual_pct = total_cls / total_geral * 100 if total_geral > 0 else 0
-            desvio    = atual_pct - alvo
-            semaforo  = "🟡" if abs(desvio) < 2 else ("🔴" if desvio < 0 else "🟢")
+            alvo      = _alvo_por_classe.get(cls)
+            if alvo:
+                desvio   = atual_pct - alvo
+                semaforo = "🟡" if abs(desvio) < 2 else ("🔴" if desvio < 0 else "🟢")
+                alvo_str = fmt_pct(alvo)
+                desv_str = f"{'+' if desvio >= 0 else ''}{fmt_pct(desvio)}"
+            else:
+                semaforo = "—"
+                alvo_str = "—"
+                desv_str = "—"
             linhas_resumo.append({
-                'classe':  cls,
-                'alvo':    f"{fmt_pct(alvo)}".replace('.', ','),
-                'atual':   f"{fmt_pct(atual_pct)}".replace('.', ','),
-                'desvio':  f"{'+' if desvio >= 0 else ''}{fmt_pct(desvio)}".replace('.', ','),
-                'status':  semaforo,
-                'total':   formatar_brl(total_cls),
+                'classe': cls,
+                'alvo':   alvo_str,
+                'atual':  fmt_pct(atual_pct),
+                'desvio': desv_str,
+                'status': semaforo,
+                'total':  formatar_brl(total_cls),
             })
         df_resumo_view = pd.DataFrame(linhas_resumo)
         cfg_res = {c: st.column_config.TextColumn(c, alignment="center") for c in df_resumo_view.columns}
