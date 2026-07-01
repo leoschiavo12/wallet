@@ -93,26 +93,31 @@ def obter_dividendos_mes_anterior(df_lancamentos_json, _v=2):
                 continue
 
             for data_ex, val_cota in divs_ex.items():
-                # normalizar data_ex para só data (sem horário) e usar <=
-                # para capturar quem detinha na data-base (inclusive)
-                data_ex_date = pd.Timestamp(data_ex).normalize()
-                ops = df_lanc[
-                    (df_lanc['Ativo'] == fii) &
-                    (df_lanc['data_dt'].dt.normalize() <= data_ex_date)
-                ]
-                if ops.empty and fii != fii_norm:
+                try:
+                    data_ex_date = pd.Timestamp(data_ex).normalize()
                     ops = df_lanc[
-                        (df_lanc['Ativo'] == fii_norm) &
+                        (df_lanc['Ativo'] == fii) &
                         (df_lanc['data_dt'].dt.normalize() <= data_ex_date)
                     ]
-                qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
-                if qtd_na_data > 0:
-                    val_total = float(val_cota) * qtd_na_data
-                    if fii_norm not in detalhes:
-                        detalhes[fii_norm] = {'por_cota': 0.0, 'total': 0.0, 'qtd': qtd_na_data}
-                    detalhes[fii_norm]['por_cota'] += float(val_cota)
-                    detalhes[fii_norm]['total']    += val_total
-                    total += val_total
+                    if ops.empty and fii != fii_norm:
+                        ops = df_lanc[
+                            (df_lanc['Ativo'] == fii_norm) &
+                            (df_lanc['data_dt'].dt.normalize() <= data_ex_date)
+                        ]
+                    qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
+                    if fii == 'MXRF11':
+                        st.sidebar.write(f"MXRF11 data_ex_date={data_ex_date} qtd={qtd_na_data} ops={len(ops)}")
+                        for _, r in ops.iterrows():
+                            st.sidebar.write(f"  {r['Data']} {r['Tipo']} {r['Quantidade']} sinal={r['sinal']}")
+                    if qtd_na_data > 0:
+                        val_total = float(val_cota) * qtd_na_data
+                        if fii_norm not in detalhes:
+                            detalhes[fii_norm] = {'por_cota': 0.0, 'total': 0.0, 'qtd': qtd_na_data}
+                        detalhes[fii_norm]['por_cota'] += float(val_cota)
+                        detalhes[fii_norm]['total']    += val_total
+                        total += val_total
+                except Exception as e:
+                    st.sidebar.write(f"ERRO {fii}: {e}")
         except:
             continue
 
