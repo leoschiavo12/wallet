@@ -1172,18 +1172,18 @@ with aba_detalhe:
         if _min_fii_i and _max_fii_i:
             fig_fii_bar.add_shape(
                 type='rect', x0=_min_fii_i, x1=_max_fii_i, y0=-0.5, y1=_n_fiis - 0.5,
-                fillcolor='rgba(255,255,255,0.06)', line=dict(width=0)
+                fillcolor='rgba(255,255,255,0.04)', line=dict(color='rgba(255,255,255,0.15)', width=1)
             )
         if _meta_fii:
             fig_fii_bar.add_shape(
                 type='line', x0=_meta_fii, x1=_meta_fii, y0=-0.5, y1=_n_fiis - 0.5,
-                line=dict(color='rgba(255,255,255,0.6)', width=2, dash='dot')
+                line=dict(color='#ffffff', width=1.5, dash='dash')
             )
             fig_fii_bar.add_annotation(
                 x=_meta_fii, y=_n_fiis - 0.5,
                 text=f"alvo {fmt_pct(_meta_fii)}",
                 showarrow=False, xanchor='left', xshift=6,
-                font=dict(size=10, color='rgba(255,255,255,0.6)')
+                font=dict(size=10, color='rgba(255,255,255,0.8)')
             )
         fig_fii_bar.update_layout(
             height=max(300, _n_fiis * 28),
@@ -1328,12 +1328,12 @@ with aba_detalhe:
             if _min_e and _max_e:
                 fig_etf_bar.add_shape(
                     type='rect', x0=_min_e, x1=_max_e, y0=i-0.4, y1=i+0.4,
-                    fillcolor='rgba(255,255,255,0.08)', line=dict(width=0)
+                    fillcolor='rgba(255,255,255,0.04)', line=dict(color='rgba(255,255,255,0.15)', width=1)
                 )
             if _alvo_e:
                 fig_etf_bar.add_shape(
                     type='line', x0=_alvo_e, x1=_alvo_e, y0=i-0.4, y1=i+0.4,
-                    line=dict(color='rgba(255,255,255,0.8)', width=2, dash='dot')
+                    line=dict(color='#ffffff', width=2, dash='dash')
                 )
         _all_alvos_etf = [(_cfg_alvos.get(a,{}) or {}).get('max') or 0 for a in df_etf_bar['Ativo']]
         _x_max_etf = max(df_etf_bar['pct'].max(), max(_all_alvos_etf, default=0)) * 1.25
