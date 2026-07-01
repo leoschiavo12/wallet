@@ -1168,7 +1168,7 @@ with aba_detalhe:
             div_cota = div_info.get('por_cota', 0.0)
             # YoC = div/cota ÷ preço médio de aquisição (yield on cost)
             yoc_m = (div_cota / pm * 100) if pm and pm > 0 and div_cota > 0 else None
-            yoc_a = ((1 + yoc_m/100)**12 - 1)*100 if yoc_m else None
+            yoc_a = yoc_m * 12 if yoc_m else None
             linhas_fii.append({
                 'ativo':      t,
                 'tipo':       info['tipo'],
@@ -1389,7 +1389,6 @@ with aba_detalhe:
     # ══════════════════════════════════════════════════════════════════════════
     with sub_tesouro:
         df_td = df[df['Classe'] == 'Tesouro Direto'].copy()
-        st.subheader("tesouro direto")
 
         lanc_all = _df_lanc_raw
         for _, row in df_td.iterrows():
@@ -1419,7 +1418,7 @@ with aba_detalhe:
                 card_valorizacao(c3, valorizacao, valorizacao_pct)
             else:
                 c3.metric("valorização", "—")
-            c4.metric(f"total  ·  ({_qtd_fmt})", formatar_brl(total_atual))
+            c4.metric(f"total  ·  ({_qtd_fmt})", abreviar_rs(total_atual))
             c5.metric("holding ponderado", fmt_holding(_td_holding))
 
             if 'preco_renda_auto' in st.session_state:
