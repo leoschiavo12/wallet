@@ -521,9 +521,56 @@ def get_sheets_service():
     )
     return build("sheets", "v4", credentials=creds).spreadsheets()
 
-SHEET_ID  = st.secrets["google_sheets"]["spreadsheet_id"]
-SHEET_TAB = "lancamentos"
-HEADERS   = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
+SHEET_ID   = st.secrets["google_sheets"]["spreadsheet_id"]
+SHEET_TAB  = "lancamentos"
+SHEET_CFG  = "configuracoes"
+HEADERS    = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
+
+def ler_configuracoes():
+    """lê alvos do Sheets: retorna dict {ativo: alvo_pct}"""
+    try:
+        svc = get_sheets_service()
+        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_CFG}!A:B").execute()
+        rows = res.get("values", [])
+        if len(rows) <= 1:
+            return {}
+        cfg = {}
+        for row in rows[1:]:
+            if len(row) >= 2:
+                try:
+                    cfg[row[0].strip()] = float(str(row[1]).replace(',', '.'))
+                except:
+                    pass
+        return cfg
+    except Exception as e:
+        return {}
+
+def salvar_configuracoes(cfg: dict):
+    """salva dict {ativo: alvo_pct} no Sheets, sobrescrevendo tudo"""
+    try:
+        svc = get_sheets_service()
+        values = [["ativo", "alvo_pct"]]
+        for ativo, alvo in cfg.items():
+            values.append([ativo, alvo])
+        svc.values().update(
+            spreadsheetId=SHEET_ID,
+            range=f"{SHEET_CFG}!A1",
+            valueInputOption="USER_ENTERED",
+            body={"values": values}
+        ).execute()
+        # limpar linhas extras
+        total_linhas = len(values)
+        sheet_id_real = _get_sheet_id(svc, SHEET_CFG)
+        svc.batchUpdate(spreadsheetId=SHEET_ID, body={"requests": [
+            {"deleteDimension": {"range": {
+                "sheetId": sheet_id_real, "dimension": "ROWS",
+                "startIndex": total_linhas, "endIndex": 1000
+            }}}
+        ]}).execute()
+        return True
+    except Exception as e:
+        st.error(f"erro ao salvar: {e}")
+        return False
 
 def ler_lancamentos(_versao=0):
     try:
@@ -750,6 +797,11 @@ _df_lanc_raw = st.session_state["_df_lanc_raw_cached"]
 
 # calcular posição atual
 _posicao = calcular_posicao(_df_lanc_raw)
+
+# carregar alvos do Sheets
+if "cfg_alvos" not in st.session_state:
+    st.session_state["cfg_alvos"] = ler_configuracoes()
+_cfg_alvos = st.session_state["cfg_alvos"]
 
 # remover diagnóstico VIUR11 (não mais necessário)
 
@@ -1266,7 +1318,6 @@ with aba_detalhe:
 
             st.markdown("---")
 
-        st.info("⚙️ % alvo por ativo será configurado na aba **configurações** — desvios aparecerão aqui quando disponível.", icon="ℹ️")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: CRIPTO
@@ -1534,7 +1585,6 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        st.info("⚙️ % alvo será vinculado à aba **configurações** quando criada. valores abaixo usam alocação padrão da estratégia.", icon="ℹ️")
 
         # ── alocação por classe ───────────────────────────────────────────────
         st.subheader("alocação por classe")
@@ -1775,12 +1825,79 @@ with aba_lanc:
     aba_lancamentos_fragment()
 
 
-# ── Aba configurações (esqueleto) ─────────────────────────────────────────────
+# ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
-    st.subheader("⚙️ configurações")
-    st.caption("em construção.")
+    # lista de ativos da carteira atual
+    _ativos_cfg   = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
+    _fiis_cfg     = [a for a in _ativos_cfg if a in FII_INFO]
+    _etfs_cfg     = [a for a in _ativos_cfg if a in ['IVVB11','DIVO11','PKIN11','LFTB11']]
+    _outros_cfg   = [a for a in _ativos_cfg if a not in _fiis_cfg and a not in _etfs_cfg]
+
+    _alvos_edit   = dict(st.session_state.get("cfg_alvos", {}))
+
+    # ── resumo atual ─────────────────────────────────────────────────────────
+    st.markdown("#### resumo da carteira")
+    _soma_alvos = sum(_alvos_edit.values()) if _alvos_edit else 0.0
+    _n_fiis_cfg = len(_fiis_cfg)
+    _alvo_fii_classe = _alvos_edit.get("__FIIs__", 0.0)
+    _alvo_fii_ind    = _alvo_fii_classe / _n_fiis_cfg if _n_fiis_cfg > 0 else 0.0
+
+    _resumo_classes = {}
+    for a in _etfs_cfg:
+        _resumo_classes['ETFs'] = _resumo_classes.get('ETFs', 0) + _alvos_edit.get(a, 0)
+    _resumo_classes['FIIs']           = _alvo_fii_classe
+    _resumo_classes['Renda+ 2050']    = _alvos_edit.get('Renda+ 2050', 0)
+    _resumo_classes['BTC']            = _alvos_edit.get('BTC', 0)
+    _resumo_classes['Tesouro Selic']  = _alvos_edit.get('Tesouro Selic 2031', 0)
+
+    _cor_soma = "🟢" if abs(_soma_alvos - 100) < 0.01 else ("🟡" if abs(_soma_alvos - 100) < 5 else "🔴")
+    st.caption(f"{_cor_soma} soma dos alvos: **{_soma_alvos:.1f}%** (meta: 100%)")
+
+    _cols_res = st.columns(len(_resumo_classes))
+    for i, (classe, pct) in enumerate(_resumo_classes.items()):
+        _cols_res[i].metric(classe, fmt_pct(pct))
+
     st.markdown("---")
-    st.markdown("**alocação alvo por classe** *(em breve)*")
-    st.markdown("**alocação alvo por ativo** *(em breve)*")
-    st.markdown("**meta de aporte mensal** *(em breve)*")
-    st.markdown("**metas financeiras** *(em breve)*")
+
+    # ── formulário de edição ─────────────────────────────────────────────────
+    st.markdown("#### alvos por ativo")
+
+    with st.form("form_cfg"):
+        st.markdown("**ETFs**")
+        _cols_etf = st.columns(len(_etfs_cfg)) if _etfs_cfg else [st]
+        _novos_etf = {}
+        for i, a in enumerate(_etfs_cfg):
+            v = _alvos_edit.get(a, 0.0)
+            _novos_etf[a] = _cols_etf[i].number_input(a, min_value=0.0, max_value=100.0,
+                                                        value=float(v), step=0.5, format="%.1f")
+
+        st.markdown("**FIIs** *(alvo da classe — dividido igualmente entre os ativos)*")
+        _alvo_fii_novo = st.number_input("FIIs (classe)", min_value=0.0, max_value=100.0,
+                                          value=float(_alvo_fii_classe), step=0.5, format="%.1f")
+        if _n_fiis_cfg > 0:
+            st.caption(f"→ {fmt_pct(_alvo_fii_novo / _n_fiis_cfg)} por FII ({_n_fiis_cfg} ativos)")
+
+        st.markdown("**outros**")
+        _cols_out = st.columns(len(_outros_cfg)) if _outros_cfg else [st]
+        _novos_out = {}
+        for i, a in enumerate(_outros_cfg):
+            v = _alvos_edit.get(a, 0.0)
+            _novos_out[a] = _cols_out[i].number_input(a, min_value=0.0, max_value=100.0,
+                                                        value=float(v), step=0.5, format="%.1f")
+
+        _soma_nova = sum(_novos_etf.values()) + _alvo_fii_novo + sum(_novos_out.values())
+        if abs(_soma_nova - 100) > 0.01:
+            st.warning(f"⚠️ soma dos alvos: {_soma_nova:.1f}% — ajuste para fechar em 100%")
+        else:
+            st.success(f"✅ soma: {_soma_nova:.1f}%")
+
+        _salvar = st.form_submit_button("💾 salvar configurações")
+        if _salvar:
+            _cfg_nova = {**_novos_etf, "__FIIs__": _alvo_fii_novo, **_novos_out}
+            if abs(_soma_nova - 100) > 0.01:
+                st.error(f"soma dos alvos é {_soma_nova:.1f}% — corrija antes de salvar.")
+            else:
+                if salvar_configuracoes(_cfg_nova):
+                    st.session_state["cfg_alvos"] = _cfg_nova
+                    st.success("configurações salvas.")
+                    st.rerun(scope="app")
