@@ -2180,8 +2180,10 @@ with aba_aportes:
 
         # ── tabela de desvios ─────────────────────────────────────────────────
         st.markdown("**desvios atuais**")
-        _total_alocado = sum(_sugestao.values())
-        _total_futuro_real = total_geral + _total_alocado  # total_geral já inclui todos os ativos
+        _total_alocado     = sum(_sugestao.values())
+        # denominador = soma atual dos ativos simulados + o que foi alocado
+        _total_sim_atual   = df_sim['atual_rs'].sum()
+        _total_futuro_real = _total_sim_atual + _total_alocado
         _rows_disp = []
         for _, row in df_sim.iterrows():
             _sug = _sugestao.get(row['ativo'], 0.0)
