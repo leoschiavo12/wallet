@@ -1975,8 +1975,8 @@ with aba_aportes:
 
         linhas_sim = []
         for ativo in _ativos_sim:
-            _pos_row = _posicao[_posicao['ativo'] == ativo]
-            _total_atual_a = float(_pos_row['total_atual'].iloc[0]) if not _pos_row.empty else 0.0
+            _df_row = df[df['Ativo'] == ativo]
+            _total_atual_a = float(_df_row['Total Atual'].iloc[0]) if not _df_row.empty else 0.0
             _alvo_pct = _alvo_sim(ativo)
             _min_pct  = _min_sim(ativo)
             _alvo_rs  = _alvo_pct / 100 * _total_futuro
