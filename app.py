@@ -1930,18 +1930,14 @@ with aba_aportes:
     st.markdown("#### simulador de aportes")
 
     # ── inputs ────────────────────────────────────────────────────────────────
-    col_v1, col_v2, col_v3 = st.columns(3)
-    _val_aporte_str  = col_v1.text_input("aporte mensal (R$)", value="1800,00", placeholder="ex: 1800,00")
-    _val_divs_str    = col_v2.text_input("dividendos FIIs recebidos (R$)", value="0,00", placeholder="ex: 143,93")
-    _val_extra_str   = col_v3.text_input("valor extra (R$)", value="", placeholder="opcional")
+    col_v1, _ = st.columns([1, 2])
+    _val_aporte_str = col_v1.text_input("aporte mensal (R$)", value="1800,00", placeholder="ex: 1800,00")
 
     def _pv(s):
         try: return float(str(s).replace('R$','').replace('.','').replace(',','.').strip())
         except: return 0.0
 
-    _total_disponivel = _pv(_val_aporte_str) + _pv(_val_divs_str) + _pv(_val_extra_str)
-
-    st.metric("total disponível", formatar_brl(_total_disponivel))
+    _total_disponivel = _pv(_val_aporte_str)
     st.markdown("---")
 
     if _total_disponivel <= 0:
@@ -1999,20 +1995,44 @@ with aba_aportes:
         df_sim = pd.DataFrame(linhas_sim)
         df_sim = df_sim.sort_values('prioridade', ascending=False)
 
-        # ── alocação sugerida ─────────────────────────────────────────────────
-        # distribuir o aporte proporcionalmente ao desvio negativo
+        # ── alocação sugerida com restrição de inteiro de cotas ─────────────
+        _FRACIONADOS = {'Renda+ 2050', 'BTC'}  # permitem compra fracionada
         _com_desvio_neg = df_sim[df_sim['desvio_rs'] < 0].copy()
-        _restante = _total_disponivel
 
         if _com_desvio_neg.empty:
-            st.success("✅ carteira equilibrada — nenhum ativo com desvio negativo significativo.")
+            st.success("✅ carteira equilibrada — nenhum ativo com desvio negativo.")
             _sugestao = {}
         else:
+            # buscar preços atuais
+            _precos_sim = {row['Ativo']: row['preco_unit'] for _, row in df.iterrows()}
+
             _soma_desvios = _com_desvio_neg['prioridade'].sum()
             _sugestao = {}
+            _restante = _total_disponivel
+
+            # ordenar por prioridade (maior desvio negativo primeiro)
             for _, row in _com_desvio_neg.iterrows():
+                ativo = row['ativo']
                 _prop = row['prioridade'] / _soma_desvios if _soma_desvios > 0 else 0
-                _sugestao[row['ativo']] = min(_total_disponivel * _prop, _restante)
+                _valor_ideal = _total_disponivel * _prop
+                _preco = _precos_sim.get(ativo, 0)
+
+                if _preco <= 0:
+                    continue
+
+                if ativo in _FRACIONADOS:
+                    # compra fracionada — valor exato
+                    _valor_compra = min(_valor_ideal, _restante)
+                else:
+                    # inteiro de cotas
+                    _cotas = int(_valor_ideal / _preco)
+                    if _cotas == 0 and _restante >= _preco:
+                        _cotas = 1  # garante pelo menos 1 cota se tiver saldo
+                    _valor_compra = min(_cotas * _preco, _restante)
+
+                if _valor_compra > 0:
+                    _sugestao[ativo] = _valor_compra
+                    _restante -= _valor_compra
 
         # ── tabela de desvios ─────────────────────────────────────────────────
         st.markdown("**desvios atuais**")
@@ -2022,12 +2042,21 @@ with aba_aportes:
             _novo_total = row['atual_rs'] + _sug
             _novo_pct   = _novo_total / _total_futuro * 100 if _total_futuro > 0 else 0
             _status = "🔴 abaixo mín" if row['abaixo_min'] else ("🟢 ok" if row['desvio_rs'] >= 0 else "🟡 desvio")
+            _preco_a = _precos_sim.get(row['ativo'], 0)
+            if _sug > 0 and _preco_a > 0:
+                if row['ativo'] in _FRACIONADOS:
+                    _cotas_str = f"{_sug/_preco_a:.4f}".replace('.', ',')
+                else:
+                    _cotas_str = str(int(round(_sug / _preco_a)))
+            else:
+                _cotas_str = '—'
             _rows_disp.append({
                 'ativo':          row['ativo'],
                 'atual %':        f"{row['atual_pct']:.1f}%".replace('.', ','),
                 'alvo %':         f"{row['alvo_pct']:.1f}%".replace('.', ','),
                 'desvio R$':      ('+' if row['desvio_rs'] >= 0 else '') + formatar_brl(row['desvio_rs']),
                 'status':         _status,
+                'cotas':          _cotas_str,
                 'sugestão R$':    formatar_brl(_sug) if _sug > 0 else '—',
                 'após aporte %':  f"{_novo_pct:.1f}%".replace('.', ','),
             })
@@ -2044,12 +2073,17 @@ with aba_aportes:
             _cols_sug = st.columns(min(len(_ativos_sug), 4))
             for i, (ativo, valor) in enumerate(_ativos_sug.items()):
                 _col_idx = i % len(_cols_sug)
-                _cols_sug[_col_idx].metric(ativo, formatar_brl(valor))
+                _preco_a = _precos_sim.get(ativo, 0)
+                if ativo in _FRACIONADOS:
+                    _label = f"{valor/_preco_a:.4f} un".replace('.', ',') if _preco_a > 0 else "—"
+                else:
+                    _label = f"{int(round(valor/_preco_a))} cotas" if _preco_a > 0 else "—"
+                _cols_sug[_col_idx].metric(ativo, formatar_brl(valor), delta=_label, delta_color="off")
 
             _soma_sug = sum(_sugestao.values())
             _nao_alocado = _total_disponivel - _soma_sug
             if _nao_alocado > 0.5:
-                st.caption(f"não alocado (carteira equilibrada): {formatar_brl(_nao_alocado)}")
+                st.caption(f"↳ não alocado: {formatar_brl(_nao_alocado)} — nenhum ativo com desvio suficiente para mais 1 cota")
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
