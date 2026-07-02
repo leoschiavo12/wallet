@@ -2083,8 +2083,8 @@ with aba_aportes:
                         break
 
         # ── resumo da sugestão (linha 2, acima da tabela) ────────────────────
-        if _sugestao:
-            _ativos_sug = {k: v for k, v in _sugestao.items() if v > 0.5}
+        _ativos_sug = {k: v for k, v in _sugestao.items() if v > 0.5} if _sugestao else {}
+        if _ativos_sug:
             _cols_sug = st.columns(min(len(_ativos_sug), 5))
             for i, (ativo, valor) in enumerate(_ativos_sug.items()):
                 _preco_a = _precos_sim.get(ativo, 0)
@@ -2100,6 +2100,29 @@ with aba_aportes:
             _nao_alocado = _total_disponivel - _soma_sug
             if _nao_alocado > 0.5:
                 st.caption(f"↳ não alocado: {formatar_brl(_nao_alocado)}")
+        else:
+            # valor insuficiente para 1 cota — mostrar próximo na fila
+            _proximo = None
+            _falta   = None
+            for _, row in _com_desvio_neg.iterrows():
+                ativo = row['ativo']
+                _preco = _precos_sim.get(ativo, 0)
+                if _preco <= 0:
+                    continue
+                if ativo in _FRACIONADOS:
+                    _proximo = ativo
+                    _falta = 0.0
+                    break
+                if _preco > _total_disponivel:
+                    if _proximo is None or _preco < _precos_sim.get(_proximo, 9e9):
+                        _proximo = ativo
+                        _falta = _preco - _total_disponivel
+            if _proximo:
+                st.info(
+                    f"valor insuficiente para 1 cota inteira. "
+                    f"próximo na fila: **{_proximo}** "
+                    + (f"· faltam **{formatar_brl(_falta)}** para 1 cota" if _falta else "")
+                )
 
         st.markdown("---")
 
