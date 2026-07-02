@@ -1938,6 +1938,12 @@ with aba_aportes:
         except: return 0.0
 
     _total_disponivel = _pv(_val_aporte_str)
+
+    # ── sugestão resumida (linha 2) ──────────────────────────────────────────
+    if _total_disponivel > 0 and _cfg_alvos:
+        # pré-calcula para exibir antes da tabela — valores serão recalculados abaixo
+        pass  # placeholder — resumo real aparece após cálculo
+
     st.markdown("---")
 
     if _total_disponivel <= 0:
@@ -2034,6 +2040,27 @@ with aba_aportes:
                     _sugestao[ativo] = _valor_compra
                     _restante -= _valor_compra
 
+        # ── resumo da sugestão (linha 2, acima da tabela) ────────────────────
+        if _sugestao:
+            _ativos_sug = {k: v for k, v in _sugestao.items() if v > 0.5}
+            _cols_sug = st.columns(min(len(_ativos_sug), 5))
+            for i, (ativo, valor) in enumerate(_ativos_sug.items()):
+                _preco_a = _precos_sim.get(ativo, 0)
+                if ativo == 'BTC':
+                    _display = abreviar_rs(valor)
+                elif ativo in _FRACIONADOS:
+                    _qtd_f = valor / _preco_a if _preco_a > 0 else 0
+                    _display = f"{_qtd_f:.4f} un".replace('.', ',')
+                else:
+                    _display = f"{int(round(valor/_preco_a))} cotas" if _preco_a > 0 else "—"
+                _cols_sug[i % len(_cols_sug)].metric(ativo, _display)
+            _soma_sug = sum(_sugestao.values())
+            _nao_alocado = _total_disponivel - _soma_sug
+            if _nao_alocado > 0.5:
+                st.caption(f"↳ não alocado: {formatar_brl(_nao_alocado)}")
+
+        st.markdown("---")
+
         # ── tabela de desvios ─────────────────────────────────────────────────
         st.markdown("**desvios atuais**")
         _rows_disp = []
@@ -2056,8 +2083,7 @@ with aba_aportes:
                 'alvo %':         f"{row['alvo_pct']:.1f}%".replace('.', ','),
                 'desvio R$':      ('+' if row['desvio_rs'] >= 0 else '') + formatar_brl(row['desvio_rs']),
                 'status':         _status,
-                'cotas':          _cotas_str,
-                'sugestão R$':    formatar_brl(_sug) if _sug > 0 else '—',
+                'sugestão':       _cotas_str if row['ativo'] != 'BTC' else (abreviar_rs(_sug) if _sug > 0 else '—'),
                 'após aporte %':  f"{_novo_pct:.1f}%".replace('.', ','),
             })
 
@@ -2066,24 +2092,7 @@ with aba_aportes:
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config=_cfg_disp)
 
         # ── resumo da sugestão ────────────────────────────────────────────────
-        if _sugestao:
-            st.markdown("---")
-            st.markdown("**sugestão de alocação**")
-            _ativos_sug = {k: v for k, v in _sugestao.items() if v > 0.5}
-            _cols_sug = st.columns(min(len(_ativos_sug), 4))
-            for i, (ativo, valor) in enumerate(_ativos_sug.items()):
-                _col_idx = i % len(_cols_sug)
-                _preco_a = _precos_sim.get(ativo, 0)
-                if ativo in _FRACIONADOS:
-                    _label = f"{valor/_preco_a:.4f} un".replace('.', ',') if _preco_a > 0 else "—"
-                else:
-                    _label = f"{int(round(valor/_preco_a))} cotas" if _preco_a > 0 else "—"
-                _cols_sug[_col_idx].metric(ativo, formatar_brl(valor), delta=_label, delta_color="off")
 
-            _soma_sug = sum(_sugestao.values())
-            _nao_alocado = _total_disponivel - _soma_sug
-            if _nao_alocado > 0.5:
-                st.caption(f"↳ não alocado: {formatar_brl(_nao_alocado)} — nenhum ativo com desvio suficiente para mais 1 cota")
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
