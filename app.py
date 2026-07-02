@@ -1925,6 +1925,132 @@ with aba_lanc:
     aba_lancamentos_fragment()
 
 
+# ── Aba simular novos aportes ─────────────────────────────────────────────────
+with aba_aportes:
+    st.markdown("#### simulador de aportes")
+
+    # ── inputs ────────────────────────────────────────────────────────────────
+    col_v1, col_v2, col_v3 = st.columns(3)
+    _val_aporte_str  = col_v1.text_input("aporte mensal (R$)", value="1800,00", placeholder="ex: 1800,00")
+    _val_divs_str    = col_v2.text_input("dividendos FIIs recebidos (R$)", value="0,00", placeholder="ex: 143,93")
+    _val_extra_str   = col_v3.text_input("valor extra (R$)", value="", placeholder="opcional")
+
+    def _pv(s):
+        try: return float(str(s).replace('R$','').replace('.','').replace(',','.').strip())
+        except: return 0.0
+
+    _total_disponivel = _pv(_val_aporte_str) + _pv(_val_divs_str) + _pv(_val_extra_str)
+
+    st.metric("total disponível", formatar_brl(_total_disponivel))
+    st.markdown("---")
+
+    if _total_disponivel <= 0:
+        st.info("informe o valor disponível para o aporte.")
+    elif not _cfg_alvos:
+        st.warning("configure os alvos por ativo na aba ⚙️ configurações antes de simular.")
+    else:
+        # ── calcular desvios ──────────────────────────────────────────────────
+        _etfs_sim   = ['IVVB11', 'DIVO11', 'PKIN11', 'LFTB11']
+        _fiis_sim   = [a for a in _posicao['ativo'].tolist() if a in FII_INFO]
+        _outros_sim = ['Renda+ 2050', 'BTC']
+        _n_fiis_sim = len(_fiis_sim)
+
+        # alvo por ativo em %
+        def _alvo_sim(ativo):
+            if ativo in _fiis_sim:
+                return (_get_banda(_cfg_alvos, '__FIIs__').get('alvo') or 0) / _n_fiis_sim if _n_fiis_sim > 0 else 0
+            return _get_banda(_cfg_alvos, ativo).get('alvo') or 0
+
+        def _min_sim(ativo):
+            if ativo in _fiis_sim:
+                return (_get_banda(_cfg_alvos, '__FIIs__').get('min') or 0) / _n_fiis_sim if _n_fiis_sim > 0 else 0
+            return _get_banda(_cfg_alvos, ativo).get('min') or 0
+
+        # todos os ativos relevantes (exceto Tesouro Selic)
+        _ativos_sim = [a for a in (_etfs_sim + _fiis_sim + _outros_sim)
+                       if a in _posicao['ativo'].tolist() or a in _etfs_sim + _outros_sim]
+
+        # patrimônio total atual + aporte
+        _total_futuro = total_geral + _total_disponivel
+
+        linhas_sim = []
+        for ativo in _ativos_sim:
+            _pos_row = _posicao[_posicao['ativo'] == ativo]
+            _total_atual_a = float(_pos_row['total_atual'].iloc[0]) if not _pos_row.empty else 0.0
+            _alvo_pct = _alvo_sim(ativo)
+            _min_pct  = _min_sim(ativo)
+            _alvo_rs  = _alvo_pct / 100 * _total_futuro
+            _min_rs   = _min_pct  / 100 * _total_futuro
+            _desvio_rs = _total_atual_a - (_alvo_pct / 100 * total_geral)
+            _desvio_pct = (_total_atual_a / total_geral * 100 - _alvo_pct) if total_geral > 0 else 0
+            _abaixo_min = _total_atual_a < _min_rs
+
+            linhas_sim.append({
+                'ativo':       ativo,
+                'atual_rs':    _total_atual_a,
+                'atual_pct':   _total_atual_a / total_geral * 100 if total_geral > 0 else 0,
+                'alvo_pct':    _alvo_pct,
+                'desvio_rs':   _desvio_rs,
+                'desvio_pct':  _desvio_pct,
+                'abaixo_min':  _abaixo_min,
+                'prioridade':  -_desvio_rs,  # maior desvio negativo = maior prioridade
+            })
+
+        df_sim = pd.DataFrame(linhas_sim)
+        df_sim = df_sim.sort_values('prioridade', ascending=False)
+
+        # ── alocação sugerida ─────────────────────────────────────────────────
+        # distribuir o aporte proporcionalmente ao desvio negativo
+        _com_desvio_neg = df_sim[df_sim['desvio_rs'] < 0].copy()
+        _restante = _total_disponivel
+
+        if _com_desvio_neg.empty:
+            st.success("✅ carteira equilibrada — nenhum ativo com desvio negativo significativo.")
+            _sugestao = {}
+        else:
+            _soma_desvios = _com_desvio_neg['prioridade'].sum()
+            _sugestao = {}
+            for _, row in _com_desvio_neg.iterrows():
+                _prop = row['prioridade'] / _soma_desvios if _soma_desvios > 0 else 0
+                _sugestao[row['ativo']] = min(_total_disponivel * _prop, _restante)
+
+        # ── tabela de desvios ─────────────────────────────────────────────────
+        st.markdown("**desvios atuais**")
+        _rows_disp = []
+        for _, row in df_sim.iterrows():
+            _sug = _sugestao.get(row['ativo'], 0.0)
+            _novo_total = row['atual_rs'] + _sug
+            _novo_pct   = _novo_total / _total_futuro * 100 if _total_futuro > 0 else 0
+            _status = "🔴 abaixo mín" if row['abaixo_min'] else ("🟢 ok" if row['desvio_rs'] >= 0 else "🟡 desvio")
+            _rows_disp.append({
+                'ativo':          row['ativo'],
+                'atual %':        f"{row['atual_pct']:.1f}%".replace('.', ','),
+                'alvo %':         f"{row['alvo_pct']:.1f}%".replace('.', ','),
+                'desvio R$':      ('+' if row['desvio_rs'] >= 0 else '') + formatar_brl(row['desvio_rs']),
+                'status':         _status,
+                'sugestão R$':    formatar_brl(_sug) if _sug > 0 else '—',
+                'após aporte %':  f"{_novo_pct:.1f}%".replace('.', ','),
+            })
+
+        df_disp = pd.DataFrame(_rows_disp)
+        _cfg_disp = {c: st.column_config.TextColumn(c, alignment="center") for c in df_disp.columns}
+        st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config=_cfg_disp)
+
+        # ── resumo da sugestão ────────────────────────────────────────────────
+        if _sugestao:
+            st.markdown("---")
+            st.markdown("**sugestão de alocação**")
+            _ativos_sug = {k: v for k, v in _sugestao.items() if v > 0.5}
+            _cols_sug = st.columns(min(len(_ativos_sug), 4))
+            for i, (ativo, valor) in enumerate(_ativos_sug.items()):
+                _col_idx = i % len(_cols_sug)
+                _cols_sug[_col_idx].metric(ativo, formatar_brl(valor))
+
+            _soma_sug = sum(_sugestao.values())
+            _nao_alocado = _total_disponivel - _soma_sug
+            if _nao_alocado > 0.5:
+                st.caption(f"não alocado (carteira equilibrada): {formatar_brl(_nao_alocado)}")
+
 # ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
     _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
