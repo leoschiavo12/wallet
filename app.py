@@ -2101,28 +2101,51 @@ with aba_aportes:
             if _nao_alocado > 0.5:
                 st.caption(f"↳ não alocado: {formatar_brl(_nao_alocado)}")
         else:
-            # valor insuficiente — mostrar o primeiro da fila com desvio negativo
-            _proximo = None
-            _falta   = None
-            for _, row in _com_desvio_neg.iterrows():  # já ordenado por score
+            # valor insuficiente para cota inteira do ativo prioritário
+            # 1) tentar comprar o de maior score que o valor consegue cobrir
+            _compra_alt = None
+            _compra_val = 0.0
+            for _, row in _com_desvio_neg.iterrows():  # ordenado por score
                 ativo  = row['ativo']
                 _preco = _precos_sim.get(ativo, 0)
                 if _preco <= 0:
                     continue
-                if ativo in _FRACIONADOS:
-                    _proximo = ativo
-                    _falta   = 0.0
+                if ativo in _FRACIONADOS or _preco <= _total_disponivel:
+                    _compra_alt = ativo
+                    _compra_val = _total_disponivel if ativo in _FRACIONADOS else _preco
                     break
-                # ativo inteiro com desvio negativo e preço acima do disponível
-                _proximo = ativo
-                _falta   = _preco - _total_disponivel
-                break  # pega o primeiro (maior score) apenas
-            if _proximo:
-                st.info(
-                    f"valor insuficiente para 1 cota inteira. "
-                    f"próximo na fila: **{_proximo}** "
-                    + (f"· faltam **{formatar_brl(_falta)}** para 1 cota" if _falta else "")
-                )
+            if _compra_alt:
+                _sugestao[_compra_alt] = _compra_val
+                _preco_a = _precos_sim.get(_compra_alt, 0)
+                if _compra_alt == 'BTC':
+                    _display = abreviar_rs(_compra_val)
+                elif _compra_alt in _FRACIONADOS:
+                    _qtd_f = _compra_val / _preco_a if _preco_a > 0 else 0
+                    _display = f"{_qtd_f:.4f} un".replace('.', ',')
+                else:
+                    _display = f"{int(round(_compra_val/_preco_a))} cotas" if _preco_a > 0 else "—"
+                st.columns([1,3])[0].metric(_compra_alt, _display)
+            else:
+                # nenhum ativo acessível — mostrar o mais próximo de ser comprado
+                _proximo = None
+                _falta   = None
+                _menor_falta = 9e9
+                for _, row in _com_desvio_neg.iterrows():
+                    ativo  = row['ativo']
+                    _preco = _precos_sim.get(ativo, 0)
+                    if _preco <= 0 or ativo in _FRACIONADOS:
+                        continue
+                    _f = _preco - _total_disponivel
+                    if _f < _menor_falta:
+                        _menor_falta = _f
+                        _proximo = ativo
+                        _falta   = _f
+                if _proximo:
+                    st.info(
+                        f"valor insuficiente para qualquer cota inteira. "
+                        f"próximo mais barato com desvio negativo: **{_proximo}** "
+                        f"· faltam **{formatar_brl(_falta)}**"
+                    )
 
         st.markdown("---")
 
