@@ -2101,22 +2101,22 @@ with aba_aportes:
             if _nao_alocado > 0.5:
                 st.caption(f"↳ não alocado: {formatar_brl(_nao_alocado)}")
         else:
-            # valor insuficiente para 1 cota — mostrar próximo na fila
+            # valor insuficiente — mostrar o primeiro da fila com desvio negativo
             _proximo = None
             _falta   = None
-            for _, row in _com_desvio_neg.iterrows():
-                ativo = row['ativo']
+            for _, row in _com_desvio_neg.iterrows():  # já ordenado por score
+                ativo  = row['ativo']
                 _preco = _precos_sim.get(ativo, 0)
                 if _preco <= 0:
                     continue
                 if ativo in _FRACIONADOS:
                     _proximo = ativo
-                    _falta = 0.0
+                    _falta   = 0.0
                     break
-                if _preco > _total_disponivel:
-                    if _proximo is None or _preco < _precos_sim.get(_proximo, 9e9):
-                        _proximo = ativo
-                        _falta = _preco - _total_disponivel
+                # ativo inteiro com desvio negativo e preço acima do disponível
+                _proximo = ativo
+                _falta   = _preco - _total_disponivel
+                break  # pega o primeiro (maior score) apenas
             if _proximo:
                 st.info(
                     f"valor insuficiente para 1 cota inteira. "
