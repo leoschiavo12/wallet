@@ -907,7 +907,7 @@ FII_INFO = {
     'KNCR11': {'tipo': 'papel',   'indexador': 'CDI'},
 }
 
-aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simular novos aportes", "⚙️ configurações"])
+aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simulador", "configurações"])
 
 with aba_dash:
     total_k = abreviar_rs(total_geral)
@@ -1927,8 +1927,6 @@ with aba_lanc:
 
 # ── Aba simular novos aportes ─────────────────────────────────────────────────
 with aba_aportes:
-    st.markdown("#### simulador de aportes")
-
     # ── inputs ────────────────────────────────────────────────────────────────
     col_v1, _ = st.columns([1, 2])
     _val_aporte_str = col_v1.text_input("$ disponível", value="1800,00", placeholder="ex: 1800,00")
@@ -2107,11 +2105,13 @@ with aba_aportes:
 
         # ── tabela de desvios ─────────────────────────────────────────────────
         st.markdown("**desvios atuais**")
+        _total_alocado = sum(_sugestao.values())
+        _total_futuro_real = total_geral + _total_alocado
         _rows_disp = []
         for _, row in df_sim.iterrows():
             _sug = _sugestao.get(row['ativo'], 0.0)
             _novo_total = row['atual_rs'] + _sug
-            _novo_pct   = _novo_total / _total_futuro * 100 if _total_futuro > 0 else 0
+            _novo_pct   = _novo_total / _total_futuro_real * 100 if _total_futuro_real > 0 else 0
             _status = "🔴 abaixo mín" if row['abaixo_min'] else ("🟢 ok" if row['desvio_rs'] >= 0 else "🟡 desvio")
             _preco_a = _precos_sim.get(row['ativo'], 0)
             if _sug > 0 and _preco_a > 0:
