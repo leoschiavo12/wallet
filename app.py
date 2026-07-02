@@ -2016,29 +2016,45 @@ with aba_aportes:
             _sugestao = {}
             _restante = _total_disponivel
 
-            # ordenar por prioridade (maior desvio negativo primeiro)
+            # 1ª passagem: distribuir proporcionalmente ao desvio, arredondando para inteiro
             for _, row in _com_desvio_neg.iterrows():
                 ativo = row['ativo']
                 _prop = row['prioridade'] / _soma_desvios if _soma_desvios > 0 else 0
                 _valor_ideal = _total_disponivel * _prop
                 _preco = _precos_sim.get(ativo, 0)
-
                 if _preco <= 0:
                     continue
-
                 if ativo in _FRACIONADOS:
-                    # compra fracionada — valor exato
                     _valor_compra = min(_valor_ideal, _restante)
                 else:
-                    # inteiro de cotas
                     _cotas = int(_valor_ideal / _preco)
-                    if _cotas == 0 and _restante >= _preco:
-                        _cotas = 1  # garante pelo menos 1 cota se tiver saldo
                     _valor_compra = min(_cotas * _preco, _restante)
-
                 if _valor_compra > 0:
-                    _sugestao[ativo] = _valor_compra
+                    _sugestao[ativo] = _sugestao.get(ativo, 0) + _valor_compra
                     _restante -= _valor_compra
+
+            # 2ª passagem: redistribuir saldo restante por prioridade até não caber mais nenhuma cota
+            _mudou = True
+            while _mudou and _restante > 0.5:
+                _mudou = False
+                for _, row in _com_desvio_neg.iterrows():
+                    ativo = row['ativo']
+                    _preco = _precos_sim.get(ativo, 0)
+                    if _preco <= 0:
+                        continue
+                    if ativo in _FRACIONADOS:
+                        if _restante > 0.01:
+                            _add = min(_restante, _preco * 0.1)  # adiciona fração mínima
+                            _sugestao[ativo] = _sugestao.get(ativo, 0) + _add
+                            _restante -= _add
+                            _mudou = True
+                    else:
+                        if _restante >= _preco:
+                            _sugestao[ativo] = _sugestao.get(ativo, 0) + _preco
+                            _restante -= _preco
+                            _mudou = True
+                    if _restante < 0.5:
+                        break
 
         # ── resumo da sugestão (linha 2, acima da tabela) ────────────────────
         if _sugestao:
