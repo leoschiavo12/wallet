@@ -2142,17 +2142,46 @@ with aba_aportes:
                         _falta   = _f
                 if _proximo:
                     st.info(
-                        f"valor insuficiente para qualquer cota inteira. "
-                        f"próximo mais barato com desvio negativo: **{_proximo}** "
-                        f"· faltam **{formatar_brl(_falta)}**"
+                        f"valor insuficiente para qualquer cota inteira com desvio negativo. "
+                        f"mais próximo: **{_proximo}** · faltam **{formatar_brl(_falta)}**"
                     )
+                else:
+                    # nenhum com desvio negativo acessível — buscar em todos os ativos por menor preço
+                    _proximo2 = None
+                    _falta2   = None
+                    _menor2   = 9e9
+                    for _, row in df_sim.iterrows():
+                        ativo  = row['ativo']
+                        _preco = _precos_sim.get(ativo, 0)
+                        if _preco <= 0 or ativo in _FRACIONADOS:
+                            continue
+                        if _preco <= _total_disponivel:
+                            # consegue comprar — usar direto
+                            _proximo2 = ativo
+                            _falta2   = 0.0
+                            break
+                        _f = _preco - _total_disponivel
+                        if _f < _menor2:
+                            _menor2   = _f
+                            _proximo2 = ativo
+                            _falta2   = _f
+                    if _proximo2 and _falta2 == 0.0:
+                        _sugestao[_proximo2] = _precos_sim.get(_proximo2, 0)
+                        _preco_a = _precos_sim.get(_proximo2, 0)
+                        _display2 = f"1 cota" if _preco_a > 0 else "—"
+                        st.columns([1,3])[0].metric(_proximo2, _display2)
+                    elif _proximo2:
+                        st.info(
+                            f"nenhum ativo acessível com R$ {formatar_brl(_total_disponivel)}. "
+                            f"mais próximo: **{_proximo2}** · faltam **{formatar_brl(_falta2)}**"
+                        )
 
         st.markdown("---")
 
         # ── tabela de desvios ─────────────────────────────────────────────────
         st.markdown("**desvios atuais**")
         _total_alocado = sum(_sugestao.values())
-        _total_futuro_real = total_geral + _total_alocado
+        _total_futuro_real = total_geral + _total_alocado  # total_geral já inclui todos os ativos
         _rows_disp = []
         for _, row in df_sim.iterrows():
             _sug = _sugestao.get(row['ativo'], 0.0)
