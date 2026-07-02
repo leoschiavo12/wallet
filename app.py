@@ -1931,7 +1931,7 @@ with aba_aportes:
 
     # ── inputs ────────────────────────────────────────────────────────────────
     col_v1, _ = st.columns([1, 2])
-    _val_aporte_str = col_v1.text_input("aporte mensal (R$)", value="1800,00", placeholder="ex: 1800,00")
+    _val_aporte_str = col_v1.text_input("$ disponível", value="1800,00", placeholder="ex: 1800,00")
 
     def _pv(s):
         try: return float(str(s).replace('R$','').replace('.','').replace(',','.').strip())
@@ -1995,10 +1995,24 @@ with aba_aportes:
                 'desvio_rs':   _desvio_rs,
                 'desvio_pct':  _desvio_pct,
                 'abaixo_min':  _abaixo_min,
-                'prioridade':  -_desvio_rs,  # maior desvio negativo = maior prioridade
+                'prioridade':  -_desvio_rs,  # base: desvio negativo
+                'pm':          (_df_row['preco_medio'].iloc[0] if not _df_row.empty else 0.0),
             })
 
         df_sim = pd.DataFrame(linhas_sim)
+        # score combinado: desvio + bônus por desconto vs PM
+        _fator_pm_val = float(st.session_state.get("cfg_fator_pm", 0.3))
+        def _score(row):
+            base = row['prioridade']  # -desvio_rs (positivo = abaixo do alvo)
+            if base <= 0:
+                return base  # acima do alvo — não altera
+            pm_row = row.get('pm', 0)
+            preco_row_val = _precos_sim.get(row['ativo'], pm_row) if '_precos_sim' in dir() else pm_row
+            desconto = (pm_row - preco_row_val) / pm_row if pm_row > 0 else 0
+            bonus = base * desconto * _fator_pm_val
+            return base + bonus
+        # _precos_sim ainda não existe aqui — será usado na parte de sugestão
+        # ordenar por desvio apenas; ajuste de score acontece dentro do bloco com preços
         df_sim = df_sim.sort_values('prioridade', ascending=False)
 
         # ── alocação sugerida com restrição de inteiro de cotas ─────────────
@@ -2009,17 +2023,31 @@ with aba_aportes:
             st.success("✅ carteira equilibrada — nenhum ativo com desvio negativo.")
             _sugestao = {}
         else:
-            # buscar preços atuais
+            # buscar preços atuais e PM
             _precos_sim = {row['Ativo']: row['preco_unit'] for _, row in df.iterrows()}
+            _pm_sim     = {row['Ativo']: row['preco_medio'] for _, row in df.iterrows()}
+            _fator_pm   = float(st.session_state.get("cfg_fator_pm", 0.3))
 
-            _soma_desvios = _com_desvio_neg['prioridade'].sum()
+            # recalcular score com desconto vs PM agora que temos _precos_sim
+            def _score_final(row):
+                base = row['prioridade']
+                if base <= 0: return base
+                pm_r = row.get('pm', 0)
+                pr   = _precos_sim.get(row['ativo'], pm_r)
+                desconto = (pm_r - pr) / pm_r if pm_r > 0 else 0
+                return base + base * max(desconto, 0) * _fator_pm
+            _com_desvio_neg = _com_desvio_neg.copy()
+            _com_desvio_neg['score'] = _com_desvio_neg.apply(_score_final, axis=1)
+            _com_desvio_neg = _com_desvio_neg.sort_values('score', ascending=False)
+
+            _soma_desvios = _com_desvio_neg['score'].sum()
             _sugestao = {}
             _restante = _total_disponivel
 
-            # 1ª passagem: distribuir proporcionalmente ao desvio, arredondando para inteiro
+            # 1ª passagem: distribuir proporcionalmente ao score, arredondando para inteiro
             for _, row in _com_desvio_neg.iterrows():
                 ativo = row['ativo']
-                _prop = row['prioridade'] / _soma_desvios if _soma_desvios > 0 else 0
+                _prop = row['score'] / _soma_desvios if _soma_desvios > 0 else 0
                 _valor_ideal = _total_disponivel * _prop
                 _preco = _precos_sim.get(ativo, 0)
                 if _preco <= 0:
@@ -2162,6 +2190,21 @@ with aba_config:
 
     # ── formulário ───────────────────────────────────────────────────────────
     st.caption("valores em % do total da carteira · a soma dos alvos deve fechar em 100%")
+
+    # ── fator de desconto vs PM ───────────────────────────────────────────────
+    st.markdown("#### peso do desconto vs preço médio no simulador")
+    st.caption("0 = ignora preço · 1 = desconto tem peso igual ao desvio de alocação · recomendado: 0,3")
+    _fator_atual = st.session_state.get("cfg_fator_pm", 0.3)
+    _fator_str = st.text_input("fator (0 a 1)", value=f"{_fator_atual:.1f}".replace('.', ','),
+                                placeholder="ex: 0,3", key="fator_pm_input")
+    try:
+        _fator_novo = float(_fator_str.replace(',', '.'))
+        _fator_novo = max(0.0, min(1.0, _fator_novo))
+        st.session_state["cfg_fator_pm"] = _fator_novo
+    except:
+        pass
+    st.markdown("---")
+
     with st.form("form_cfg"):
         st.markdown("**ETFs**")
         _inp_etf = {}
