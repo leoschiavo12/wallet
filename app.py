@@ -20,26 +20,25 @@ st.markdown("""
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
         [data-testid="stMetricDelta"] { display: none !important; }
 
-        /* ── mobile: empilhar colunas e ajustar padding ─────────── */
+        /* ── mobile: 2 colunas lado a lado, padding compacto ───── */
         @media (max-width: 768px) {
-            /* empilha todas as colunas do Streamlit */
+            /* 2 colunas no mobile — não empilha, mas limita */
             [data-testid="column"] {
-                width: 100% !important;
-                flex: 1 1 100% !important;
-                min-width: 100% !important;
+                min-width: 48% !important;
+                flex: 1 1 48% !important;
             }
-            /* reduz padding lateral das abas */
+            /* reduz padding lateral */
             .main .block-container {
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
-                padding-top: 1rem !important;
+                padding-left: 0.75rem !important;
+                padding-right: 0.75rem !important;
+                padding-top: 0.75rem !important;
             }
             /* métricas menores no mobile */
             [data-testid="stMetric"] label {
-                font-size: 0.72rem !important;
+                font-size: 0.68rem !important;
             }
             [data-testid="stMetricValue"] {
-                font-size: 1.4rem !important;
+                font-size: 1.25rem !important;
             }
             /* tabs com scroll horizontal */
             [data-testid="stTabs"] > div:first-child {
@@ -54,16 +53,13 @@ st.markdown("""
             [data-testid="stDataFrame"] {
                 overflow-x: auto !important;
             }
-            /* cards HTML do metric_tag */
-            div[style*="padding:4px"] {
-                margin-bottom: 0.5rem !important;
-            }
         }
 
-        /* ── tablet: colunas de 4+ viram 2 ─────────────────────── */
+        /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
         @media (min-width: 769px) and (max-width: 1024px) {
-            [data-testid="column"]:nth-child(n+3) {
-                min-width: 45% !important;
+            [data-testid="column"] {
+                min-width: 48% !important;
+                flex: 1 1 48% !important;
             }
         }
     </style>
