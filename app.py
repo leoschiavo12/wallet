@@ -14,10 +14,58 @@ st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
 
 st.markdown("""
     <style>
+        /* ── base ──────────────────────────────────────────────── */
         html, body, [class*="css"] { font-size: 14px !important; }
         .stDataFrame div [role="gridcell"] > div { justify-content: center !important; text-align: center !important; }
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
         [data-testid="stMetricDelta"] { display: none !important; }
+
+        /* ── mobile: empilhar colunas e ajustar padding ─────────── */
+        @media (max-width: 768px) {
+            /* empilha todas as colunas do Streamlit */
+            [data-testid="column"] {
+                width: 100% !important;
+                flex: 1 1 100% !important;
+                min-width: 100% !important;
+            }
+            /* reduz padding lateral das abas */
+            .main .block-container {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+                padding-top: 1rem !important;
+            }
+            /* métricas menores no mobile */
+            [data-testid="stMetric"] label {
+                font-size: 0.72rem !important;
+            }
+            [data-testid="stMetricValue"] {
+                font-size: 1.4rem !important;
+            }
+            /* tabs com scroll horizontal */
+            [data-testid="stTabs"] > div:first-child {
+                overflow-x: auto !important;
+                flex-wrap: nowrap !important;
+            }
+            /* gráficos ocupam largura total */
+            [data-testid="stPlotlyChart"] {
+                width: 100% !important;
+            }
+            /* tabelas com scroll horizontal */
+            [data-testid="stDataFrame"] {
+                overflow-x: auto !important;
+            }
+            /* cards HTML do metric_tag */
+            div[style*="padding:4px"] {
+                margin-bottom: 0.5rem !important;
+            }
+        }
+
+        /* ── tablet: colunas de 4+ viram 2 ─────────────────────── */
+        @media (min-width: 769px) and (max-width: 1024px) {
+            [data-testid="column"]:nth-child(n+3) {
+                min-width: 45% !important;
+            }
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1772,7 +1820,7 @@ with aba_lanc:
                     st.rerun(scope="fragment")
         else:
             with st.container(border=True):
-                c1, c2, c3, c4, c5, c6 = st.columns([1.1, 0.7, 1.5, 0.9, 1.1, 0.9])
+                c1, c2, c3 = st.columns([1.1, 0.7, 1.5])
                 with c1:
                     f_data = st.date_input("data", value=_date.today(),
                                            format="DD/MM/YYYY", max_value=_date.today(),
@@ -1785,6 +1833,7 @@ with aba_lanc:
                                        label_visibility="collapsed")
                     f_ativo  = _opcoes[idx][0]
                     f_classe = _opcoes[idx][1]
+                c4, c5, c6 = st.columns([0.9, 1.1, 0.9])
                 with c4:
                     f_qtd_str = st.text_input("qtd", placeholder="quantidade",
                                               label_visibility="collapsed")
@@ -2025,18 +2074,61 @@ with aba_aportes:
             _precos_sim = {row['Ativo']: row['preco_unit'] for _, row in df.iterrows()}
             _pm_sim     = {row['Ativo']: row['preco_medio'] for _, row in df.iterrows()}
             _fator_pm   = float(st.session_state.get("cfg_fator_pm", 0.3))
+            _fator_perf = float(st.session_state.get("cfg_fator_perf", 0.2))
 
-            # recalcular score com desconto vs PM agora que temos _precos_sim
-            def _score_final(row):
-                base = row['prioridade']
-                if base <= 0: return base
+            # variação 90 dias via yfinance
+            import datetime as _dt
+            _data_90d = _dt.date.today() - _dt.timedelta(days=90)
+            _var_90d = {}
+            try:
+                _tickers_90 = [f"{a}.SA" for a in _precos_sim if a not in ('BTC', 'Renda+ 2050')]
+                if _tickers_90:
+                    _hist = yf.download(_tickers_90, start=str(_data_90d), progress=False, auto_adjust=True)['Close']
+                    if hasattr(_hist, 'columns'):
+                        for _t in _hist.columns:
+                            _nome = _t.replace('.SA', '')
+                            _serie = _hist[_t].dropna()
+                            if len(_serie) >= 2:
+                                _var_90d[_nome] = (_serie.iloc[-1] - _serie.iloc[0]) / _serie.iloc[0]
+                    else:
+                        _nome = _tickers_90[0].replace('.SA', '')
+                        _serie = _hist.dropna()
+                        if len(_serie) >= 2:
+                            _var_90d[_nome] = (_serie.iloc[-1] - _serie.iloc[0]) / _serie.iloc[0]
+            except:
+                pass
+
+            # score normalizado: cada componente compete no range 0-1
+            # peso: 60% desvio alocação · fator_pm% desconto PM · fator_perf% queda 90d
+            _neg = _com_desvio_neg.copy()
+
+            # componente 1: desvio normalizado (já é prioridade = -desvio_rs, positivo)
+            _max_desv = _neg['prioridade'].max()
+            _neg['_c_desv'] = _neg['prioridade'] / _max_desv if _max_desv > 0 else 0
+
+            # componente 2: desconto vs PM normalizado
+            def _desc_pm(row):
                 pm_r = row.get('pm', 0)
                 pr   = _precos_sim.get(row['ativo'], pm_r)
-                desconto = (pm_r - pr) / pm_r if pm_r > 0 else 0
-                return base + base * max(desconto, 0) * _fator_pm
-            _com_desvio_neg = _com_desvio_neg.copy()
-            _com_desvio_neg['score'] = _com_desvio_neg.apply(_score_final, axis=1)
-            _com_desvio_neg = _com_desvio_neg.sort_values('score', ascending=False)
+                return max((pm_r - pr) / pm_r, 0) if pm_r > 0 else 0
+            _neg['_c_pm'] = _neg.apply(_desc_pm, axis=1)
+            _max_pm = _neg['_c_pm'].max()
+            _neg['_c_pm'] = _neg['_c_pm'] / _max_pm if _max_pm > 0 else 0
+
+            # componente 3: queda 90d normalizada
+            _neg['_c_perf'] = _neg['ativo'].map(lambda a: max(-_var_90d.get(a, 0), 0))
+            _max_perf = _neg['_c_perf'].max()
+            _neg['_c_perf'] = _neg['_c_perf'] / _max_perf if _max_perf > 0 else 0
+
+            # peso total: 60% desvio + fator_pm * 20% + fator_perf * 20%
+            # (fator_pm e fator_perf escalam de 0 a 1 sua contribuição nos 40% restantes)
+            _w_desv  = 0.6
+            _w_pm    = _fator_pm   * 0.2
+            _w_perf  = _fator_perf * 0.2
+            _neg['score'] = (_neg['_c_desv'] * _w_desv +
+                             _neg['_c_pm']   * _w_pm   +
+                             _neg['_c_perf'] * _w_perf)
+            _com_desvio_neg = _neg.sort_values('score', ascending=False)
 
             _soma_desvios = _com_desvio_neg['score'].sum()
             _sugestao = {}
@@ -2269,17 +2361,33 @@ with aba_config:
     st.caption("valores em % do total da carteira · a soma dos alvos deve fechar em 100%")
 
     # ── fator de desconto vs PM ───────────────────────────────────────────────
-    st.markdown("#### peso do desconto vs preço médio no simulador")
-    st.caption("0 = ignora preço · 1 = desconto tem peso igual ao desvio de alocação · recomendado: 0,3")
-    _fator_atual = st.session_state.get("cfg_fator_pm", 0.3)
-    _fator_str = st.text_input("fator (0 a 1)", value=f"{_fator_atual:.1f}".replace('.', ','),
-                                placeholder="ex: 0,3", key="fator_pm_input")
+    st.markdown("#### pesos do simulador de aportes")
+    st.caption("fatores que ajustam a prioridade de cada ativo além do desvio de alocação")
+    _cf1, _cf2 = st.columns(2)
+
+    _fator_pm_atual = st.session_state.get("cfg_fator_pm", 0.3)
+    _fator_pm_str = _cf1.text_input(
+        "desconto vs preço médio (0–1)",
+        value=f"{_fator_pm_atual:.1f}".replace('.', ','),
+        placeholder="ex: 0,3", key="fator_pm_input",
+        help="0 = ignora · 1 = mesmo peso do desvio · recomendado: 0,3"
+    )
     try:
-        _fator_novo = float(_fator_str.replace(',', '.'))
-        _fator_novo = max(0.0, min(1.0, _fator_novo))
-        st.session_state["cfg_fator_pm"] = _fator_novo
-    except:
-        pass
+        _fpm = max(0.0, min(1.0, float(_fator_pm_str.replace(',', '.'))))
+        st.session_state["cfg_fator_pm"] = _fpm
+    except: pass
+
+    _fator_perf_atual = st.session_state.get("cfg_fator_perf", 0.2)
+    _fator_perf_str = _cf2.text_input(
+        "queda nos últimos 90 dias (0–1)",
+        value=f"{_fator_perf_atual:.1f}".replace('.', ','),
+        placeholder="ex: 0,2", key="fator_perf_input",
+        help="0 = ignora · 1 = mesmo peso do desvio · recomendado: 0,2"
+    )
+    try:
+        _fperf = max(0.0, min(1.0, float(_fator_perf_str.replace(',', '.'))))
+        st.session_state["cfg_fator_perf"] = _fperf
+    except: pass
     st.markdown("---")
 
     with st.form("form_cfg"):
