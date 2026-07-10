@@ -997,7 +997,7 @@ with aba_dash:
             height=400, showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
         )
-        st.plotly_chart(fig_donut, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_donut, width="stretch", config={"displayModeBar": False})
 
     with col_mensal:
         import calendar as _cal
@@ -1065,7 +1065,7 @@ with aba_dash:
                 ),
                 margin=dict(t=10, b=10, l=10, r=10)
             )
-            st.plotly_chart(fig_mensal, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_mensal, width="stretch", config={"displayModeBar": False})
         else:
             st.info("preços mensais históricos ainda não disponíveis. serão populados automaticamente no próximo carregamento.")
 
@@ -1241,7 +1241,7 @@ with aba_detalhe:
             yaxis=dict(showgrid=False, tickfont=dict(size=11), fixedrange=True),
             bargap=0.25, margin=dict(t=20, b=10, l=10, r=60)
         )
-        st.plotly_chart(fig_fii_bar, use_container_width=True,
+        st.plotly_chart(fig_fii_bar, width="stretch",
                         config={"displayModeBar": False, "scrollZoom": False})
 
         st.markdown("---")
@@ -1296,7 +1296,7 @@ with aba_detalhe:
 
         with st.expander("ver tabela de FIIs", expanded=False):
             cfg_fii = {c: st.column_config.TextColumn(c, alignment="center") for c in df_fii_fmt.columns}
-            st.dataframe(df_fii_fmt, use_container_width=True, hide_index=True, column_config=cfg_fii)
+            st.dataframe(df_fii_fmt, width="stretch", hide_index=True, column_config=cfg_fii)
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: ETFs
@@ -1393,7 +1393,7 @@ with aba_detalhe:
             yaxis=dict(showgrid=False, tickfont=dict(size=11), fixedrange=True),
             bargap=0.3, margin=dict(t=10, b=10, l=10, r=60)
         )
-        st.plotly_chart(fig_etf_bar, use_container_width=True,
+        st.plotly_chart(fig_etf_bar, width="stretch",
                         config={"displayModeBar": False, "scrollZoom": False})
 
         st.markdown("---")
@@ -1507,7 +1507,7 @@ with aba_detalhe:
                 yaxis=dict(showgrid=True, gridcolor="#333"),
                 margin=dict(t=10, b=10, l=10, r=10)
             )
-            st.plotly_chart(fig_btc, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
+            st.plotly_chart(fig_btc, width="stretch", config={"displayModeBar": False, "scrollZoom": False})
             st.caption(f"fonte: {hist_fonte}")
         else:
             st.warning("histórico de preços indisponível — coingecko e yfinance não retornaram dados.")
@@ -1671,7 +1671,7 @@ with aba_detalhe:
             yaxis=dict(showgrid=False, tickfont=dict(size=11), fixedrange=True),
             bargap=0.25, margin=dict(t=10, b=10, l=10, r=60)
         )
-        st.plotly_chart(fig_ativo, use_container_width=True,
+        st.plotly_chart(fig_ativo, width="stretch",
                         config={"displayModeBar": False, "scrollZoom": False})
 
         st.markdown("---")
@@ -1710,7 +1710,7 @@ with aba_detalhe:
                 'part. %':         df_view['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.',',')).values,
             })
             cfg_geral = {c: st.column_config.TextColumn(c, alignment="center") for c in df_geral_fmt.columns}
-            st.dataframe(df_geral_fmt, use_container_width=True, hide_index=True, column_config=cfg_geral)
+            st.dataframe(df_geral_fmt, width="stretch", hide_index=True, column_config=cfg_geral)
 
         st.markdown("---")
 
@@ -1748,7 +1748,7 @@ with aba_detalhe:
             })
         df_resumo_view = pd.DataFrame(linhas_resumo)
         cfg_res = {c: st.column_config.TextColumn(c, alignment="center") for c in df_resumo_view.columns}
-        st.dataframe(df_resumo_view, use_container_width=True, hide_index=True, column_config=cfg_res)
+        st.dataframe(df_resumo_view, width="stretch", hide_index=True, column_config=cfg_res)
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
 with aba_lanc:
@@ -1811,7 +1811,7 @@ with aba_lanc:
             c2.metric("média mensal (6m)", formatar_brl(media_6m))
             with c3:
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("+ novo aporte", type="primary", use_container_width=True):
+                if st.button("+ novo aporte", type="primary", width="stretch"):
                     st.session_state["abrir_form_aporte"] = True
                     st.rerun(scope="fragment")
         else:
@@ -1848,7 +1848,7 @@ with aba_lanc:
 
                 ca, cb = st.columns([1, 5])
                 with ca:
-                    if st.button("salvar", type="primary", use_container_width=True):
+                    if st.button("salvar", type="primary", width="stretch"):
                         if f_qtd > 0 and f_preco > 0:
                             salvar_lancamento([
                                 f_data.strftime("%d/%m/%Y"),
@@ -1892,7 +1892,7 @@ with aba_lanc:
 
         cols_show = ["#", "data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
         cfg_hist  = {c: st.column_config.TextColumn(c, alignment="center") for c in cols_show}
-        st.dataframe(df_hist_fmt[cols_show], use_container_width=True,
+        st.dataframe(df_hist_fmt[cols_show], width="stretch",
                      hide_index=True, column_config=cfg_hist)
 
         st.markdown("---")
@@ -1965,7 +1965,7 @@ with aba_lanc:
             )
             pm_fmt['preco medio'] = pm_fmt['preco medio'].apply(formatar_brl)
             cfg_pm = {c: st.column_config.TextColumn(c, alignment="center") for c in pm_fmt.columns}
-            st.dataframe(pm_fmt, use_container_width=True, hide_index=True, column_config=cfg_pm)
+            st.dataframe(pm_fmt, width="stretch", hide_index=True, column_config=cfg_pm)
 
     aba_lancamentos_fragment()
 
@@ -2072,27 +2072,22 @@ with aba_aportes:
             _fator_pm   = float(st.session_state.get("cfg_fator_pm", 0.3))
             _fator_perf = float(st.session_state.get("cfg_fator_perf", 0.2))
 
-            # variação 90 dias via yfinance
+            # variação 90 dias via yfinance (ticker a ticker para evitar crash)
             import datetime as _dt
             _data_90d = _dt.date.today() - _dt.timedelta(days=90)
             _var_90d = {}
-            try:
-                _tickers_90 = [f"{a}.SA" for a in _precos_sim if a not in ('BTC', 'Renda+ 2050')]
-                if _tickers_90:
-                    _hist = yf.download(_tickers_90, start=str(_data_90d), progress=False, auto_adjust=True)['Close']
-                    if hasattr(_hist, 'columns'):
-                        for _t in _hist.columns:
-                            _nome = _t.replace('.SA', '')
-                            _serie = _hist[_t].dropna()
-                            if len(_serie) >= 2:
-                                _var_90d[_nome] = (_serie.iloc[-1] - _serie.iloc[0]) / _serie.iloc[0]
-                    else:
-                        _nome = _tickers_90[0].replace('.SA', '')
-                        _serie = _hist.dropna()
-                        if len(_serie) >= 2:
-                            _var_90d[_nome] = (_serie.iloc[-1] - _serie.iloc[0]) / _serie.iloc[0]
-            except:
-                pass
+            _tickers_90 = [a for a in _precos_sim if a not in ('BTC', 'Renda+ 2050')]
+            for _ativo_90 in _tickers_90:
+                try:
+                    _t90 = f"{_ativo_90}.SA"
+                    _h = yf.download(_t90, start=str(_data_90d), progress=False,
+                                     auto_adjust=True, threads=False)
+                    if not _h.empty and 'Close' in _h.columns:
+                        _s = _h['Close'].dropna()
+                        if len(_s) >= 2:
+                            _var_90d[_ativo_90] = float((_s.iloc[-1] - _s.iloc[0]) / _s.iloc[0])
+                except Exception:
+                    continue
 
             # score normalizado: cada componente compete no range 0-1
             # peso: 60% desvio alocação · fator_pm% desconto PM · fator_perf% queda 90d
@@ -2298,7 +2293,7 @@ with aba_aportes:
 
         df_disp = pd.DataFrame(_rows_disp)
         _cfg_disp = {c: st.column_config.TextColumn(c, alignment="center") for c in df_disp.columns}
-        st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config=_cfg_disp)
+        st.dataframe(df_disp, width="stretch", hide_index=True, column_config=_cfg_disp)
 
         # ── resumo da sugestão ────────────────────────────────────────────────
 
