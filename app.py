@@ -339,13 +339,12 @@ def obter_preco_renda_mais():
         if df_f.empty:
             return None, f'nenhum registro apos filtro — datas: {df["Data Base"].dt.strftime("%d/%m/%Y").tolist()[-3:]}'
 
-        pu  = float(df_f.iloc[0]['PU Venda Manha'])
-        dt  = df_f.iloc[0]['Data Base'].strftime('%d/%m/%Y')
-        return pu, dt
+        pu    = float(df_f.iloc[0]['PU Venda Manha'])
+        taxa  = float(df_f.iloc[0]['Taxa Venda Manha'])
+        dt    = df_f.iloc[0]['Data Base'].strftime('%d/%m/%Y')
+        return pu, dt, taxa
     except Exception as e:
-        return None, str(e)
-    except Exception as e:
-        return None, str(e)
+        return None, str(e), None
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
@@ -449,6 +448,46 @@ def data_td_de_secrets(nome):
 @st.cache_data(ttl=86400)
 def obter_preco_renda_mais_cached():
     return obter_preco_renda_mais()
+
+def calcular_projecao_renda_mais(saldo_atual, taxa_real_aa, aporte_mensal, ano_conversao=2050,
+                                  anos_pagamento=20, mes_atual=None, ano_atual=None):
+    """
+    Projeta o saldo acumulado do Renda+ na data de conversão e a parcela mensal
+    real (poder de compra de hoje) resultante da anuidade de 240 pagamentos.
+
+    Aproximação: usa uma única taxa real (IPCA+X% a.a.) para todo o saldo —
+    inclusive o que já foi acumulado a taxas diferentes no passado — porque o
+    app não guarda a taxa contratada em cada compra individual. Não considera
+    IR (tabela regressiva) nem taxa de custódia sobre o excedente de 6 SM.
+    """
+    import datetime as _dt
+    hoje = _dt.date.today()
+    ano_atual  = ano_atual  or hoje.year
+    mes_atual  = mes_atual  or hoje.month
+    meses_ate_conversao = max((ano_conversao - ano_atual) * 12 - (mes_atual - 1), 0)
+
+    taxa_m = (1 + taxa_real_aa) ** (1/12) - 1
+
+    fv_saldo = saldo_atual * (1 + taxa_m) ** meses_ate_conversao
+    if taxa_m > 0:
+        fv_aportes = aporte_mensal * (((1 + taxa_m) ** meses_ate_conversao - 1) / taxa_m)
+    else:
+        fv_aportes = aporte_mensal * meses_ate_conversao
+
+    saldo_conversao = fv_saldo + fv_aportes
+
+    n_pag = anos_pagamento * 12
+    if taxa_m > 0:
+        parcela_mensal = saldo_conversao * taxa_m / (1 - (1 + taxa_m) ** -n_pag)
+    else:
+        parcela_mensal = saldo_conversao / n_pag
+
+    return {
+        'meses_ate_conversao': meses_ate_conversao,
+        'saldo_conversao': saldo_conversao,
+        'parcela_mensal': parcela_mensal,
+        'total_recebido_20anos': parcela_mensal * n_pag,
+    }
 
 SHEET_PM_TAB = "precos_mensais"
 PM_HEADERS   = ["ano_mes", "ativo", "preco_fechamento"]
@@ -872,6 +911,8 @@ if _resultado_renda and _resultado_renda[0]:
     precos['Renda+ 2050'] = _resultado_renda[0]
     st.session_state['preco_renda_auto'] = _resultado_renda[0]
     st.session_state['data_renda_auto']  = _resultado_renda[1]
+    if len(_resultado_renda) > 2 and _resultado_renda[2]:
+        st.session_state['taxa_renda_auto'] = _resultado_renda[2]
 else:
     precos['Renda+ 2050'] = preco_td_de_secrets('Renda+ 2050', 490.02)
     if _resultado_renda:
@@ -1553,6 +1594,51 @@ with aba_detalhe:
                 st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
             elif 'preco_renda_erro' in st.session_state:
                 st.caption(f"preço manual (secrets) — API: {st.session_state.get('preco_renda_erro','')}")
+
+            if ativo == 'Renda+ 2050':
+                with st.expander("projeção de renda vitalícia"):
+                    _taxa_auto = st.session_state.get('taxa_renda_auto')
+                    _taxa_default = float(_taxa_auto) if _taxa_auto else 7.2
+
+                    # estimativa de aporte mensal futuro: alvo % do Renda+ × aporte médio informado
+                    _alvo_renda_pct = (_get_banda(_cfg_alvos, 'Renda+ 2050').get('alvo') or 20) if '_cfg_alvos' in dir() else 20
+                    _aporte_default = round(1900 * (_alvo_renda_pct / 100))
+
+                    pc1, pc2 = st.columns(2)
+                    _taxa_input = pc1.text_input(
+                        "taxa real contratada (IPCA+ % a.a.)",
+                        value=f"{_taxa_default:.2f}".replace('.', ','),
+                        help="Auto = taxa de mercado do Renda+ 2050 hoje. Ajuste se souber sua taxa média ponderada real (varia por compra)."
+                    )
+                    _aporte_input = pc2.text_input(
+                        "aporte mensal futuro estimado (R$)",
+                        value=str(_aporte_default),
+                        help="Quanto por mês, em média, deve seguir para o Renda+ 2050 até 2050 (baseado no alvo % configurado)."
+                    )
+
+                    try:
+                        _taxa_pct = float(_taxa_input.replace(',', '.'))
+                        _aporte_v = float(_aporte_input.replace(',', '.'))
+                    except ValueError:
+                        _taxa_pct, _aporte_v = _taxa_default, _aporte_default
+
+                    _proj = calcular_projecao_renda_mais(
+                        saldo_atual=total_atual,
+                        taxa_real_aa=_taxa_pct / 100,
+                        aporte_mensal=_aporte_v,
+                    )
+
+                    _anos_restantes = _proj['meses_ate_conversao'] / 12
+                    r1, r2, r3 = st.columns(3)
+                    r1.metric("saldo em 2050 (valor de hoje)", abreviar_rs(_proj['saldo_conversao']))
+                    r2.metric("renda mensal vitalícia (valor de hoje)", formatar_brl(_proj['parcela_mensal']))
+                    r3.metric("total em 20 anos (2050–2069)", abreviar_rs(_proj['total_recebido_20anos']))
+
+                    st.caption(
+                        f"projeção em termos reais (poder de compra de hoje) · {_anos_restantes:.0f} anos até a conversão · "
+                        f"considera uma única taxa média para todo o saldo (passado + futuro) — não reflete a taxa exata de cada "
+                        f"compra individual, nem desconta IR ou taxa de custódia."
+                    )
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: CARTEIRA
