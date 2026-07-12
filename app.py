@@ -446,6 +446,25 @@ def data_td_de_secrets(nome):
     except:
         return "nao definida"
 
+@st.cache_data(ttl=21600)  # 6h — evita repetir ~10-14 downloads sequenciais a cada rerun do app
+def obter_variacao_90d(tickers_tupla):
+    """retorna dict {ticker: variação_90d} via yfinance, um ticker por vez (threads=False evita segfault)"""
+    import datetime as _dt
+    data_90d = _dt.date.today() - _dt.timedelta(days=90)
+    var_90d = {}
+    for ativo in tickers_tupla:
+        try:
+            t90 = f"{ativo}.SA"
+            h = yf.download(t90, start=str(data_90d), progress=False,
+                             auto_adjust=True, threads=False)
+            if not h.empty and 'Close' in h.columns:
+                s = h['Close'].dropna()
+                if len(s) >= 2:
+                    var_90d[ativo] = float((s.iloc[-1] - s.iloc[0]) / s.iloc[0])
+        except Exception:
+            continue
+    return var_90d
+
 @st.cache_data(ttl=86400)
 def obter_preco_renda_mais_cached():
     return obter_preco_renda_mais()
@@ -2278,22 +2297,9 @@ with aba_aportes:
             _fator_pm   = float(st.session_state.get("cfg_fator_pm", 0.3))
             _fator_perf = float(st.session_state.get("cfg_fator_perf", 0.2))
 
-            # variação 90 dias via yfinance (ticker a ticker para evitar crash)
-            import datetime as _dt
-            _data_90d = _dt.date.today() - _dt.timedelta(days=90)
-            _var_90d = {}
-            _tickers_90 = [a for a in _precos_sim if a not in ('BTC', 'Renda+ 2050')]
-            for _ativo_90 in _tickers_90:
-                try:
-                    _t90 = f"{_ativo_90}.SA"
-                    _h = yf.download(_t90, start=str(_data_90d), progress=False,
-                                     auto_adjust=True, threads=False)
-                    if not _h.empty and 'Close' in _h.columns:
-                        _s = _h['Close'].dropna()
-                        if len(_s) >= 2:
-                            _var_90d[_ativo_90] = float((_s.iloc[-1] - _s.iloc[0]) / _s.iloc[0])
-                except Exception:
-                    continue
+            # variação 90 dias via yfinance (cacheado — evita repetir a cada rerun)
+            _tickers_90 = tuple(sorted(a for a in _precos_sim if a not in ('BTC', 'Renda+ 2050')))
+            _var_90d = obter_variacao_90d(_tickers_90)
 
             # score normalizado: cada componente compete no range 0-1
             # peso: 60% desvio alocação · fator_pm% desconto PM · fator_perf% queda 90d
