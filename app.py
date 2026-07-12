@@ -340,7 +340,7 @@ def obter_preco_renda_mais():
             return None, f'nenhum registro apos filtro — datas: {df["Data Base"].dt.strftime("%d/%m/%Y").tolist()[-3:]}'
 
         pu    = float(df_f.iloc[0]['PU Venda Manha'])
-        taxa  = float(df_f.iloc[0]['Taxa Venda Manha'])
+        taxa  = float(df_f.iloc[0]['Taxa Compra Manha'])
         dt    = df_f.iloc[0]['Data Base'].strftime('%d/%m/%Y')
         return pu, dt, taxa
     except Exception as e:
