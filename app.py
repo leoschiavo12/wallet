@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import math
 import requests
+import openpyxl
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import date
@@ -606,6 +607,95 @@ SHEET_ID   = st.secrets["google_sheets"]["spreadsheet_id"]
 SHEET_TAB  = "lancamentos"
 SHEET_CFG  = "configuracoes"
 HEADERS    = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
+
+# ── taxas contratadas do Renda+ (extrato analítico Tesouro Direto) ────────────
+SHEET_RENDA_TAB = "renda_mais_taxas"
+RENDA_HEADERS   = ["data", "valor_investido", "taxa_contratada_pct"]
+
+@st.cache_data(ttl=3600)
+def ler_renda_taxas():
+    """lê histórico de taxas contratadas por aporte no Renda+: DataFrame [data, valor_investido, taxa_contratada_pct]"""
+    try:
+        svc  = get_sheets_service()
+        res  = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_TAB}!A:C").execute()
+        rows = res.get("values", [])
+        if len(rows) <= 1:
+            return pd.DataFrame(columns=RENDA_HEADERS)
+        n      = len(RENDA_HEADERS)
+        padded = [(r + [''] * n)[:n] for r in rows[1:]]
+        df_rt  = pd.DataFrame(padded, columns=RENDA_HEADERS)
+        df_rt['valor_investido']     = df_rt['valor_investido'].apply(normalizar_numero)
+        df_rt['taxa_contratada_pct'] = df_rt['taxa_contratada_pct'].apply(normalizar_numero)
+        return df_rt.dropna(subset=['valor_investido', 'taxa_contratada_pct'])
+    except Exception:
+        return pd.DataFrame(columns=RENDA_HEADERS)
+
+def salvar_renda_taxas(df_novo):
+    """sobrescreve a aba inteira com o conteúdo do extrato mais recente (fonte é sempre o extrato completo)"""
+    try:
+        svc = get_sheets_service()
+        svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_TAB}!A:C").execute()
+        fmt_rows = [RENDA_HEADERS] + [
+            [r['data'], str(r['valor_investido']).replace('.', ','), str(r['taxa_contratada_pct']).replace('.', ',')]
+            for _, r in df_novo.iterrows()
+        ]
+        svc.values().update(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_TAB}!A1",
+            valueInputOption="USER_ENTERED", body={"values": fmt_rows}
+        ).execute()
+        return True
+    except Exception as e:
+        st.warning(f"erro ao salvar taxas do Renda+: {e}")
+        return False
+
+def parse_extrato_renda_mais(arquivo_upload):
+    """
+    parseia o Extrato Analítico do Tesouro Renda+ (xlsx baixado do Tesouro Direto/corretora).
+    retorna DataFrame [data, valor_investido, taxa_contratada_pct] com uma linha por aporte.
+    """
+    import re
+    wb = openpyxl.load_workbook(arquivo_upload, data_only=True)
+    ws = wb.worksheets[0]
+
+    def _to_float(v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        s = str(v).strip().replace('.', '').replace(',', '.')
+        try:
+            return float(s)
+        except Exception:
+            return None
+
+    registros = []
+    for row in ws.iter_rows(min_row=1, values_only=True):
+        if not row or row[0] is None:
+            continue
+        data_str = str(row[0]).strip()
+        # linhas de aporte começam com data no formato DD/MM/AAAA
+        if not re.match(r'^\d{2}/\d{2}/\d{4}$', data_str):
+            continue
+        valor_investido = _to_float(row[3]) if len(row) > 3 else None   # coluna D
+        taxa_raw = row[4] if len(row) > 4 else None                    # coluna E: "IPCA + 6,36%"
+        if valor_investido is None or not taxa_raw:
+            continue
+        m = re.search(r'([\d,]+)\s*%', str(taxa_raw))
+        if not m:
+            continue
+        taxa = float(m.group(1).replace(',', '.'))
+        registros.append({'data': data_str, 'valor_investido': valor_investido, 'taxa_contratada_pct': taxa})
+
+    return pd.DataFrame(registros)
+
+def calcular_taxa_media_ponderada_renda(df_taxas):
+    """taxa média ponderada pelo valor investido em cada aporte. retorna None se não houver dados."""
+    if df_taxas is None or df_taxas.empty:
+        return None
+    total = df_taxas['valor_investido'].sum()
+    if total <= 0:
+        return None
+    return float((df_taxas['valor_investido'] * df_taxas['taxa_contratada_pct']).sum() / total)
 
 def ler_configuracoes():
     """lê alvos do Sheets: retorna dict {ativo: {min, alvo, max}}"""
@@ -1597,8 +1687,16 @@ with aba_detalhe:
 
             if ativo == 'Renda+ 2050':
                 with st.expander("projeção de renda vitalícia"):
-                    _taxa_auto = st.session_state.get('taxa_renda_auto')
-                    _taxa_default = float(_taxa_auto) if _taxa_auto else 7.2
+                    _df_renda_taxas = ler_renda_taxas()
+                    _taxa_ponderada = calcular_taxa_media_ponderada_renda(_df_renda_taxas)
+
+                    if _taxa_ponderada is not None:
+                        _taxa_default = _taxa_ponderada
+                        _fonte_taxa = f"média ponderada real de {len(_df_renda_taxas)} aportes (extrato Tesouro Direto)"
+                    else:
+                        _taxa_auto = st.session_state.get('taxa_renda_auto')
+                        _taxa_default = float(_taxa_auto) if _taxa_auto else 7.2
+                        _fonte_taxa = "taxa de mercado hoje — sem extrato importado ainda"
 
                     # estimativa de aporte mensal futuro: alvo % do Renda+ × aporte médio informado
                     _alvo_renda_pct = (_get_banda(_cfg_alvos, 'Renda+ 2050').get('alvo') or 20) if '_cfg_alvos' in dir() else 20
@@ -1608,13 +1706,14 @@ with aba_detalhe:
                     _taxa_input = pc1.text_input(
                         "taxa real contratada (IPCA+ % a.a.)",
                         value=f"{_taxa_default:.2f}".replace('.', ','),
-                        help="Auto = taxa de mercado do Renda+ 2050 hoje. Ajuste se souber sua taxa média ponderada real (varia por compra)."
+                        help=f"Fonte atual: {_fonte_taxa}. Ajuste manualmente se quiser simular outro cenário."
                     )
                     _aporte_input = pc2.text_input(
                         "aporte mensal futuro estimado (R$)",
                         value=str(_aporte_default),
                         help="Quanto por mês, em média, deve seguir para o Renda+ 2050 até 2050 (baseado no alvo % configurado)."
                     )
+                    st.caption(f"↳ {_fonte_taxa}")
 
                     try:
                         _taxa_pct = float(_taxa_input.replace(',', '.'))
@@ -1636,9 +1735,30 @@ with aba_detalhe:
 
                     st.caption(
                         f"projeção em termos reais (poder de compra de hoje) · {_anos_restantes:.0f} anos até a conversão · "
-                        f"considera uma única taxa média para todo o saldo (passado + futuro) — não reflete a taxa exata de cada "
-                        f"compra individual, nem desconta IR ou taxa de custódia."
+                        f"não desconta IR (tabela regressiva) nem taxa de custódia sobre excedente de 6 salários mínimos."
                     )
+
+                    st.markdown("---")
+                    st.caption("atualizar taxas contratadas — sobe o Extrato Analítico do Tesouro Renda+ (xlsx) sempre que tiver um novo")
+                    _upload_extrato = st.file_uploader(
+                        "extrato analítico (.xlsx)", type=["xlsx"], key="upload_extrato_renda",
+                        label_visibility="collapsed"
+                    )
+                    if _upload_extrato is not None:
+                        try:
+                            _df_novo = parse_extrato_renda_mais(_upload_extrato)
+                            if _df_novo.empty:
+                                st.error("não encontrei linhas de aporte reconhecíveis nesse arquivo.")
+                            else:
+                                if salvar_renda_taxas(_df_novo):
+                                    _nova_taxa = calcular_taxa_media_ponderada_renda(_df_novo)
+                                    st.success(
+                                        f"✓ {len(_df_novo)} aportes importados — nova taxa média ponderada: "
+                                        f"IPCA + {_nova_taxa:.2f}%".replace('.', ',')
+                                    )
+                                    st.cache_data.clear()
+                        except Exception as e:
+                            st.error(f"erro ao ler o extrato: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: CARTEIRA
