@@ -2255,7 +2255,7 @@ with aba_aportes:
                         st.columns([1,3])[0].metric(_proximo2, _display2)
                     elif _proximo2:
                         st.info(
-                            f"nenhum ativo acessível com R$ {formatar_brl(_total_disponivel)}. "
+                            f"nenhum ativo acessível com {formatar_brl(_total_disponivel)}. "
                             f"mais próximo: **{_proximo2}** · faltam **{formatar_brl(_falta2)}**"
                         )
 
