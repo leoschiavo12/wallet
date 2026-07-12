@@ -1,4 +1,4 @@
-# dependencias smartwallet
 yfinance
+plotly
 google-api-python-client
 google-auth
