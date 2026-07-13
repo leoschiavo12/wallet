@@ -23,10 +23,23 @@ st.markdown("""
 
         /* ── mobile: 2 colunas lado a lado, padding compacto ───── */
         @media (max-width: 768px) {
+            /* container-pai das colunas: por padrão o Streamlit empilha (flex-direction:column)
+               abaixo de uma certa largura — isso é o que causava o empilhamento mesmo com
+               regras nos filhos. Forçamos row+wrap aqui, que é a causa raiz. */
+            div[data-testid="stHorizontalBlock"],
+            div[class*="stHorizontalBlock"] {
+                display: flex !important;
+                flex-direction: row !important;
+                flex-wrap: wrap !important;
+                gap: 0.5rem !important;
+            }
             /* 2 colunas no mobile — não empilha, mas limita */
-            [data-testid="column"] {
-                min-width: 48% !important;
-                flex: 1 1 48% !important;
+            div[data-testid="column"],
+            div[data-testid="stColumn"],
+            div[class*="stColumn"] {
+                min-width: 46% !important;
+                width: 46% !important;
+                flex: 1 1 46% !important;
             }
             /* reduz padding lateral */
             .main .block-container {
@@ -58,7 +71,15 @@ st.markdown("""
 
         /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
         @media (min-width: 769px) and (max-width: 1024px) {
-            [data-testid="column"] {
+            div[data-testid="stHorizontalBlock"],
+            div[class*="stHorizontalBlock"] {
+                display: flex !important;
+                flex-direction: row !important;
+                flex-wrap: wrap !important;
+            }
+            div[data-testid="column"],
+            div[data-testid="stColumn"],
+            div[class*="stColumn"] {
                 min-width: 48% !important;
                 flex: 1 1 48% !important;
             }
