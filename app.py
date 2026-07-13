@@ -103,6 +103,42 @@ st.markdown("""
             .valorizacao-pct {
                 font-size: 1.25rem !important;
             }
+
+            /* linha RF/RV/CDI/IPCA+: 4 itens numa linha só, rótulos curtos */
+            .st-key-row_indices [data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 0.25rem !important;
+            }
+            .st-key-row_indices [data-testid="column"],
+            .st-key-row_indices [data-testid="stColumn"] {
+                min-width: 23% !important;
+                width: 23% !important;
+                flex: 1 1 23% !important;
+            }
+            .st-key-row_indices [data-testid="stMetric"] label {
+                font-size: 0.6rem !important;
+            }
+            .st-key-row_indices [data-testid="stMetricValue"] {
+                font-size: 0.95rem !important;
+            }
+
+            /* linha de dividendos dos FIIs: 3 itens numa linha só */
+            .st-key-row_fii_dividendos [data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 0.25rem !important;
+            }
+            .st-key-row_fii_dividendos [data-testid="column"],
+            .st-key-row_fii_dividendos [data-testid="stColumn"] {
+                min-width: 31% !important;
+                width: 31% !important;
+                flex: 1 1 31% !important;
+            }
+            .st-key-row_fii_dividendos [data-testid="stMetric"] label {
+                font-size: 0.62rem !important;
+            }
+            .st-key-row_fii_dividendos [data-testid="stMetricValue"] {
+                font-size: 1rem !important;
+            }
         }
 
         /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
@@ -1413,14 +1449,15 @@ with aba_detalhe:
         c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
         card_valorizacao(c2, _var_fii_rs, _var_fii_pct)
 
-        st.markdown("")
+        st.markdown("---")
 
-        c3, c4, c5 = st.columns(3)
-        _yield_str = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
-        _label_mes = f"{meses_pt3[mes_ref_f]}/{ano_ref_f}"
-        c3.metric(f"dividendos — {_label_mes}", formatar_brl(div_total))
-        c4.metric(f"yield — {_label_mes}", _yield_str)
-        c5.metric("dividendos recebidos (total)", abreviar_rs(_total_divs))
+        with st.container(key="row_fii_dividendos"):
+            c3, c4, c5 = st.columns(3)
+            _yield_str = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
+            _label_mes = f"{meses_pt3[mes_ref_f]}/{ano_ref_f}"
+            c3.metric(f"dividendos — {_label_mes}", formatar_brl(div_total))
+            c4.metric(f"yield — {_label_mes}", _yield_str)
+            c5.metric("dividendos recebidos (total)", abreviar_rs(_total_divs))
 
         st.markdown("---")
 
@@ -2003,11 +2040,12 @@ with aba_detalhe:
         pct_cdi    = total_cdi  / total_geral * 100 if total_geral > 0 else 0
         pct_ipca   = total_ipca / total_geral * 100 if total_geral > 0 else 0
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"renda fixa  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}")
-        c2.metric(f"renda variável  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}")
-        c3.metric(f"CDI  ·  {abreviar_rs(total_cdi)}", fmt_pct(pct_cdi))
-        c4.metric(f"IPCA+  ·  {abreviar_rs(total_ipca)}", fmt_pct(pct_ipca))
+        with st.container(key="row_indices"):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric(f"RF  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}")
+            c2.metric(f"RV  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}")
+            c3.metric(f"CDI  ·  {abreviar_rs(total_cdi)}", fmt_pct(pct_cdi))
+            c4.metric(f"IPCA+  ·  {abreviar_rs(total_ipca)}", fmt_pct(pct_ipca))
 
         st.markdown("---")
 
