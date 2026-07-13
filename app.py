@@ -139,6 +139,27 @@ st.markdown("""
             .st-key-row_fii_dividendos [data-testid="stMetricValue"] {
                 font-size: 1rem !important;
             }
+
+            /* cards por ETF: 5 infos numa linha só, bem compactas */
+            [class*="st-key-row_etf_"] [data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 0.2rem !important;
+            }
+            [class*="st-key-row_etf_"] [data-testid="column"],
+            [class*="st-key-row_etf_"] [data-testid="stColumn"] {
+                min-width: 19% !important;
+                width: 19% !important;
+                flex: 1 1 19% !important;
+            }
+            [class*="st-key-row_etf_"] [data-testid="stMetric"] label {
+                font-size: 0.55rem !important;
+            }
+            [class*="st-key-row_etf_"] [data-testid="stMetricValue"] {
+                font-size: 0.8rem !important;
+            }
+            [class*="st-key-row_etf_"] .valorizacao-pct {
+                font-size: 0.8rem !important;
+            }
         }
 
         /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
@@ -1454,10 +1475,12 @@ with aba_detalhe:
         with st.container(key="row_fii_dividendos"):
             c3, c4, c5 = st.columns(3)
             _yield_str = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
-            _label_mes = f"{meses_pt3[mes_ref_f]}/{ano_ref_f}"
-            c3.metric(f"dividendos — {_label_mes}", formatar_brl(div_total))
+            _meses_abrev3 = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
+                              7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
+            _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
+            c3.metric(_label_mes, formatar_brl(div_total))
             c4.metric(f"yield — {_label_mes}", _yield_str)
-            c5.metric("dividendos recebidos (total)", abreviar_rs(_total_divs))
+            c5.metric("div. totais", abreviar_rs(_total_divs))
 
         st.markdown("---")
 
@@ -1646,7 +1669,7 @@ with aba_detalhe:
         _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
         c1.metric(f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira))
         card_valorizacao(c2, var_etf_rs, var_etf_pct)
-        c3.metric("holding médio (classe)", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
+        c3.metric("holding médio", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
 
 
 
@@ -1718,13 +1741,14 @@ with aba_detalhe:
             var_pct_e   = var_rs / custo * 100 if custo > 0 else 0
             holding     = holding_ponderado_meses(ativo, _df_lanc_raw)
 
-            c1, c2, c3, c4, c5 = st.columns(5)
-            _qtd_str = str(int(qtd)) if qtd == int(qtd) else f"{qtd:.2f}".replace('.', ',')
-            c1.metric("ativo", ativo)
-            c2.metric(f"preço  ·  (~{formatar_brl(pm)})", formatar_brl(preco))
-            card_valorizacao(c3, var_rs, var_pct_e)
-            c4.metric(f"total  ·  ({_qtd_str})", abreviar_rs(total_atual))
-            c5.metric("holding ponderado", fmt_holding(holding))
+            with st.container(key=f"row_etf_{ativo}"):
+                c1, c2, c3, c4, c5 = st.columns(5)
+                _qtd_str = str(int(qtd)) if qtd == int(qtd) else f"{qtd:.2f}".replace('.', ',')
+                c1.metric("ativo", ativo)
+                c2.metric(f"preço  ·  (~{formatar_brl(pm)})", formatar_brl(preco))
+                card_valorizacao(c3, var_rs, var_pct_e)
+                c4.metric(f"total  ·  ({_qtd_str})", abreviar_rs(total_atual))
+                c5.metric("holding ponderado", fmt_holding(holding))
 
             st.markdown("---")
 
