@@ -1533,34 +1533,32 @@ with aba_detalhe:
             c4.metric(f"yield — {_label_mes}", _yield_str)
             c5.metric("div. totais", abreviar_rs(_total_divs))
 
-        st.markdown("---")
+            # ── tijolo vs papel, alinhados embaixo de jun/26 e yield ──────────
+            df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
+            resumo_tipo = df_fii.groupby('tipo_fii')['Total Atual'].sum().reset_index()
 
-        # ── linha 2: tijolo vs papel com CDI/IPCA fundido ───────────────────
-        df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
-        resumo_tipo = df_fii.groupby('tipo_fii')['Total Atual'].sum().reset_index()
+            df_papel = df_fii[df_fii['tipo_fii'] == 'papel'].copy()
+            df_papel['indexador'] = df_papel['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('indexador', '?'))
+            total_papel = df_papel['Total Atual'].sum() if not df_papel.empty else 0
 
-        df_papel = df_fii[df_fii['tipo_fii'] == 'papel'].copy()
-        df_papel['indexador'] = df_papel['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('indexador', '?'))
-        total_papel = df_papel['Total Atual'].sum() if not df_papel.empty else 0
+            # montar subtexto CDI/IPCA para o card papel
+            idx_info = ""
+            if not df_papel.empty:
+                resumo_idx = df_papel.groupby('indexador')['Total Atual'].sum().reset_index()
+                partes = []
+                for _, ri in resumo_idx.sort_values('Total Atual', ascending=False).iterrows():
+                    pct_idx = ri['Total Atual'] / total_papel * 100 if total_papel > 0 else 0
+                    partes.append(f"{ri['indexador']} {pct_idx:.0f}%".replace('.', ','))
+                idx_info = "  ·  " + " / ".join(partes)
 
-        # montar subtexto CDI/IPCA para o card papel
-        idx_info = ""
-        if not df_papel.empty:
-            resumo_idx = df_papel.groupby('indexador')['Total Atual'].sum().reset_index()
-            partes = []
-            for _, ri in resumo_idx.sort_values('Total Atual', ascending=False).iterrows():
-                pct_idx = ri['Total Atual'] / total_papel * 100 if total_papel > 0 else 0
-                partes.append(f"{ri['indexador']} {pct_idx:.0f}%".replace('.', ','))
-            idx_info = "  ·  " + " / ".join(partes)
-
-        c1, c2 = st.columns(2)
-        for _, r in resumo_tipo.sort_values('Total Atual', ascending=False).iterrows():
-            pct  = r['Total Atual'] / total_fii * 100 if total_fii > 0 else 0
-            col  = c1 if r['tipo_fii'] == 'tijolo' else c2
-            n    = n_tijolo if r['tipo_fii'] == 'tijolo' else n_papel
-            sufx = idx_info if r['tipo_fii'] == 'papel' else ""
-            col.metric(f"{r['tipo_fii']} ({n})  ·  {abreviar_rs(r['Total Atual'])}{sufx}".replace('.', ','),
-                       f"{fmt_pct(pct)}".replace('.', ','))
+            c6, c7, c8 = st.columns(3)
+            for _, r in resumo_tipo.sort_values('Total Atual', ascending=False).iterrows():
+                pct  = r['Total Atual'] / total_fii * 100 if total_fii > 0 else 0
+                col  = c6 if r['tipo_fii'] == 'tijolo' else c7
+                n    = n_tijolo if r['tipo_fii'] == 'tijolo' else n_papel
+                sufx = idx_info if r['tipo_fii'] == 'papel' else ""
+                col.metric(f"{r['tipo_fii']} ({n})  ·  {abreviar_rs(r['Total Atual'])}{sufx}".replace('.', ','),
+                           f"{fmt_pct(pct)}".replace('.', ','))
 
         st.markdown("---")
 
