@@ -649,10 +649,26 @@ def ler_renda_taxas():
     except Exception:
         return pd.DataFrame(columns=RENDA_HEADERS)
 
+def _garantir_aba_existe(svc, nome_aba, headers=None):
+    """cria a aba no Sheets se ainda não existir, com cabeçalho opcional"""
+    meta = svc.get(spreadsheetId=SHEET_ID).execute()
+    existentes = [s['properties']['title'] for s in meta.get('sheets', [])]
+    if nome_aba not in existentes:
+        svc.batchUpdate(
+            spreadsheetId=SHEET_ID,
+            body={"requests": [{"addSheet": {"properties": {"title": nome_aba}}}]}
+        ).execute()
+        if headers:
+            svc.values().update(
+                spreadsheetId=SHEET_ID, range=f"{nome_aba}!A1",
+                valueInputOption="USER_ENTERED", body={"values": [headers]}
+            ).execute()
+
 def salvar_renda_taxas(df_novo):
     """sobrescreve a aba inteira com o conteúdo do extrato mais recente (fonte é sempre o extrato completo)"""
     try:
         svc = get_sheets_service()
+        _garantir_aba_existe(svc, SHEET_RENDA_TAB, RENDA_HEADERS)
         svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_TAB}!A:C").execute()
         fmt_rows = [RENDA_HEADERS] + [
             [r['data'], str(r['valor_investido']).replace('.', ','), str(r['taxa_contratada_pct']).replace('.', ',')]
