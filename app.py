@@ -140,25 +140,25 @@ st.markdown("""
                 font-size: 1rem !important;
             }
 
-            /* cards por ETF: 5 infos numa linha só, bem compactas */
+            /* cards por ETF: 3 infos por linha (ativo/preço/total em cima, valorização/holding embaixo) */
             [class*="st-key-row_etf_"] [data-testid="stHorizontalBlock"] {
-                flex-wrap: nowrap !important;
-                gap: 0.2rem !important;
+                flex-wrap: wrap !important;
+                gap: 0.3rem !important;
             }
             [class*="st-key-row_etf_"] [data-testid="column"],
             [class*="st-key-row_etf_"] [data-testid="stColumn"] {
-                min-width: 19% !important;
-                width: 19% !important;
-                flex: 1 1 19% !important;
+                min-width: 31% !important;
+                width: 31% !important;
+                flex: 1 1 31% !important;
             }
             [class*="st-key-row_etf_"] [data-testid="stMetric"] label {
-                font-size: 0.55rem !important;
+                font-size: 0.62rem !important;
             }
             [class*="st-key-row_etf_"] [data-testid="stMetricValue"] {
-                font-size: 0.8rem !important;
+                font-size: 0.95rem !important;
             }
             [class*="st-key-row_etf_"] .valorizacao-pct {
-                font-size: 0.8rem !important;
+                font-size: 0.95rem !important;
             }
         }
 
@@ -1742,13 +1742,15 @@ with aba_detalhe:
             holding     = holding_ponderado_meses(ativo, _df_lanc_raw)
 
             with st.container(key=f"row_etf_{ativo}"):
-                c1, c2, c3, c4, c5 = st.columns(5)
                 _qtd_str = str(int(qtd)) if qtd == int(qtd) else f"{qtd:.2f}".replace('.', ',')
-                c1.metric("ativo", ativo)
-                c2.metric(f"preço  ·  (~{formatar_brl(pm)})", formatar_brl(preco))
-                card_valorizacao(c3, var_rs, var_pct_e)
-                c4.metric(f"total  ·  ({_qtd_str})", abreviar_rs(total_atual))
-                c5.metric("holding ponderado", fmt_holding(holding))
+                r1c1, r1c2, r1c3 = st.columns(3)
+                r1c1.metric("ativo", ativo)
+                r1c2.metric(f"preço  ·  (~{formatar_brl(pm)})", formatar_brl(preco))
+                r1c3.metric(f"total  ·  ({_qtd_str})", abreviar_rs(total_atual))
+
+                r2c1, r2c2, r2c3 = st.columns(3)
+                card_valorizacao(r2c2, var_rs, var_pct_e)
+                r2c3.metric("~holding", fmt_holding(holding))
 
             st.markdown("---")
 
