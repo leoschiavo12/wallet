@@ -160,6 +160,39 @@ st.markdown("""
             [class*="st-key-row_etf_"] .valorizacao-pct {
                 font-size: 0.95rem !important;
             }
+
+            /* mesma estrutura (3 colunas, 2 linhas) para cripto, tesouro e FIIs */
+            [class*="st-key-row_cripto_"] [data-testid="stHorizontalBlock"],
+            [class*="st-key-row_tesouro_"] [data-testid="stHorizontalBlock"],
+            [class*="st-key-row_fii_ativo_"] [data-testid="stHorizontalBlock"] {
+                flex-wrap: wrap !important;
+                gap: 0.3rem !important;
+            }
+            [class*="st-key-row_cripto_"] [data-testid="column"],
+            [class*="st-key-row_cripto_"] [data-testid="stColumn"],
+            [class*="st-key-row_tesouro_"] [data-testid="column"],
+            [class*="st-key-row_tesouro_"] [data-testid="stColumn"],
+            [class*="st-key-row_fii_ativo_"] [data-testid="column"],
+            [class*="st-key-row_fii_ativo_"] [data-testid="stColumn"] {
+                min-width: 31% !important;
+                width: 31% !important;
+                flex: 1 1 31% !important;
+            }
+            [class*="st-key-row_cripto_"] [data-testid="stMetric"] label,
+            [class*="st-key-row_tesouro_"] [data-testid="stMetric"] label,
+            [class*="st-key-row_fii_ativo_"] [data-testid="stMetric"] label {
+                font-size: 0.62rem !important;
+            }
+            [class*="st-key-row_cripto_"] [data-testid="stMetricValue"],
+            [class*="st-key-row_tesouro_"] [data-testid="stMetricValue"],
+            [class*="st-key-row_fii_ativo_"] [data-testid="stMetricValue"] {
+                font-size: 0.95rem !important;
+            }
+            [class*="st-key-row_cripto_"] .valorizacao-pct,
+            [class*="st-key-row_tesouro_"] .valorizacao-pct,
+            [class*="st-key-row_fii_ativo_"] .valorizacao-pct {
+                font-size: 0.95rem !important;
+            }
         }
 
         /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
@@ -545,6 +578,24 @@ def metric_tag(col, label, valor, rs, pct):
 
 def metric_tag_simples(col, label, valor):
     col.metric(label, valor)
+
+def holding_ponderado_meses(ativo, df_lanc):
+    """holding médio ponderado pelo valor de cada compra, em meses — usado em ETFs, tesouro, cripto e FIIs"""
+    import datetime
+    hoje = datetime.date.today()
+    compras = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'].str.lower() == 'compra')].copy()
+    if compras.empty: return None
+    compras['data_dt'] = pd.to_datetime(compras['data'], format='%d/%m/%Y', errors='coerce')
+    compras['valor']   = compras['quantidade'] * compras['preco_unitario']
+    total_val = compras['valor'].sum()
+    if total_val == 0: return None
+    meses_pond = sum(
+        (row['valor'] / total_val) *
+        ((hoje - row['data_dt'].date()).days / 30.44)
+        for _, row in compras.iterrows()
+        if pd.notna(row['data_dt'])
+    )
+    return round(meses_pond, 1)
 
 
 # ── Tesouro Direto: lê de st.secrets, fallback para valor hardcoded ──────────
@@ -1577,6 +1628,31 @@ with aba_detalhe:
 
         st.markdown("---")
 
+        # ── cards por FII (mesmo padrão de ETFs/tesouro/cripto) ────────────────
+        for _, row in df_fii.sort_values('Total Atual', ascending=False).iterrows():
+            _ativo_f  = row['Ativo']
+            _qtd_f    = float(row['Qtd'])
+            _preco_f  = row['preco_unit']
+            _total_f  = row['Total Atual']
+            _custo_f  = row['custo_total']
+            _pm_f     = row['preco_medio']
+            _var_f_rs  = _total_f - _custo_f
+            _var_f_pct = _var_f_rs / _custo_f * 100 if _custo_f > 0 else 0
+            _holding_f = holding_ponderado_meses(_ativo_f, _df_lanc_raw)
+            _qtd_f_str = str(int(_qtd_f)) if _qtd_f == int(_qtd_f) else f"{_qtd_f:.2f}".replace('.', ',')
+
+            with st.container(key=f"row_fii_ativo_{_ativo_f}"):
+                r1c1, r1c2, r1c3 = st.columns(3)
+                r1c1.metric("ativo", _ativo_f)
+                r1c2.metric(f"preço  ·  (~{formatar_brl(_pm_f)})", formatar_brl(_preco_f))
+                r1c3.metric(f"total  ·  ({_qtd_f_str})", abreviar_rs(_total_f))
+
+                r2c1, r2c2, r2c3 = st.columns(3)
+                card_valorizacao(r2c2, _var_f_rs, _var_f_pct)
+                r2c3.metric("~holding", fmt_holding(_holding_f))
+
+            st.markdown("---")
+
         # calcular preço médio por FII dos lançamentos
         lanc_df = _df_lanc_raw
         pm_fii = {}
@@ -1639,23 +1715,6 @@ with aba_detalhe:
         var_etf_rs       = total_etf - total_inv_etf
         var_etf_pct      = var_etf_rs / total_inv_etf * 100 if total_inv_etf > 0 else 0
         df_etf['part_classe_%'] = df_etf['Total Atual'] / total_etf * 100
-
-        def holding_ponderado_meses(ativo, df_lanc):
-            import datetime
-            hoje = datetime.date.today()
-            compras = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'].str.lower() == 'compra')].copy()
-            if compras.empty: return None
-            compras['data_dt'] = pd.to_datetime(compras['data'], format='%d/%m/%Y', errors='coerce')
-            compras['valor']   = compras['quantidade'] * compras['preco_unitario']
-            total_val = compras['valor'].sum()
-            if total_val == 0: return None
-            meses_pond = sum(
-                (row['valor'] / total_val) *
-                ((hoje - row['data_dt'].date()).days / 30.44)
-                for _, row in compras.iterrows()
-                if pd.notna(row['data_dt'])
-            )
-            return round(meses_pond, 1)
 
         # holding médio ponderado da classe
         _holding_classe = 0.0
@@ -1790,12 +1849,15 @@ with aba_detalhe:
 
         _btc_qtd_str  = f"{qtd_btc:.4f}".replace('.', ',')
         _btc_holding  = holding_ponderado_meses('BTC', _df_lanc_raw)
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("ativo", "BTC")
-        c2.metric(f"preço  ·  (~{abreviar_rs(_btc_pm)})", abreviar_rs(preco_btc_atual))
-        card_valorizacao(c3, _btc_var_rs, _btc_var_pct)
-        c4.metric(f"total  ·  ({_btc_qtd_str})", abreviar_rs(total_btc))
-        c5.metric("holding ponderado", fmt_holding(_btc_holding))
+        with st.container(key="row_cripto_BTC"):
+            r1c1, r1c2, r1c3 = st.columns(3)
+            r1c1.metric("ativo", "BTC")
+            r1c2.metric(f"preço  ·  (~{abreviar_rs(_btc_pm)})", abreviar_rs(preco_btc_atual))
+            r1c3.metric(f"total  ·  ({_btc_qtd_str})", abreviar_rs(total_btc))
+
+            r2c1, r2c2, r2c3 = st.columns(3)
+            card_valorizacao(r2c2, _btc_var_rs, _btc_var_pct)
+            r2c3.metric("~holding", fmt_holding(_btc_holding))
 
         st.markdown("---")
 
@@ -1873,15 +1935,18 @@ with aba_detalhe:
             _qtd_fmt    = f"{qtd:.2f}".replace(".", ",") if qtd != int(qtd) else str(int(qtd))
             _pm_fmt     = formatar_brl(pm) if pm > 0 else "—"
             _td_holding = holding_ponderado_meses(ativo, _df_lanc_raw)
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("ativo", ativo)
-            c2.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
-            if valorizacao is not None and valorizacao_pct is not None:
-                card_valorizacao(c3, valorizacao, valorizacao_pct)
-            else:
-                c3.metric("valorização", "—")
-            c4.metric(f"total  ·  ({_qtd_fmt})", abreviar_rs(total_atual))
-            c5.metric("holding ponderado", fmt_holding(_td_holding))
+            with st.container(key=f"row_tesouro_{ativo}"):
+                r1c1, r1c2, r1c3 = st.columns(3)
+                r1c1.metric("ativo", ativo)
+                r1c2.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
+                r1c3.metric(f"total  ·  ({_qtd_fmt})", abreviar_rs(total_atual))
+
+                r2c1, r2c2, r2c3 = st.columns(3)
+                if valorizacao is not None and valorizacao_pct is not None:
+                    card_valorizacao(r2c2, valorizacao, valorizacao_pct)
+                else:
+                    r2c2.metric("valorização", "—")
+                r2c3.metric("~holding", fmt_holding(_td_holding))
 
             if 'preco_renda_auto' in st.session_state:
                 st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
