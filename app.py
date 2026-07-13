@@ -509,6 +509,41 @@ def calcular_projecao_renda_mais(saldo_atual, taxa_real_aa, aporte_mensal, ano_c
         'total_recebido_20anos': parcela_mensal * n_pag,
     }
 
+def calcular_trajetoria_renda_mais(saldo_atual, taxa_real_aa, aporte_mensal, ano_conversao=2050,
+                                    anos_pagamento=20, mes_atual=None, ano_atual=None):
+    """
+    Série anual do saldo do Renda+: acumulação (hoje até a conversão) + consumo
+    da anuidade (conversão até o fim dos 20 anos de pagamento). Usada só para o gráfico
+    (a projeção "oficial" de saldo/parcela vem de calcular_projecao_renda_mais).
+    """
+    import datetime as _dt
+    hoje = _dt.date.today()
+    ano_atual = ano_atual or hoje.year
+    mes_atual = mes_atual or hoje.month
+    taxa_m = (1 + taxa_real_aa) ** (1/12) - 1
+    meses_ate_conversao = max((ano_conversao - ano_atual) * 12 - (mes_atual - 1), 0)
+
+    pontos = []
+    saldo = saldo_atual
+    for m in range(0, meses_ate_conversao + 1):
+        ano_ref = ano_atual + (mes_atual - 1 + m) / 12
+        if m % 12 == 0 or m == meses_ate_conversao:
+            pontos.append({'ano': ano_ref, 'saldo': saldo, 'fase': 'acumulação'})
+        saldo = saldo * (1 + taxa_m) + aporte_mensal
+
+    saldo_conversao = pontos[-1]['saldo'] if pontos else saldo_atual
+    n_pag = anos_pagamento * 12
+    parcela = (saldo_conversao * taxa_m / (1 - (1 + taxa_m) ** -n_pag)) if taxa_m > 0 else (saldo_conversao / n_pag)
+
+    saldo2 = saldo_conversao
+    for m in range(1, n_pag + 1):
+        saldo2 = saldo2 * (1 + taxa_m) - parcela
+        ano_ref = ano_conversao + m / 12
+        if m % 12 == 0 or m == n_pag:
+            pontos.append({'ano': ano_ref, 'saldo': max(saldo2, 0), 'fase': 'pagamento'})
+
+    return pd.DataFrame(pontos)
+
 SHEET_PM_TAB = "precos_mensais"
 PM_HEADERS   = ["ano_mes", "ativo", "preco_fechamento"]
 
@@ -1772,6 +1807,61 @@ with aba_detalhe:
                         f"projeção em termos reais (poder de compra de hoje) · {_anos_restantes:.0f} anos até a conversão · "
                         f"não desconta IR (tabela regressiva) nem taxa de custódia sobre excedente de 6 salários mínimos."
                     )
+
+                    # gráfico de trajetória: acumulação até 2050 + consumo da anuidade até ~2069/2070
+                    _df_traj = calcular_trajetoria_renda_mais(
+                        saldo_atual=total_atual, taxa_real_aa=_taxa_pct / 100, aporte_mensal=_aporte_v
+                    )
+                    _fig_traj = go.Figure()
+                    _df_acum = _df_traj[_df_traj['fase'] == 'acumulação']
+                    _df_pag  = _df_traj[_df_traj['fase'] == 'pagamento']
+                    _fig_traj.add_trace(go.Scatter(
+                        x=_df_acum['ano'], y=_df_acum['saldo'], name='acumulação (aportes + juros)',
+                        fill='tozeroy', mode='lines', line=dict(color='#2E86AB', width=2),
+                        fillcolor='rgba(46,134,171,0.2)',
+                        hovertemplate='%{x:.0f}: R$ %{y:,.0f}<extra></extra>'
+                    ))
+                    _fig_traj.add_trace(go.Scatter(
+                        x=_df_pag['ano'], y=_df_pag['saldo'], name='pagamento (renda vitalícia)',
+                        fill='tozeroy', mode='lines', line=dict(color='#06A77D', width=2),
+                        fillcolor='rgba(6,167,125,0.2)',
+                        hovertemplate='%{x:.0f}: R$ %{y:,.0f}<extra></extra>'
+                    ))
+                    _fig_traj.add_vline(x=2050, line_dash='dash', line_color='gray',
+                                         annotation_text='conversão em renda', annotation_position='top')
+                    _fig_traj.update_layout(
+                        height=280, margin=dict(l=10, r=10, t=30, b=10),
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, x=0),
+                        xaxis_title=None, yaxis_title=None, showlegend=True,
+                    )
+                    st.plotly_chart(_fig_traj, use_container_width=True)
+
+                    # sensibilidade: como a renda mensal muda com ±1 p.p. na taxa
+                    st.caption("sensibilidade da renda mensal à taxa (as próximas compras podem travar taxa diferente da atual)")
+                    _cenarios = [
+                        ("taxa −1 p.p.", max(_taxa_pct - 1, 0.1)),
+                        ("taxa atual", _taxa_pct),
+                        ("taxa +1 p.p.", _taxa_pct + 1),
+                    ]
+                    _labels_c, _valores_c = [], []
+                    for _label_c, _t_c in _cenarios:
+                        _proj_c = calcular_projecao_renda_mais(
+                            saldo_atual=total_atual, taxa_real_aa=_t_c / 100, aporte_mensal=_aporte_v
+                        )
+                        _labels_c.append(f"{_label_c}<br>(IPCA+{_t_c:.2f}%)".replace('.', ','))
+                        _valores_c.append(_proj_c['parcela_mensal'])
+
+                    _fig_sens = go.Figure(go.Bar(
+                        x=_labels_c, y=_valores_c,
+                        text=[formatar_brl(v) for v in _valores_c], textposition='outside',
+                        marker_color=['#A8A8A8', '#2E86AB', '#A8A8A8'],
+                        hovertemplate='%{text}<extra></extra>'
+                    ))
+                    _fig_sens.update_layout(
+                        height=260, margin=dict(l=10, r=10, t=20, b=10),
+                        yaxis_title=None, showlegend=False,
+                    )
+                    st.plotly_chart(_fig_sens, use_container_width=True)
 
                     st.markdown("---")
                     st.caption("atualizar taxas contratadas — sobe o Extrato Analítico do Tesouro Renda+ (xlsx) sempre que tiver um novo")
