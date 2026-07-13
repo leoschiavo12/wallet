@@ -67,6 +67,42 @@ st.markdown("""
             [data-testid="stDataFrame"] {
                 overflow-x: auto !important;
             }
+
+            /* ── seções específicas (maior especificidade sobrescreve a regra geral acima) ── */
+
+            /* linha de exposição geográfica: 4 itens numa linha só, mais compactos */
+            .st-key-row_geo [data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 0.25rem !important;
+            }
+            .st-key-row_geo [data-testid="column"],
+            .st-key-row_geo [data-testid="stColumn"] {
+                min-width: 23% !important;
+                width: 23% !important;
+                flex: 1 1 23% !important;
+            }
+            .st-key-row_geo [data-testid="stMetric"] label {
+                font-size: 0.6rem !important;
+            }
+            .st-key-row_geo [data-testid="stMetricValue"] {
+                font-size: 0.95rem !important;
+            }
+
+            /* linha donut + gráfico mensal: empilha em vez de espremer lado a lado */
+            .st-key-row_dashboard_chart [data-testid="stHorizontalBlock"] {
+                flex-direction: column !important;
+            }
+            .st-key-row_dashboard_chart [data-testid="column"],
+            .st-key-row_dashboard_chart [data-testid="stColumn"] {
+                width: 100% !important;
+                min-width: 100% !important;
+                flex: 1 1 100% !important;
+            }
+
+            /* card de valorização: alinhar tamanho de fonte ao st.metric nativo */
+            .valorizacao-pct {
+                font-size: 1.25rem !important;
+            }
         }
 
         /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
@@ -441,7 +477,7 @@ def card_valorizacao(col, rs, pct):
         f"<div style='padding-top:4px'>"
         f"<p style='font-size:0.875rem;color:rgba(250,250,250,0.6);margin:0 0 6px 0'>"
         f"valorização · {_rs_str}</p>"
-        f"<p style='font-size:1.75rem;font-weight:500;color:{cor};margin:0;line-height:1.1'>"
+        f"<p class='valorizacao-pct' style='font-size:1.75rem;font-weight:500;color:{cor};margin:0;line-height:1.1'>"
         f"{sinal} {_pct_str}</p></div>",
         unsafe_allow_html=True
     )
@@ -1190,106 +1226,115 @@ with aba_dash:
 
     st.markdown('---')
 
-    # ── linha 1: donut + gráfico mensal lado a lado ───────────────────────────
-    col_donut, col_mensal = st.columns([1, 2])
+    # ── linha 1: donut + gráfico mensal lado a lado (empilha no mobile) ───────
+    _ctx_dashboard_chart = st.container(key="row_dashboard_chart")
+    with _ctx_dashboard_chart:
+        col_donut, col_mensal = st.columns([1, 2])
 
-    with col_donut:
-        total_classe = df_resumo_classe['Total Atual'].sum()
-        labels_donut, hover_donut = [], []
-        for _, row in df_resumo_classe.iterrows():
-            pct    = row['Total Atual'] / total_classe * 100
-            labels_donut.append(f"{row['Classe']}<br>{fmt_pct(pct)}".replace('.', ','))
-            hover_donut.append(f"<b>{row['Classe']}</b><br>{fmt_pct(pct)}<br>{formatar_brl(row['Total Atual'])}".replace('.', ','))
+        with col_donut:
+            total_classe = df_resumo_classe['Total Atual'].sum()
+            labels_donut, hover_donut = [], []
+            for _, row in df_resumo_classe.iterrows():
+                pct    = row['Total Atual'] / total_classe * 100
+                labels_donut.append(f"{row['Classe']}<br>{fmt_pct(pct)}".replace('.', ','))
+                hover_donut.append(f"<b>{row['Classe']}</b><br>{fmt_pct(pct)}<br>{formatar_brl(row['Total Atual'])}".replace('.', ','))
 
-        fig_donut = go.Figure(go.Pie(
-            labels=labels_donut,
-            values=df_resumo_classe['Total Atual'].tolist(),
-            hole=0.75,
-            textinfo='label',
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='%{customdata}<extra></extra>',
-            customdata=hover_donut,
-            marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)]),
-            domain=dict(x=[0.1, 0.9], y=[0.1, 0.9])
-        ))
-        fig_donut.update_layout(
-            dragmode=False,
-            margin=dict(t=60, b=60, l=60, r=60),
-            height=400, showlegend=False,
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
-        )
-        st.plotly_chart(fig_donut, width="stretch", config={"displayModeBar": False})
-
-    with col_mensal:
-        import calendar as _cal
-        import datetime as _dt
-        hoje_dt   = _dt.date.today()
-        mes_atual = f"{hoje_dt.year}-{hoje_dt.month:02d}"
-
-        if not _df_pm.empty and 'ano_mes' in _df_pm.columns:
-            meses_pm = sorted(_df_pm['ano_mes'].unique())
-            meses_pm = [m for m in meses_pm if m < mes_atual]
-        else:
-            meses_pm = []
-
-        if meses_pm:
-            # usar função cacheada — evita recalcular 39× a cada render
-            _vals_cache = calcular_valores_mensais(
-                _df_lanc_raw.to_dict(orient='records'),
-                _df_pm.to_dict(orient='records')
-            )
-            vals_mensais = [{'mes': pd.to_datetime(v['mes']), 'total': v['total'],
-                             'label': pd.to_datetime(v['mes']).strftime('%b/%y'), 'atual': False}
-                            for v in _vals_cache]
-
-            # adicionar barra do mês atual com valor de mercado corrente
-            vals_mensais.append({
-                'mes':   pd.to_datetime(f"{mes_atual}-01"),
-                'total': total_geral,
-                'label': pd.to_datetime(f"{mes_atual}-01").strftime('%b/%y') + " ●",
-                'atual': True,
-            })
-
-            df_mensal = pd.DataFrame(vals_mensais)
-            df_mensal['cor']   = df_mensal['atual'].apply(lambda x: "#64B5F6" if x else "#1E88E5")
-            df_mensal['hover'] = df_mensal.apply(
-                lambda r: f"<b>{r['label'].replace(' ●','')}</b>"
-                          + (" <i>(atual)</i>" if r['atual'] else "")
-                          + f"<br>{formatar_brl(r['total'])}", axis=1
-            )
-
-            # próxima meta — próximo múltiplo de 10k acima do máximo
-            _max_val = df_mensal['total'].max()
-            _meta    = (int(_max_val // 10000) + 1) * 10000
-            y_max    = _meta * 1.05
-            _ticks   = list(range(0, int(_meta) + 1, 10000))
-
-            fig_mensal = go.Figure()
-            fig_mensal.add_trace(go.Bar(
-                x=df_mensal['mes'], y=df_mensal['total'],
-                marker_color=df_mensal['cor'].tolist(),
-                hovertemplate="%{customdata}<extra></extra>",
-                customdata=df_mensal['hover'].tolist(),
+            fig_donut = go.Figure(go.Pie(
+                labels=labels_donut,
+                values=df_resumo_classe['Total Atual'].tolist(),
+                hole=0.75,
+                textinfo='label',
+                textposition='outside',
+                textfont=dict(size=10),
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=hover_donut,
+                marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)]),
+                domain=dict(x=[0.1, 0.9], y=[0.1, 0.9])
             ))
-            fig_mensal.update_layout(
-            dragmode=False,
-                height=400,
-                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                showlegend=False, bargap=0.2,
-                xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45),
-                yaxis=dict(
-                    showgrid=True, gridcolor="#333",
-                    range=[0, y_max],
-                    tickmode='array',
-                    tickvals=_ticks,
-                    ticktext=[f"{v//1000:.0f}k" if v > 0 else "0" for v in _ticks],
-                ),
-                margin=dict(t=10, b=10, l=10, r=10)
+            fig_donut.update_layout(
+                dragmode=False,
+                margin=dict(t=60, b=60, l=60, r=60),
+                height=400, showlegend=False,
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
-            st.plotly_chart(fig_mensal, width="stretch", config={"displayModeBar": False})
-        else:
-            st.info("preços mensais históricos ainda não disponíveis. serão populados automaticamente no próximo carregamento.")
+            st.plotly_chart(
+                fig_donut, width="stretch",
+                config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+            )
+
+        with col_mensal:
+            import calendar as _cal
+            import datetime as _dt
+            hoje_dt   = _dt.date.today()
+            mes_atual = f"{hoje_dt.year}-{hoje_dt.month:02d}"
+
+            if not _df_pm.empty and 'ano_mes' in _df_pm.columns:
+                meses_pm = sorted(_df_pm['ano_mes'].unique())
+                meses_pm = [m for m in meses_pm if m < mes_atual]
+            else:
+                meses_pm = []
+
+            if meses_pm:
+                # usar função cacheada — evita recalcular 39× a cada render
+                _vals_cache = calcular_valores_mensais(
+                    _df_lanc_raw.to_dict(orient='records'),
+                    _df_pm.to_dict(orient='records')
+                )
+                vals_mensais = [{'mes': pd.to_datetime(v['mes']), 'total': v['total'],
+                                 'label': pd.to_datetime(v['mes']).strftime('%b/%y'), 'atual': False}
+                                for v in _vals_cache]
+
+                # adicionar barra do mês atual com valor de mercado corrente
+                vals_mensais.append({
+                    'mes':   pd.to_datetime(f"{mes_atual}-01"),
+                    'total': total_geral,
+                    'label': pd.to_datetime(f"{mes_atual}-01").strftime('%b/%y') + " ●",
+                    'atual': True,
+                })
+
+                df_mensal = pd.DataFrame(vals_mensais)
+                df_mensal['cor']   = df_mensal['atual'].apply(lambda x: "#64B5F6" if x else "#1E88E5")
+                df_mensal['hover'] = df_mensal.apply(
+                    lambda r: f"<b>{r['label'].replace(' ●','')}</b>"
+                              + (" <i>(atual)</i>" if r['atual'] else "")
+                              + f"<br>{formatar_brl(r['total'])}", axis=1
+                )
+
+                # próxima meta — próximo múltiplo de 10k acima do máximo
+                _max_val = df_mensal['total'].max()
+                _meta    = (int(_max_val // 10000) + 1) * 10000
+                y_max    = _meta * 1.05
+                _ticks   = list(range(0, int(_meta) + 1, 10000))
+
+                fig_mensal = go.Figure()
+                fig_mensal.add_trace(go.Bar(
+                    x=df_mensal['mes'], y=df_mensal['total'],
+                    marker_color=df_mensal['cor'].tolist(),
+                    hovertemplate="%{customdata}<extra></extra>",
+                    customdata=df_mensal['hover'].tolist(),
+                ))
+                fig_mensal.update_layout(
+                    dragmode=False,
+                    height=400,
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    showlegend=False, bargap=0.2,
+                    xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45, fixedrange=True),
+                    yaxis=dict(
+                        showgrid=True, gridcolor="#333",
+                        range=[0, y_max],
+                        tickmode='array',
+                        tickvals=_ticks,
+                        ticktext=[f"{v//1000:.0f}k" if v > 0 else "0" for v in _ticks],
+                        fixedrange=True,
+                    ),
+                    margin=dict(t=10, b=10, l=10, r=10)
+                )
+                st.plotly_chart(
+                    fig_mensal, width="stretch",
+                    config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                )
+            else:
+                st.info("preços mensais históricos ainda não disponíveis. serão populados automaticamente no próximo carregamento.")
 
     st.markdown('---')
 
@@ -1364,9 +1409,13 @@ with aba_detalhe:
         _var_fii_pct = _var_fii_rs / df_fii['custo_total'].sum() * 100 if df_fii['custo_total'].sum() > 0 else 0
         _pct_fii_carteira = total_fii / total_geral * 100 if total_geral > 0 else 0
 
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2 = st.columns(2)
         c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
         card_valorizacao(c2, _var_fii_rs, _var_fii_pct)
+
+        st.markdown("")
+
+        c3, c4, c5 = st.columns(3)
         _yield_str = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
         _label_mes = f"{meses_pt3[mes_ref_f]}/{ano_ref_f}"
         c3.metric(f"dividendos — {_label_mes}", formatar_brl(div_total))
@@ -1922,16 +1971,18 @@ with aba_detalhe:
             + df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
         geo_totais['Global (cripto)'] = df[df['Classe'] == 'Cripto']['Total Atual'].sum()
         geo_sorted = sorted(geo_totais.items(), key=lambda x: -x[1])
-        cols_geo = st.columns(len(geo_sorted))
-        for i, (pais, val) in enumerate(geo_sorted):
-            pct   = val / total_geral * 100 if total_geral > 0 else 0
-            flag  = GEO_FLAG.get(pais, '')
-            val_k = abreviar_rs(val)
-            cols_geo[i].metric(f"{flag}  ·  {val_k}", f"{fmt_pct(pct)}".replace('.', ','))
+
+        with st.container(key="row_geo"):
+            cols_geo = st.columns(len(geo_sorted))
+            for i, (pais, val) in enumerate(geo_sorted):
+                pct   = val / total_geral * 100 if total_geral > 0 else 0
+                flag  = GEO_FLAG.get(pais, '')
+                val_k = abreviar_rs(val)
+                cols_geo[i].metric(f"{flag}  ·  {val_k}", f"{fmt_pct(pct)}".replace('.', ','))
 
         st.markdown("---")
 
-        # ── linha 2: renda fixa vs variável ──────────────────────────────────
+        # ── linha 2: renda fixa/variável + CDI/IPCA, tudo junto ────────────────
         # LFTB11 é ETF de renda fixa (replica Tesouro Selic) — vai para RF
         _etfs_rf = ['LFTB11']
         total_rf = df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum() + \
@@ -1939,15 +1990,8 @@ with aba_detalhe:
         total_rv = df[(df['Classe'].isin(['ETF','FII','Cripto'])) & (~df['Ativo'].isin(_etfs_rf))]['Total Atual'].sum()
         pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
         pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
-        c1, c2 = st.columns(2)
-        c1.metric(f"renda fixa  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}")
-        c2.metric(f"renda variável  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}")
 
-        st.markdown("---")
-
-        # ── linha 3: CDI vs IPCA ──────────────────────────────────────────────
-        # CDI = LFTB11 + FIIs papel CDI
-        # IPCA = Renda+ 2050 + FIIs papel IPCA
+        # CDI = LFTB11 + FIIs papel CDI · IPCA = Renda+ 2050 + FIIs papel IPCA
         _df_fii_idx = df[df['Classe'] == 'FII'].copy()
         _df_fii_idx['indexador'] = _df_fii_idx['Ativo'].map(
             lambda t: FII_INFO.get(t, {}).get('indexador'))
@@ -1959,9 +2003,11 @@ with aba_detalhe:
         pct_cdi    = total_cdi  / total_geral * 100 if total_geral > 0 else 0
         pct_ipca   = total_ipca / total_geral * 100 if total_geral > 0 else 0
 
-        c1, c2 = st.columns(2)
-        c1.metric(f"CDI  ·  {abreviar_rs(total_cdi)}", fmt_pct(pct_cdi))
-        c2.metric(f"IPCA+  ·  {abreviar_rs(total_ipca)}", fmt_pct(pct_ipca))
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(f"renda fixa  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}")
+        c2.metric(f"renda variável  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}")
+        c3.metric(f"CDI  ·  {abreviar_rs(total_cdi)}", fmt_pct(pct_cdi))
+        c4.metric(f"IPCA+  ·  {abreviar_rs(total_ipca)}", fmt_pct(pct_ipca))
 
         st.markdown("---")
 
