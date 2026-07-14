@@ -2262,40 +2262,37 @@ with aba_detalhe:
         st.markdown("---")
 
         # ── cards de todos os ativos (mesmo padrão das demais abas) ──────────
-        with st.expander("ver todos os ativos", expanded=False):
-            def _fmt_preco_geral(ativo_nome, preco):
-                return abreviar_rs(preco) if ativo_nome == 'BTC' else formatar_brl(preco)
+        def _fmt_preco_geral(ativo_nome, preco):
+            return abreviar_rs(preco) if ativo_nome == 'BTC' else formatar_brl(preco)
 
-            for _, row in df.sort_values('Total Atual', ascending=False).iterrows():
-                _ativo_g  = row['Ativo']
-                _qtd_g    = float(row['Qtd'])
-                _preco_g  = row['preco_unit']
-                _total_g  = row['Total Atual']
-                _custo_g  = row['custo_total']
-                _pm_g     = row['preco_medio']
-                _var_g_rs  = _total_g - _custo_g
-                _var_g_pct = _var_g_rs / _custo_g * 100 if _custo_g > 0 else 0
-                _holding_g = holding_ponderado_meses(_ativo_g, _df_lanc_raw)
-                _qtd_g_str = (
-                    f"{_qtd_g:.6f}".replace('.', ',') if _qtd_g < 1
-                    else f"{_qtd_g:.2f}".replace('.', ',') if row['Classe'] == 'Tesouro Direto'
-                    else str(int(_qtd_g)) if _qtd_g == int(_qtd_g)
-                    else f"{_qtd_g:.2f}".replace('.', ',')
-                )
+        for _, row in df.sort_values('Total Atual', ascending=False).iterrows():
+            _ativo_g  = row['Ativo']
+            _qtd_g    = float(row['Qtd'])
+            _preco_g  = row['preco_unit']
+            _total_g  = row['Total Atual']
+            _custo_g  = row['custo_total']
+            _pm_g     = row['preco_medio']
+            _var_g_rs  = _total_g - _custo_g
+            _var_g_pct = _var_g_rs / _custo_g * 100 if _custo_g > 0 else 0
+            _holding_g = holding_ponderado_meses(_ativo_g, _df_lanc_raw)
+            _qtd_g_str = (
+                f"{_qtd_g:.6f}".replace('.', ',') if _qtd_g < 1
+                else f"{_qtd_g:.2f}".replace('.', ',') if row['Classe'] == 'Tesouro Direto'
+                else str(int(_qtd_g)) if _qtd_g == int(_qtd_g)
+                else f"{_qtd_g:.2f}".replace('.', ',')
+            )
 
-                with st.container(key=f"row_all_{_ativo_g}"):
-                    r1c1, r1c2, r1c3 = st.columns(3)
-                    r1c1.metric("ativo", _ativo_g)
-                    r1c2.metric(f"preço  ·  (~{_fmt_preco_geral(_ativo_g, _pm_g)})", _fmt_preco_geral(_ativo_g, _preco_g))
-                    r1c3.metric(f"total  ·  ({_qtd_g_str})", abreviar_rs(_total_g))
+            with st.container(key=f"row_all_{_ativo_g}"):
+                r1c1, r1c2, r1c3 = st.columns(3)
+                r1c1.metric("ativo", _ativo_g)
+                r1c2.metric(f"preço  ·  (~{_fmt_preco_geral(_ativo_g, _pm_g)})", _fmt_preco_geral(_ativo_g, _preco_g))
+                r1c3.metric(f"total  ·  ({_qtd_g_str})", abreviar_rs(_total_g))
 
-                    r2c1, r2c2, r2c3 = st.columns(3)
-                    card_valorizacao(r2c2, _var_g_rs, _var_g_pct)
-                    r2c3.metric("~holding", fmt_holding(_holding_g))
+                r2c1, r2c2, r2c3 = st.columns(3)
+                card_valorizacao(r2c2, _var_g_rs, _var_g_pct)
+                r2c3.metric("~holding", fmt_holding(_holding_g))
 
-                st.markdown("---")
-
-        st.markdown("---")
+            st.markdown("---")
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
 with aba_lanc:
@@ -2418,7 +2415,6 @@ with aba_lanc:
             return
 
         # ── histórico ────────────────────────────────────────────────────────
-        st.subheader("histórico")
         # guardar índice original (posição no Sheets = índice + 2)
         df_hist = df_lanc.copy().reset_index(drop=True)
         df_hist["_sheet_row"] = df_hist.index + 2  # linha real no Sheets (1-based, +1 header)
@@ -2437,15 +2433,16 @@ with aba_lanc:
         df_hist_fmt["valor"] = df_hist_fmt["valor"].apply(
             lambda x: formatar_brl(x) if pd.notna(x) else "")
 
-        cols_show = ["#", "data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
-        cfg_hist  = {c: st.column_config.TextColumn(c, alignment="center") for c in cols_show}
-        st.dataframe(df_hist_fmt[cols_show], width="stretch",
-                     hide_index=True, column_config=cfg_hist)
+        with st.expander("histórico", expanded=False):
+            cols_show = ["#", "data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
+            cfg_hist  = {c: st.column_config.TextColumn(c, alignment="center") for c in cols_show}
+            st.dataframe(df_hist_fmt[cols_show], width="stretch",
+                         hide_index=True, column_config=cfg_hist)
 
-        st.markdown("---")
+            st.markdown("---")
 
-        # ── excluir ──────────────────────────────────────────────────────────
-        with st.expander("excluir lançamento"):
+            # ── excluir lançamento (aqui, junto com o histórico que ele referencia) ──
+            st.caption("excluir lançamento")
             idx_del = st.number_input(
                 "número # do lançamento (conforme tabela acima)",
                 min_value=1, max_value=n, step=1, value=1,
@@ -2479,40 +2476,6 @@ with aba_lanc:
                     except Exception as e:
                         st.error(f"erro: {e}")
                     st.rerun(scope="fragment")
-
-        st.markdown("---")
-
-        # ── preço médio por ativo ─────────────────────────────────────────────
-        st.subheader("preço médio por ativo")
-        saldo_ativo = df_lanc.groupby("ativo").apply(
-            lambda g: (g["quantidade"] * g["sinal"]).sum()
-        ).reset_index()
-        saldo_ativo.columns = ["ativo", "saldo"]
-        ativos_ativos = saldo_ativo[saldo_ativo["saldo"] > 0.001]["ativo"].tolist()
-
-        rows_pm = []
-        for ativo in sorted(ativos_ativos):
-            compras_a = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'] == 'compra')]
-            if not compras_a.empty:
-                tot_c = (compras_a['quantidade'] * compras_a['preco_unitario']).sum()
-                qtd_c = compras_a['quantidade'].sum()
-                rows_pm.append({
-                    'ativo': ativo,
-                    'total investido': tot_c,
-                    'qtd comprada': qtd_c,
-                    'preco medio': tot_c / qtd_c if qtd_c > 0 else 0
-                })
-
-        if rows_pm:
-            pm_fmt = pd.DataFrame(rows_pm)
-            pm_fmt['total investido'] = pm_fmt['total investido'].apply(formatar_brl)
-            pm_fmt['qtd comprada']    = pm_fmt['qtd comprada'].apply(
-                lambda x: f"{x:.8f}".rstrip('0').rstrip('.').replace('.', ',') if x < 1
-                else f"{x:g}".replace('.', ',')
-            )
-            pm_fmt['preco medio'] = pm_fmt['preco medio'].apply(formatar_brl)
-            cfg_pm = {c: st.column_config.TextColumn(c, alignment="center") for c in pm_fmt.columns}
-            st.dataframe(pm_fmt, width="stretch", hide_index=True, column_config=cfg_pm)
 
     aba_lancamentos_fragment()
 
