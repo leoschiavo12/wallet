@@ -193,6 +193,39 @@ st.markdown("""
             [class*="st-key-row_fii_ativo_"] .valorizacao-pct {
                 font-size: 0.95rem !important;
             }
+
+            /* resumo ETF (total/valorização/holding médio): 3 numa linha */
+            .st-key-row_etf_resumo [data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 0.3rem !important;
+            }
+            .st-key-row_etf_resumo [data-testid="column"],
+            .st-key-row_etf_resumo [data-testid="stColumn"] {
+                min-width: 31% !important;
+                width: 31% !important;
+                flex: 1 1 31% !important;
+            }
+            .st-key-row_etf_resumo [data-testid="stMetric"] label {
+                font-size: 0.62rem !important;
+            }
+            .st-key-row_etf_resumo [data-testid="stMetricValue"] {
+                font-size: 0.95rem !important;
+            }
+            .st-key-row_etf_resumo .valorizacao-pct {
+                font-size: 0.95rem !important;
+            }
+
+            /* variações do BTC: 3 colunas x 2 linhas alinhadas */
+            .st-key-row_cripto_variacoes [data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 0.3rem !important;
+            }
+            .st-key-row_cripto_variacoes [data-testid="column"],
+            .st-key-row_cripto_variacoes [data-testid="stColumn"] {
+                min-width: 31% !important;
+                width: 31% !important;
+                flex: 1 1 31% !important;
+            }
         }
 
         /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
@@ -1722,11 +1755,12 @@ with aba_detalhe:
                 _holding_classe += (_h * row['custo_total'] / total_inv_etf)
 
         # ── linha 1: resumo da classe + donut ────────────────────────────────
-        c1, c2, c3 = st.columns(3)
-        _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
-        c1.metric(f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira))
-        card_valorizacao(c2, var_etf_rs, var_etf_pct)
-        c3.metric("holding médio", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
+        with st.container(key="row_etf_resumo"):
+            c1, c2, c3 = st.columns(3)
+            _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
+            c1.metric(f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira))
+            card_valorizacao(c2, var_etf_rs, var_etf_pct)
+            c3.metric("holding médio", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
 
 
 
@@ -1859,30 +1893,35 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
-        for col, label, v in [
-            (c1, "hoje",    var_1d),
-            (c2, "7 dias",  var_7d),
-            (c3, "30 dias", var_30d),
-            (c4, "6 meses", var_6m),
-            (c5, "1 ano",   var_1a),
-            (c6, "5 anos",  var_5a),
-        ]:
-            if v is None:
-                cor, texto = "#888888", "—"
-            elif v >= 0:
-                cor, texto = "#22c55e", f"+{fmt_pct(v)}".replace('.', ',')
-            else:
-                cor, texto = "#ef4444", f"{fmt_pct(v)}".replace('.', ',')
-            col.markdown(
-                f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px;font-family:inherit'>{label}</div>"
-                f"<div style='font-size:1.6rem;font-weight:700;color:{cor};font-family:inherit'>{texto}</div>",
-                unsafe_allow_html=True
-            )
+        with st.container(key="row_cripto_variacoes"):
+            r1c1, r1c2, r1c3 = st.columns(3)
+            r2c1, r2c2, r2c3 = st.columns(3)
+            for col, label, v in [
+                (r1c1, "hoje",    var_1d),
+                (r1c2, "7 dias",  var_7d),
+                (r1c3, "30 dias", var_30d),
+                (r2c1, "6 meses", var_6m),
+                (r2c2, "1 ano",   var_1a),
+                (r2c3, "5 anos",  var_5a),
+            ]:
+                if v is None:
+                    cor, texto = "#888888", "—"
+                elif v >= 0:
+                    cor, texto = "#22c55e", f"+{fmt_pct(v)}".replace('.', ',')
+                else:
+                    cor, texto = "#ef4444", f"{fmt_pct(v)}".replace('.', ',')
+                col.markdown(
+                    f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px;font-family:inherit'>{label}</div>"
+                    f"<div style='font-size:1.6rem;font-weight:700;color:{cor};font-family:inherit'>{texto}</div>",
+                    unsafe_allow_html=True
+                )
 
         st.markdown("---")
         if hist is not None and not hist.empty:
-            st.subheader("últimos 12 meses")
+            st.markdown(
+                "<p style='font-size:1rem;font-weight:600;margin:0 0 0.5rem 0'>últimos 12 meses</p>",
+                unsafe_allow_html=True
+            )
             corte = hist.index.max() - pd.DateOffset(days=365)
             hist_1a = hist[hist.index >= corte]
             fig_btc = go.Figure()
