@@ -548,20 +548,20 @@ def gerar_ticks_pct(max_pct_ativo, step=5):
 def abreviar_rs(valor):
     if valor >= 1_000_000:
         v = f"{valor/1_000_000:.1f}".replace('.', ',')
-        return f"R$ {v}M"
+        return f"R${v}M"
     elif valor >= 1_000:
         v = valor / 1_000
         s = f"{v:.1f}".replace('.', ',')
         if s.endswith(',0'):
             s = s[:-2]
-        return f"R$ {s}k"
+        return f"R${s}k"
     else:
-        return f"R$ {int(valor)}"
+        return f"R${int(valor)}"
 
 def formatar_brl(valor):
     s = f"{valor:,.2f}"
     s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
-    return f"R$ {s}"
+    return f"R${s}"
 
 def fmt_pct(valor):
     """formata % sem casa decimal se for ,0"""
@@ -591,7 +591,7 @@ def tag_var(rs, pct):
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def card_valorizacao(col, rs, pct):
-    """card HTML de valorização: label=valorização · R$ X, valor grande colorido"""
+    """card HTML de valorização: label=valorização · R$X, valor grande colorido"""
     sinal    = "▲" if rs >= 0 else "▼"
     cor      = "#22c55e" if rs >= 0 else "#ef4444"
     _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
@@ -1912,7 +1912,7 @@ with aba_detalhe:
                     cor, texto = "#ef4444", f"{fmt_pct(v)}".replace('.', ',')
                 col.markdown(
                     f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px;font-family:inherit'>{label}</div>"
-                    f"<div style='font-size:1.6rem;font-weight:700;color:{cor};font-family:inherit'>{texto}</div>",
+                    f"<div style='font-size:1.6rem;font-weight:500;color:{cor};font-family:inherit'>{texto}</div>",
                     unsafe_allow_html=True
                 )
 
@@ -1929,7 +1929,7 @@ with aba_detalhe:
                 x=hist_1a.index, y=hist_1a.values,
                 mode="lines",
                 line=dict(color="#F7931A", width=2),
-                hovertemplate="%{x|%d/%m/%Y}<br>R$ %{y:,.0f}<extra></extra>"
+                hovertemplate="%{x|%d/%m/%Y}<br>R$%{y:,.0f}<extra></extra>"
             ))
             fig_btc.update_layout(
             dragmode=False,
@@ -2054,13 +2054,13 @@ with aba_detalhe:
                         x=_df_acum['ano'], y=_df_acum['saldo'], name='acumulação (aportes + juros)',
                         fill='tozeroy', mode='lines', line=dict(color='#2E86AB', width=2),
                         fillcolor='rgba(46,134,171,0.2)',
-                        hovertemplate='%{x:.0f}: R$ %{y:,.0f}<extra></extra>'
+                        hovertemplate='%{x:.0f}: R$%{y:,.0f}<extra></extra>'
                     ))
                     _fig_traj.add_trace(go.Scatter(
                         x=_df_pag['ano'], y=_df_pag['saldo'], name='pagamento (renda vitalícia)',
                         fill='tozeroy', mode='lines', line=dict(color='#06A77D', width=2),
                         fillcolor='rgba(6,167,125,0.2)',
-                        hovertemplate='%{x:.0f}: R$ %{y:,.0f}<extra></extra>'
+                        hovertemplate='%{x:.0f}: R$%{y:,.0f}<extra></extra>'
                     ))
                     _fig_traj.add_vline(x=2050, line_dash='dash', line_color='gray',
                                          annotation_text='conversão em renda', annotation_position='top')
@@ -2246,7 +2246,7 @@ with aba_detalhe:
                 if row['Ativo'] == 'BTC':
                     return abreviar_rs(row['preco_unit'])
                 s = f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
-                return f"R$ {s}"
+                return f"R${s}"
 
             df_view = df.copy().sort_values('Total Atual', ascending=False)
             df_view['variacao_rs']  = df_view['Total Atual'] - df_view['custo_total']
