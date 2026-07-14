@@ -226,6 +226,27 @@ st.markdown("""
                 width: 31% !important;
                 flex: 1 1 31% !important;
             }
+
+            /* cards de "ver todos os ativos" (mesma estrutura das outras abas) */
+            [class*="st-key-row_all_"] [data-testid="stHorizontalBlock"] {
+                flex-wrap: wrap !important;
+                gap: 0.3rem !important;
+            }
+            [class*="st-key-row_all_"] [data-testid="column"],
+            [class*="st-key-row_all_"] [data-testid="stColumn"] {
+                min-width: 31% !important;
+                width: 31% !important;
+                flex: 1 1 31% !important;
+            }
+            [class*="st-key-row_all_"] [data-testid="stMetric"] label {
+                font-size: 0.62rem !important;
+            }
+            [class*="st-key-row_all_"] [data-testid="stMetricValue"] {
+                font-size: 0.95rem !important;
+            }
+            [class*="st-key-row_all_"] .valorizacao-pct {
+                font-size: 0.95rem !important;
+            }
         }
 
         /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
@@ -1907,9 +1928,9 @@ with aba_detalhe:
                 if v is None:
                     cor, texto = "#888888", "—"
                 elif v >= 0:
-                    cor, texto = "#22c55e", f"+{fmt_pct(v)}".replace('.', ',')
+                    cor, texto = "#22c55e", f"▲ +{fmt_pct(v)}".replace('.', ',')
                 else:
-                    cor, texto = "#ef4444", f"{fmt_pct(v)}".replace('.', ',')
+                    cor, texto = "#ef4444", f"▼ {fmt_pct(v)}".replace('.', ',')
                 col.markdown(
                     f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px;font-family:inherit'>{label}</div>"
                     f"<div style='font-size:1.6rem;font-weight:500;color:{cor};font-family:inherit'>{texto}</div>",
@@ -2240,79 +2261,41 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        # ── tabela geral de todos os ativos ──────────────────────────────────
+        # ── cards de todos os ativos (mesmo padrão das demais abas) ──────────
         with st.expander("ver todos os ativos", expanded=False):
-            def fmt_preco(row):
-                if row['Ativo'] == 'BTC':
-                    return abreviar_rs(row['preco_unit'])
-                s = f"{row['preco_unit']:,.2f}".replace(',','X').replace('.',',').replace('X','.')
-                return f"R${s}"
+            def _fmt_preco_geral(ativo_nome, preco):
+                return abreviar_rs(preco) if ativo_nome == 'BTC' else formatar_brl(preco)
 
-            df_view = df.copy().sort_values('Total Atual', ascending=False)
-            df_view['variacao_rs']  = df_view['Total Atual'] - df_view['custo_total']
-            df_view['variacao_pct'] = df_view.apply(
-                lambda r: (r['variacao_rs'] / r['custo_total'] * 100) if r['custo_total'] > 0 else 0, axis=1
-            )
-            df_geral_fmt = pd.DataFrame({
-                'ativo':           df_view['Ativo'].values,
-                'classe':          df_view['Classe'].values,
-                'qtd':             df_view.apply(lambda r: (
-                    f"{float(r['Qtd']):.6f}".replace('.',',') if float(r['Qtd']) < 1
-                    else f"{float(r['Qtd']):.2f}".replace('.',',') if r['Classe'] == 'Tesouro Direto'
-                    else str(int(float(r['Qtd'])))
-                ), axis=1).values,
-                'preço médio':     df_view['preco_medio'].apply(formatar_brl).values,
-                'total investido': df_view['custo_total'].apply(formatar_brl).values,
-                'preço atual':     df_view.apply(fmt_preco, axis=1).values,
-                'total atual':     df_view['Total Atual'].apply(formatar_brl).values,
-                'variação R$':     df_view['variacao_rs'].apply(
-                    lambda x: f"+{formatar_brl(x)}" if x >= 0 else f"−{formatar_brl(abs(x))}"
-                ).values,
-                'variação %':      df_view['variacao_pct'].apply(
-                    lambda x: f"{'+' if x >= 0 else ''}{fmt_pct(x)}".replace('.', ',')
-                ).values,
-                'part. %':         df_view['Part. %'].apply(lambda x: f"{x:.2f}%".replace('.',',')).values,
-            })
-            cfg_geral = {c: st.column_config.TextColumn(c, alignment="center") for c in df_geral_fmt.columns}
-            st.dataframe(df_geral_fmt, width="stretch", hide_index=True, column_config=cfg_geral)
+            for _, row in df.sort_values('Total Atual', ascending=False).iterrows():
+                _ativo_g  = row['Ativo']
+                _qtd_g    = float(row['Qtd'])
+                _preco_g  = row['preco_unit']
+                _total_g  = row['Total Atual']
+                _custo_g  = row['custo_total']
+                _pm_g     = row['preco_medio']
+                _var_g_rs  = _total_g - _custo_g
+                _var_g_pct = _var_g_rs / _custo_g * 100 if _custo_g > 0 else 0
+                _holding_g = holding_ponderado_meses(_ativo_g, _df_lanc_raw)
+                _qtd_g_str = (
+                    f"{_qtd_g:.6f}".replace('.', ',') if _qtd_g < 1
+                    else f"{_qtd_g:.2f}".replace('.', ',') if row['Classe'] == 'Tesouro Direto'
+                    else str(int(_qtd_g)) if _qtd_g == int(_qtd_g)
+                    else f"{_qtd_g:.2f}".replace('.', ',')
+                )
+
+                with st.container(key=f"row_all_{_ativo_g}"):
+                    r1c1, r1c2, r1c3 = st.columns(3)
+                    r1c1.metric("ativo", _ativo_g)
+                    r1c2.metric(f"preço  ·  (~{_fmt_preco_geral(_ativo_g, _pm_g)})", _fmt_preco_geral(_ativo_g, _preco_g))
+                    r1c3.metric(f"total  ·  ({_qtd_g_str})", abreviar_rs(_total_g))
+
+                    r2c1, r2c2, r2c3 = st.columns(3)
+                    card_valorizacao(r2c2, _var_g_rs, _var_g_pct)
+                    r2c3.metric("~holding", fmt_holding(_holding_g))
+
+                st.markdown("---")
 
         st.markdown("---")
-
-
-        # ── alocação por classe ───────────────────────────────────────────────
-        _alvo_por_classe = {}
-        if _cfg_alvos:
-            _etfs_list = ['IVVB11','DIVO11','PKIN11','LFTB11']
-            _alvo_por_classe['ETF']            = sum((_get_banda(_cfg_alvos, a).get('alvo') or 0) for a in _etfs_list)
-            _alvo_por_classe['FII']            = (_get_banda(_cfg_alvos, '__FIIs__').get('alvo') or 0)
-            _alvo_por_classe['Tesouro Direto'] = (_get_banda(_cfg_alvos, 'Renda+ 2050').get('alvo') or 0)
-            _alvo_por_classe['Cripto']         = (_get_banda(_cfg_alvos, 'BTC').get('alvo') or 0)
-
-        linhas_resumo = []
-        for cls in ['ETF', 'FII', 'Tesouro Direto', 'Cripto']:
-            total_cls = df[df['Classe'] == cls]['Total Atual'].sum()
-            atual_pct = total_cls / total_geral * 100 if total_geral > 0 else 0
-            alvo      = _alvo_por_classe.get(cls)
-            if alvo:
-                desvio   = atual_pct - alvo
-                semaforo = "🟡" if abs(desvio) < 2 else ("🔴" if desvio < 0 else "🟢")
-                alvo_str = fmt_pct(alvo)
-                desv_str = f"{'+' if desvio >= 0 else ''}{fmt_pct(desvio)}"
-            else:
-                semaforo = "—"
-                alvo_str = "—"
-                desv_str = "—"
-            linhas_resumo.append({
-                'classe': cls,
-                'alvo':   alvo_str,
-                'atual':  fmt_pct(atual_pct),
-                'desvio': desv_str,
-                'status': semaforo,
-                'total':  formatar_brl(total_cls),
-            })
-        df_resumo_view = pd.DataFrame(linhas_resumo)
-        cfg_res = {c: st.column_config.TextColumn(c, alignment="center") for c in df_resumo_view.columns}
-        st.dataframe(df_resumo_view, width="stretch", hide_index=True, column_config=cfg_res)
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
 with aba_lanc:
