@@ -615,6 +615,51 @@ def obter_preco_renda_mais():
     except Exception as e:
         return None, str(e), None
 
+@st.cache_data(ttl=86400)  # 24h — histórico de datas passadas não muda
+def obter_historico_taxa_renda_mais():
+    """
+    série histórica da taxa de mercado (Taxa Compra Manha) do Renda+ 2050, para o
+    gráfico de 'variação real da taxa'. Baixa uma fatia bem maior do CSV do Tesouro
+    Transparente que obter_preco_renda_mais() (que só pega os últimos ~500KB, suficiente
+    pra achar o preço de hoje mas não pra cobrir anos de histórico).
+    """
+    try:
+        from io import StringIO
+        url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
+
+        head = requests.head(url, timeout=10)
+        tamanho = int(head.headers.get('Content-Length', 0))
+        fatia = 60_000_000  # ~60MB — estimativa pra cobrir vários anos; aumentar se faltar histórico
+        if tamanho > 0:
+            inicio = max(0, tamanho - fatia)
+            resp = requests.get(url, headers={'Range': f'bytes={inicio}-'}, timeout=60)
+        else:
+            resp = requests.get(url, timeout=60)
+
+        if resp.status_code not in (200, 206):
+            return pd.DataFrame(), f'status {resp.status_code}'
+
+        texto = resp.content.decode('latin1')
+        linhas = texto.split('\n')
+        cabecalho = 'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha'
+        renda = [l for l in linhas if 'Renda' in l and '2069' in l and len(l) > 10]
+        if not renda:
+            return pd.DataFrame(), f'nao encontrado — {len(linhas)} linhas no trecho'
+
+        csv_str = cabecalho + '\n' + '\n'.join(renda)
+        df = pd.read_csv(StringIO(csv_str), sep=';', decimal=',')
+        df['Data Base'] = pd.to_datetime(df['Data Base'], format='%d/%m/%Y', errors='coerce')
+
+        mask = (
+            df['Tipo Titulo'].str.contains('Renda', case=False, na=False) &
+            df['Data Vencimento'].str.contains('2069', na=False)
+        )
+        df_f = df[mask].sort_values('Data Base')
+        df_f = df_f.dropna(subset=['Data Base', 'Taxa Compra Manha'])
+        return df_f[['Data Base', 'Taxa Compra Manha']].reset_index(drop=True), None
+    except Exception as e:
+        return pd.DataFrame(), str(e)
+
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
 
@@ -2244,6 +2289,46 @@ with aba_detalhe:
                     )
                 else:
                     st.caption("sem histórico de taxas importado ainda — sobe o extrato no expander abaixo pra ver o gráfico.")
+
+                # ── gráfico 2: variação real da taxa de mercado + meus aportes ──────
+                _df_hist_taxa, _erro_hist_taxa = obter_historico_taxa_renda_mais()
+                if not _df_hist_taxa.empty:
+                    fig_taxa_mercado = go.Figure()
+                    fig_taxa_mercado.add_trace(go.Scatter(
+                        x=_df_hist_taxa['Data Base'], y=_df_hist_taxa['Taxa Compra Manha'],
+                        mode='lines', name='taxa de mercado',
+                        line=dict(color='#A8A8A8', width=1.5),
+                        hovertemplate='%{x|%d/%m/%Y}: IPCA+%{y:.2f}%<extra></extra>'
+                    ))
+                    if not _df_renda_taxas_chart.empty:
+                        fig_taxa_mercado.add_trace(go.Scatter(
+                            x=_df_rt['data_dt'], y=_df_rt['taxa_contratada_pct'],
+                            mode='markers', name='meus aportes',
+                            marker=dict(size=8, color='#2E86AB'),
+                            hovertemplate='%{x|%d/%m/%Y}: IPCA+%{y:.2f}%<extra></extra>'
+                        ))
+                    if _taxa_media_chart is not None:
+                        fig_taxa_mercado.add_hline(
+                            y=_taxa_media_chart, line_dash='dash', line_color='gray',
+                            annotation_text=f"média: IPCA+{_taxa_media_chart:.2f}%".replace('.', ','),
+                            annotation_position='top left'
+                        )
+                    fig_taxa_mercado.update_layout(
+                        height=280, margin=dict(l=10, r=10, t=30, b=10),
+                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                        showlegend=True,
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, x=0),
+                        xaxis=dict(showgrid=False, fixedrange=True),
+                        yaxis=dict(showgrid=True, gridcolor='#333', fixedrange=True, ticksuffix='%'),
+                    )
+                    st.plotly_chart(
+                        fig_taxa_mercado, width="stretch",
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                    )
+                    _data_min = _df_hist_taxa['Data Base'].min().strftime('%d/%m/%Y')
+                    st.caption(f"histórico de mercado disponível desde {_data_min} — se for mais recente que sua primeira compra, aumente a fatia baixada (variável 'fatia' no código).")
+                else:
+                    st.caption(f"não consegui obter o histórico de taxa de mercado ({_erro_hist_taxa}).")
 
                 with st.expander("projeção de renda vitalícia"):
                     _df_renda_taxas = _df_renda_taxas_chart
