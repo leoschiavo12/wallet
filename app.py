@@ -1748,6 +1748,21 @@ with aba_dash:
             "entram como novas compras nos lançamentos) · lucro total = ganho de capital + dividendos recebidos"
         )
 
+    with st.expander("ver histórico mensal de dividendos salvo"):
+        if not _df_div_mensal.empty:
+            _df_dm_view = _df_div_mensal.copy()
+            _df_dm_view['valor_mes'] = _df_dm_view['valor_mes'].apply(formatar_brl)
+            _df_dm_view['acumulado'] = _df_dm_view['acumulado'].apply(formatar_brl)
+            _df_dm_view = _df_dm_view.sort_values('ano_mes', ascending=False)
+            cfg_dm = {c: st.column_config.TextColumn(c, alignment="center") for c in _df_dm_view.columns}
+            st.dataframe(_df_dm_view, width="stretch", hide_index=True, column_config=cfg_dm)
+            st.caption(
+                "cada linha é um mês fechado, salvo uma única vez — não é recalculado depois. Se algum "
+                "valor estiver errado, corrija direto na aba 'dividendos_mensais' do Google Sheets."
+            )
+        else:
+            st.caption("sem histórico mensal salvo ainda.")
+
     st.markdown('---')
 
     # ── linha 1: donut + gráfico mensal lado a lado (empilha no mobile) ───────
