@@ -615,13 +615,14 @@ def obter_preco_renda_mais():
     except Exception as e:
         return None, str(e), None
 
-@st.cache_data(ttl=86400)  # 24h — histórico de datas passadas não muda
-def obter_historico_taxa_renda_mais():
+@st.cache_data(ttl=604800)  # 7 dias — histórico de datas passadas não muda; só perde os dias mais recentes até expirar
+def _baixar_fatia_taxa_renda_mais(fatia_bytes):
     """
-    série histórica da taxa de mercado (Taxa Compra Manha) do Renda+ 2050, para o
-    gráfico de 'variação real da taxa'. Baixa uma fatia bem maior do CSV do Tesouro
-    Transparente que obter_preco_renda_mais() (que só pega os últimos ~500KB, suficiente
-    pra achar o preço de hoje mas não pra cobrir anos de histórico).
+    baixa e parseia uma fatia (em bytes, a partir do FIM do arquivo) do CSV de preços/taxas
+    do Tesouro Transparente, filtrada só pro Renda+ 2050 (vencimento 2069). Função de baixo
+    nível, sem dependência do Sheets — a orquestração (o que já está salvo vs o que falta
+    buscar) fica em obter_historico_taxa_renda_mais(), mais abaixo no arquivo.
+    Retorna DataFrame[data_dt, taxa] (ou vazio + mensagem de erro).
     """
     try:
         from io import StringIO
@@ -629,22 +630,21 @@ def obter_historico_taxa_renda_mais():
 
         head = requests.head(url, timeout=10)
         tamanho = int(head.headers.get('Content-Length', 0))
-        fatia = 60_000_000  # ~60MB — estimativa pra cobrir vários anos; aumentar se faltar histórico
         if tamanho > 0:
-            inicio = max(0, tamanho - fatia)
-            resp = requests.get(url, headers={'Range': f'bytes={inicio}-'}, timeout=60)
+            inicio = max(0, tamanho - fatia_bytes)
+            resp = requests.get(url, headers={'Range': f'bytes={inicio}-'}, timeout=90)
         else:
-            resp = requests.get(url, timeout=60)
+            resp = requests.get(url, timeout=90)
 
         if resp.status_code not in (200, 206):
-            return pd.DataFrame(), f'status {resp.status_code}'
+            return pd.DataFrame(columns=['data_dt', 'taxa']), f'status {resp.status_code}'
 
         texto = resp.content.decode('latin1')
         linhas = texto.split('\n')
         cabecalho = 'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha'
         renda = [l for l in linhas if 'Renda' in l and '2069' in l and len(l) > 10]
         if not renda:
-            return pd.DataFrame(), f'nao encontrado — {len(linhas)} linhas no trecho'
+            return pd.DataFrame(columns=['data_dt', 'taxa']), f'nao encontrado — {len(linhas)} linhas no trecho'
 
         csv_str = cabecalho + '\n' + '\n'.join(renda)
         df = pd.read_csv(StringIO(csv_str), sep=';', decimal=',')
@@ -654,11 +654,11 @@ def obter_historico_taxa_renda_mais():
             df['Tipo Titulo'].str.contains('Renda', case=False, na=False) &
             df['Data Vencimento'].str.contains('2069', na=False)
         )
-        df_f = df[mask].sort_values('Data Base')
-        df_f = df_f.dropna(subset=['Data Base', 'Taxa Compra Manha'])
-        return df_f[['Data Base', 'Taxa Compra Manha']].reset_index(drop=True), None
+        df_f = df[mask].dropna(subset=['Data Base', 'Taxa Compra Manha'])
+        df_f = df_f.rename(columns={'Data Base': 'data_dt', 'Taxa Compra Manha': 'taxa'})
+        return df_f[['data_dt', 'taxa']].reset_index(drop=True), None
     except Exception as e:
-        return pd.DataFrame(), str(e)
+        return pd.DataFrame(columns=['data_dt', 'taxa']), str(e)
 
 def arredondar_teto(valor, multiplo):
     return math.ceil(valor / multiplo) * multiplo
@@ -1071,6 +1071,75 @@ def salvar_renda_taxas(df_novo):
     except Exception as e:
         st.warning(f"erro ao salvar taxas do Renda+: {e}")
         return False
+
+# ── histórico de taxa de mercado do Renda+ 2050 (persistido, atualizado incrementalmente) ──
+SHEET_RENDA_MERCADO_TAB = "renda_mais_taxa_mercado"
+RENDA_MERCADO_HEADERS   = ["data", "taxa_compra_manha"]
+
+def ler_historico_taxa_mercado():
+    """lê o histórico de taxa de mercado já salvo no Sheets — rápido, não bate no Tesouro Transparente"""
+    try:
+        svc = get_sheets_service()
+        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_MERCADO_TAB}!A:B").execute()
+        rows = res.get("values", [])
+        if len(rows) <= 1:
+            return pd.DataFrame(columns=['data_dt', 'taxa'])
+        df = pd.DataFrame(rows[1:], columns=RENDA_MERCADO_HEADERS)
+        df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
+        df['taxa']    = df['taxa_compra_manha'].apply(normalizar_numero)
+        return df.dropna(subset=['data_dt', 'taxa'])[['data_dt', 'taxa']].sort_values('data_dt').reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame(columns=['data_dt', 'taxa'])
+
+def salvar_historico_taxa_mercado(df_completo):
+    """sobrescreve a aba inteira com a série completa e atualizada (cria a aba se não existir)"""
+    try:
+        svc = get_sheets_service()
+        _garantir_aba_existe(svc, SHEET_RENDA_MERCADO_TAB, RENDA_MERCADO_HEADERS)
+        svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_MERCADO_TAB}!A:B").execute()
+        linhas = [RENDA_MERCADO_HEADERS] + [
+            [r['data_dt'].strftime('%d/%m/%Y'), str(r['taxa']).replace('.', ',')]
+            for _, r in df_completo.iterrows()
+        ]
+        svc.values().update(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_MERCADO_TAB}!A1",
+            valueInputOption="USER_ENTERED", body={"values": linhas}
+        ).execute()
+        return True
+    except Exception as e:
+        st.warning(f"erro ao salvar histórico de taxa de mercado: {e}")
+        return False
+
+@st.cache_data(ttl=43200)  # 12h — evita rebater no Sheets/Tesouro Transparente a cada rerun
+def obter_historico_taxa_renda_mais():
+    """
+    série histórica completa da taxa de mercado do Renda+ 2050, mantida permanentemente
+    na aba renda_mais_taxa_mercado: na primeira vez (aba vazia) faz um backfill completo
+    baixando uma fatia grande do CSV do Tesouro Transparente; nas vezes seguintes baixa só
+    uma fatia pequena (cobre algumas semanas/meses) e soma apenas os dias que ainda não
+    estavam salvos. Nunca mais rebaixa anos de histórico que já tem guardado.
+    """
+    df_armazenado = ler_historico_taxa_mercado()
+
+    # backfill completo só quando ainda não tem nada salvo; senão, incremento pequeno
+    fatia = 200_000_000 if df_armazenado.empty else 8_000_000
+    df_novo, erro = _baixar_fatia_taxa_renda_mais(fatia)
+
+    if df_novo.empty:
+        return df_armazenado, erro
+
+    if df_armazenado.empty:
+        df_completo = df_novo
+    else:
+        datas_existentes = set(df_armazenado['data_dt'].dt.date)
+        df_novo_filtrado = df_novo[~df_novo['data_dt'].dt.date.isin(datas_existentes)]
+        if df_novo_filtrado.empty:
+            return df_armazenado, None  # nada novo pra adicionar, já está tudo salvo
+        df_completo = pd.concat([df_armazenado, df_novo_filtrado], ignore_index=True)
+
+    df_completo = df_completo.sort_values('data_dt').drop_duplicates(subset=['data_dt']).reset_index(drop=True)
+    salvar_historico_taxa_mercado(df_completo)
+    return df_completo, None
 
 def parse_extrato_renda_mais(arquivo_upload):
     """
@@ -2295,7 +2364,7 @@ with aba_detalhe:
                 if not _df_hist_taxa.empty:
                     fig_taxa_mercado = go.Figure()
                     fig_taxa_mercado.add_trace(go.Scatter(
-                        x=_df_hist_taxa['Data Base'], y=_df_hist_taxa['Taxa Compra Manha'],
+                        x=_df_hist_taxa['data_dt'], y=_df_hist_taxa['taxa'],
                         mode='lines', name='taxa de mercado',
                         line=dict(color='#A8A8A8', width=1.5),
                         hovertemplate='%{x|%d/%m/%Y}: IPCA+%{y:.2f}%<extra></extra>'
@@ -2325,8 +2394,11 @@ with aba_detalhe:
                         fig_taxa_mercado, width="stretch",
                         config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
-                    _data_min = _df_hist_taxa['Data Base'].min().strftime('%d/%m/%Y')
-                    st.caption(f"histórico de mercado disponível desde {_data_min} — se for mais recente que sua primeira compra, aumente a fatia baixada (variável 'fatia' no código).")
+                    _data_min = _df_hist_taxa['data_dt'].min().strftime('%d/%m/%Y')
+                    st.caption(
+                        f"histórico de mercado disponível desde {_data_min} · dados guardados permanentemente "
+                        f"(aba renda_mais_taxa_mercado) — só os dias novos são buscados a cada atualização."
+                    )
                 else:
                     st.caption(f"não consegui obter o histórico de taxa de mercado ({_erro_hist_taxa}).")
 
