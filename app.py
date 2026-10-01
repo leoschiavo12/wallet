@@ -2057,6 +2057,19 @@ with aba_detalhe:
             )
 
         with st.expander("lançar dividendos manualmente (fundos sem histórico no yfinance)"):
+            _todos_manuais = _df_lanc_raw[_df_lanc_raw['tipo'].str.strip().str.lower() == 'dividendo']
+            if not _todos_manuais.empty:
+                st.caption("lançamentos tipo 'dividendo' já existentes na planilha (todos, de qualquer ativo):")
+                _df_manuais_view = _todos_manuais[['data', 'ativo', 'total']].copy()
+                _df_manuais_view['total'] = _df_manuais_view['total'].apply(formatar_brl)
+                _df_manuais_view = _df_manuais_view.sort_values('data')
+                cfg_man = {c: st.column_config.TextColumn(c, alignment="center") for c in _df_manuais_view.columns}
+                st.dataframe(_df_manuais_view, width="stretch", hide_index=True, column_config=cfg_man)
+                st.caption(f"total desses lançamentos manuais: {formatar_brl(_todos_manuais['total'].sum())}")
+            else:
+                st.caption("nenhum lançamento tipo 'dividendo' na planilha ainda.")
+
+            st.markdown("---")
             st.caption(
                 "pra fundos encerrados/incorporados (ex: BCFF11, MCHF11) o yfinance não tem histórico de "
                 "dividendo nenhum — precisa lançar manualmente. Uma linha por registro: "
