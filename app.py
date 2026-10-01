@@ -268,6 +268,27 @@ st.markdown("""
             .st-key-row_dash_resumo .valorizacao-pct {
                 font-size: 1.1rem !important;
             }
+
+            /* linha de lucro total do dashboard: valor investido/lucro total/dividendos numa linha só */
+            .st-key-row_dash_lucro [data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 0.3rem !important;
+            }
+            .st-key-row_dash_lucro [data-testid="column"],
+            .st-key-row_dash_lucro [data-testid="stColumn"] {
+                min-width: 31% !important;
+                width: 31% !important;
+                flex: 1 1 31% !important;
+            }
+            .st-key-row_dash_lucro [data-testid="stMetric"] label {
+                font-size: 0.62rem !important;
+            }
+            .st-key-row_dash_lucro [data-testid="stMetricValue"] {
+                font-size: 1.1rem !important;
+            }
+            .st-key-row_dash_lucro .valorizacao-pct {
+                font-size: 1.1rem !important;
+            }
         }
 
         /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
@@ -729,8 +750,8 @@ def tag_var(rs, pct):
     return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
-def card_valorizacao(col, rs, pct):
-    """card HTML de valorização: label=valorização · R$X, valor grande colorido"""
+def card_valorizacao(col, rs, pct, label="valorização"):
+    """card HTML de valorização: label (padrão 'valorização') · R$X, valor grande colorido"""
     sinal    = "▲" if rs >= 0 else "▼"
     cor      = "#22c55e" if rs >= 0 else "#ef4444"
     _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
@@ -738,7 +759,7 @@ def card_valorizacao(col, rs, pct):
     col.markdown(
         f"<div style='padding-top:4px'>"
         f"<p style='font-size:0.875rem;color:rgba(250,250,250,0.6);margin:0 0 6px 0'>"
-        f"valorização · {_rs_str}</p>"
+        f"{label} · {_rs_str}</p>"
         f"<p class='valorizacao-pct' style='font-size:1.75rem;font-weight:500;color:{cor};margin:0;line-height:1.1'>"
         f"{sinal} {_pct_str}</p></div>",
         unsafe_allow_html=True
@@ -1583,6 +1604,18 @@ with aba_dash:
         c1.metric("patrimônio", total_k)
         card_valorizacao(c2, _var_val, _var_pct)
         c3.metric(f"dividendos  ·  {_label_div_dash}", formatar_brl(_div_mes_total))
+
+    # lucro total = ganho de capital (valorização) + dividendos recebidos (todos os tempos)
+    _, _total_divs_geral = calcular_dividendos_historicos(_df_lanc_raw.to_dict(orient='records'))
+    _lucro_total = _var_val + _total_divs_geral
+
+    with st.container(key="row_dash_lucro"):
+        l1, l2, l3 = st.columns([1, 1, 1])
+        l1.metric("valor investido", formatar_brl(_custo_total))
+        card_valorizacao(l2, _lucro_total, (_lucro_total / _custo_total * 100) if _custo_total > 0 else 0,
+                          label="lucro total")
+        l3.metric("dividendos recebidos (total)", formatar_brl(_total_divs_geral))
+        st.caption("lucro total (acima) = ganho de capital + dividendos recebidos de todos os tempos")
 
     st.markdown('---')
 
