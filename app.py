@@ -318,6 +318,23 @@ def obter_precos_b3(tickers_lista):
     except:
         return {t.upper(): 0.0 for t in tickers_lista}
 
+@st.cache_data(ttl=43200)  # 12h — P/VP não muda intraday de forma relevante
+def obter_pvp_fiis(tickers_tupla):
+    """
+    busca P/VP (priceToBook) de cada FII via yfinance. Muitos FIIs brasileiros
+    não têm esse campo preenchido pela Yahoo Finance (ao contrário de ações comuns) —
+    nesses casos retorna None para o ativo, e o app mostra '—'.
+    """
+    resultado = {}
+    for t in tickers_tupla:
+        try:
+            info = yf.Ticker(f"{t}.SA").info
+            pvp  = info.get('priceToBook')
+            resultado[t] = float(pvp) if pvp else None
+        except Exception:
+            resultado[t] = None
+    return resultado
+
 @st.cache_data(ttl=3600)
 def obter_dividendos_mes_anterior(df_lancamentos_json):
     import pandas as pd
@@ -1765,14 +1782,16 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        # YoC (yield on cost) agregado: dividendos dos últimos 12m ÷ custo de aquisição total dos FIIs
-        _custo_total_fii = df_fii['custo_total'].sum()
-        _yoc_12m_carteira = (_total_divs_12m / _custo_total_fii * 100) if _custo_total_fii > 0 and _total_divs_12m > 0 else None
+        # YoC (yield on cost): mês de referência e últimos 12m — ÷ custo de aquisição total dos FIIs
+        _custo_total_fii   = df_fii['custo_total'].sum()
+        _yoc_12m_carteira  = (_total_divs_12m / _custo_total_fii * 100) if _custo_total_fii > 0 and _total_divs_12m > 0 else None
+        _yoc_mes_carteira  = (div_total / _custo_total_fii * 100) if _custo_total_fii > 0 and div_total > 0 else None
 
         with st.container(key="row_fii_dividendos"):
             c3, c4, c5 = st.columns(3)
-            _yield_str = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
-            _yoc_str   = f"{_yoc_12m_carteira:.2f}%".replace('.', ',') if _yoc_12m_carteira else "—"
+            _yield_str     = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
+            _yoc_12m_str   = f"{_yoc_12m_carteira:.2f}%".replace('.', ',') if _yoc_12m_carteira else "—"
+            _yoc_mes_str   = f"{_yoc_mes_carteira:.2f}%".replace('.', ',') if _yoc_mes_carteira else "—"
             _meses_abrev3 = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
                               7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
             _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
@@ -1781,7 +1800,8 @@ with aba_detalhe:
             c5.metric("div. totais", abreviar_rs(_total_divs))
 
             r3c1, r3c2, r3c3 = st.columns(3)
-            r3c2.metric("YoC (12m)", _yoc_str)
+            r3c1.metric(f"YoC — {_label_mes}", _yoc_mes_str)
+            r3c2.metric("YoC (12m)", _yoc_12m_str)
 
             # ── tijolo vs papel, alinhados embaixo de jun/26 e yield ──────────
             df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
@@ -1877,6 +1897,8 @@ with aba_detalhe:
         st.markdown("---")
 
         # ── cards por FII (mesmo padrão de ETFs/tesouro/cripto) ────────────────
+        _pvp_fiis = obter_pvp_fiis(tuple(sorted(df_fii['Ativo'].unique())))
+
         for _, row in df_fii.sort_values('Total Atual', ascending=False).iterrows():
             _ativo_f  = row['Ativo']
             _qtd_f    = float(row['Qtd'])
@@ -1889,6 +1911,12 @@ with aba_detalhe:
             _holding_f = holding_ponderado_meses(_ativo_f, _df_lanc_raw)
             _qtd_f_str = str(int(_qtd_f)) if _qtd_f == int(_qtd_f) else f"{_qtd_f:.2f}".replace('.', ',')
 
+            _pvp_f     = _pvp_fiis.get(_ativo_f)
+            _pvp_f_str = f"{_pvp_f:.2f}".replace('.', ',') if _pvp_f else "—"
+            _yoc_f_12m_rs  = _divs_12m.get(_ativo_f, 0.0)
+            _yoc_f_12m_pct = (_yoc_f_12m_rs / _custo_f * 100) if _custo_f > 0 and _yoc_f_12m_rs > 0 else None
+            _yoc_f_str     = f"{_yoc_f_12m_pct:.2f}%".replace('.', ',') if _yoc_f_12m_pct else "—"
+
             with st.container(key=f"row_fii_ativo_{_ativo_f}"):
                 r1c1, r1c2, r1c3 = st.columns(3)
                 r1c1.metric("ativo", _ativo_f)
@@ -1898,6 +1926,10 @@ with aba_detalhe:
                 r2c1, r2c2, r2c3 = st.columns(3)
                 card_valorizacao(r2c2, _var_f_rs, _var_f_pct)
                 r2c3.metric("~holding", fmt_holding(_holding_f))
+
+                r3c1, r3c2, r3c3 = st.columns(3)
+                r3c2.metric("P/VP", _pvp_f_str)
+                r3c3.metric("YoC (12m)", _yoc_f_str)
 
             st.markdown("---")
 
