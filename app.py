@@ -1821,6 +1821,28 @@ with aba_detalhe:
                 col.metric(f"{r['tipo_fii']} ({n})  ·  {abreviar_rs(r['Total Atual'])}{sufx}".replace('.', ','),
                            f"{fmt_pct(pct)}".replace('.', ','))
 
+        with st.expander(f"detalhamento — dividendos de {_label_mes} por FII"):
+            if div_detalhe:
+                _linhas_div = []
+                for _ativo_d, _info_d in div_detalhe.items():
+                    _linhas_div.append({
+                        'ativo': _ativo_d,
+                        'valor por cota': formatar_brl(_info_d['por_cota']),
+                        'qtd considerada': f"{_info_d['qtd']:.0f}" if _info_d['qtd'] == int(_info_d['qtd']) else f"{_info_d['qtd']:.4f}".replace('.', ','),
+                        'subtotal': formatar_brl(_info_d['total']),
+                    })
+                df_div_detalhe = pd.DataFrame(_linhas_div).sort_values('ativo')
+                cfg_div = {c: st.column_config.TextColumn(c, alignment="center") for c in df_div_detalhe.columns}
+                st.dataframe(df_div_detalhe, width="stretch", hide_index=True, column_config=cfg_div)
+                st.caption(
+                    "'qtd considerada' é a quantidade que o app calcula que você tinha na véspera da data-ex de cada "
+                    "pagamento. Se o valor por cota ou a quantidade de algum ativo não bater com seu extrato real da "
+                    "corretora, é ali que está a diferença — pode ser uma data-ex divergente no yfinance, ou algum "
+                    "lançamento de compra/venda com data um pouco diferente da real."
+                )
+            else:
+                st.caption("sem dividendos detectados pra esse mês.")
+
         st.markdown("---")
 
         # donut distribuição por ativo dentro dos FIIs
