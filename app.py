@@ -495,7 +495,9 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
             resultado[t] = 0.0
 
     # lançamentos manuais de tipo 'dividendo' (fundos sem histórico no yfinance) —
-    # aproxima o valor por cota dividindo pela quantidade que você tem hoje
+    # cada pagamento é dividido pela quantidade que você tinha NAQUELA data (não a
+    # quantidade de hoje — senão comprar mais cotas depois "dilui" artificialmente
+    # o provento por cota já pago, derrubando o YoC sem motivo real)
     if df_lanc_json:
         df = pd.DataFrame(df_lanc_json)
         if not df.empty:
@@ -503,10 +505,14 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
             df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
             _manuais = df[(df['tipo'].str.strip().str.lower() == 'dividendo') & (df['data_dt'] >= janela_ini)]
             for ativo in _manuais['ativo'].unique():
-                _qtd_atual = (df[df['ativo'] == ativo]['quantidade'] * df[df['ativo'] == ativo]['sinal']).sum()
-                if _qtd_atual > 0:
-                    _soma_manual = _manuais[_manuais['ativo'] == ativo]['total'].sum()
-                    resultado[ativo] = resultado.get(ativo, 0.0) + (_soma_manual / _qtd_atual)
+                _soma_por_cota = 0.0
+                for _, _entrada in _manuais[_manuais['ativo'] == ativo].iterrows():
+                    _ops_ate_data = df[(df['ativo'] == ativo) & (df['data_dt'] < _entrada['data_dt'])]
+                    _qtd_na_data  = (_ops_ate_data['quantidade'] * _ops_ate_data['sinal']).sum()
+                    if _qtd_na_data > 0:
+                        _soma_por_cota += _entrada['total'] / _qtd_na_data
+                if _soma_por_cota > 0:
+                    resultado[ativo] = resultado.get(ativo, 0.0) + _soma_por_cota
 
     return resultado
 
