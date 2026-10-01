@@ -479,6 +479,15 @@ def calcular_dividendos_historicos(df_lanc_json):
         except:
             continue
 
+    # lançamentos manuais de tipo 'dividendo' — cobre fundos sem histórico no yfinance
+    # (ex: encerrados/incorporados, onde tk.dividends vem vazio e o ativo é pulado acima)
+    _manuais_hist = df[df['tipo'].str.strip().str.lower() == 'dividendo']
+    for ativo in _manuais_hist['ativo'].unique():
+        _soma_manual_ativo = _manuais_hist[_manuais_hist['ativo'] == ativo]['total'].sum()
+        if _soma_manual_ativo > 0:
+            resultado[ativo] = resultado.get(ativo, 0.0) + _soma_manual_ativo
+            total_geral_divs += _soma_manual_ativo
+
     # somar lançamentos manuais de tipo 'dividendo' (ajustes para fundos sem histórico yfinance)
     _divs_manuais = df[df['tipo'].str.strip().str.lower() == 'dividendo']
     for _, row in _divs_manuais.iterrows():
@@ -1284,6 +1293,18 @@ def salvar_lancamento(row: list):
     ).execute()
     st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
+def salvar_lancamentos_lote(rows: list):
+    """salva vários lançamentos de uma vez — rows: lista de [data, tipo, ativo, classe, quantidade, preco_unitario, total]"""
+    def fmt_num(v):
+        return str(v).replace('.', ',')
+    rows_fmt = [[r[0], r[1], r[2], r[3], fmt_num(r[4]), fmt_num(r[5]), fmt_num(r[6])] for r in rows]
+    svc = get_sheets_service()
+    svc.values().append(
+        spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G",
+        valueInputOption="USER_ENTERED", body={"values": rows_fmt}
+    ).execute()
+    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
+
 def _get_sheet_id(svc, nome_aba):
     """retorna o sheetId numérico real da aba pelo nome"""
     meta = svc.get(spreadsheetId=SHEET_ID, fields="sheets.properties").execute()
@@ -2034,6 +2055,51 @@ with aba_detalhe:
                 f"cada pagamento daquele mês — útil pra conferir contra o extrato real da corretora se o valor "
                 f"não bater (pode ser uma data-ex divergente no yfinance, por exemplo)."
             )
+
+        with st.expander("lançar dividendos manualmente (fundos sem histórico no yfinance)"):
+            st.caption(
+                "pra fundos encerrados/incorporados (ex: BCFF11, MCHF11) o yfinance não tem histórico de "
+                "dividendo nenhum — precisa lançar manualmente. Uma linha por registro: "
+                "data(dd/mm/aaaa),ativo,valor. Simplificado em valor único por fundo (sem detalhar mês a mês), "
+                "mais um ajuste genérico ('AJUSTE-DIVIDENDOS') cobrindo a diferença que não foi possível rastrear "
+                "até um ativo específico. As datas aqui são só um registro formal — não precisam ser exatas, já "
+                "que o total histórico soma tudo independente da data."
+            )
+            _lote_div_default = (
+                "25/06/2023,BCFF11,3.36\n"
+                "25/05/2023,MCHF11,12.11\n"
+                "01/01/2023,AJUSTE-DIVIDENDOS,26.18"
+            )
+            _lote_div_texto = st.text_area(
+                "uma linha por registro: data,ativo,valor", value=_lote_div_default,
+                height=260, key="lote_dividendos_manual"
+            )
+            if st.button("lançar todos", key="btn_lote_dividendos"):
+                _linhas_div_lote = [l.strip() for l in _lote_div_texto.strip().split('\n') if l.strip()]
+                _rows_div_validas, _erros_div = [], []
+                for _linha in _linhas_div_lote:
+                    _partes = _linha.split(',')
+                    if len(_partes) != 3:
+                        _erros_div.append(_linha)
+                        continue
+                    _data_d, _ativo_d, _valor_d = [p.strip() for p in _partes]
+                    try:
+                        _valor_d_f = float(_valor_d.replace(',', '.'))
+                        if _valor_d_f <= 0 or not pd.to_datetime(_data_d, format='%d/%m/%Y', errors='coerce'):
+                            raise ValueError
+                        _rows_div_validas.append([_data_d, 'dividendo', _ativo_d, 'FII', 0, 0, _valor_d_f])
+                    except (ValueError, TypeError):
+                        _erros_div.append(_linha)
+
+                if _rows_div_validas:
+                    salvar_lancamentos_lote(_rows_div_validas)
+                    st.cache_data.clear()
+                    st.success(f"{len(_rows_div_validas)} dividendos lançados!")
+                    if _erros_div:
+                        st.warning(f"{len(_erros_div)} linha(s) ignorada(s): {', '.join(_erros_div)}")
+                    st.rerun()
+                else:
+                    st.warning("nenhuma linha válida encontrada pra lançar.")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: ETFs
