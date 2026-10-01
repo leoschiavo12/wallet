@@ -335,6 +335,11 @@ def obter_pvp_fiis(tickers_tupla):
             resultado[t] = None
     return resultado
 
+# FIIs que mudaram de ticker na B3 — lançamentos antigos guardam o nome antigo,
+# mas o yfinance só reconhece o ticker atual. Usado por toda função que busca
+# dividendos via yfinance a partir do ticker salvo em lançamentos.
+ALIAS_FII_TICKERS = {'GALG11': 'GARE11'}
+
 @st.cache_data(ttl=3600)
 def obter_dividendos_mes_anterior(df_lancamentos_json):
     import pandas as pd
@@ -356,13 +361,12 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
 
     total    = 0.0
     detalhes = {}
-    ALIAS    = {'GALG11': 'GARE11'}
 
     # Classe vem como 'FII' do Sheets — após title() fica 'Fii'
     fiis = list(df_lanc[df_lanc['Classe'].str.upper() == 'FII']['Ativo'].unique())
 
     for fii in fiis:
-        fii_norm = ALIAS.get(fii, fii)
+        fii_norm = ALIAS_FII_TICKERS.get(fii, fii)
         try:
             tk = yf.Ticker(f"{fii_norm}.SA")
             divs = tk.dividends
@@ -439,7 +443,8 @@ def calcular_dividendos_historicos(df_lanc_json):
 
     for ativo in fiis:
         try:
-            tk   = yf.Ticker(f"{ativo}.SA")
+            ativo_norm = ALIAS_FII_TICKERS.get(ativo, ativo)
+            tk   = yf.Ticker(f"{ativo_norm}.SA")
             divs = tk.dividends
             if divs is None or divs.empty:
                 continue
@@ -500,7 +505,8 @@ def calcular_dividendos_12m(df_lanc_json):
 
     for ativo in fiis:
         try:
-            tk   = yf.Ticker(f"{ativo}.SA")
+            ativo_norm = ALIAS_FII_TICKERS.get(ativo, ativo)
+            tk   = yf.Ticker(f"{ativo_norm}.SA")
             divs = tk.dividends
             if divs is None or divs.empty:
                 continue
@@ -522,6 +528,13 @@ def calcular_dividendos_12m(df_lanc_json):
                 qtd = (g_ate['quantidade'] * g_ate['sinal']).sum()
                 if qtd > 0:
                     total_ativo += qtd * valor_div
+
+            # anualiza se o ativo tem menos de 12 meses de posse — senão o YoC de
+            # posições novas fica artificialmente baixo (poucos meses de dividendo
+            # comparados a um custo de aquisição "inteiro")
+            _dias_janela = (pd.Timestamp(_dt.date.today()) - _ini).days
+            if 0 < _dias_janela < 350:
+                total_ativo = total_ativo * (365 / _dias_janela)
 
             resultado[ativo] = round(total_ativo, 2)
             total_geral_divs += total_ativo
