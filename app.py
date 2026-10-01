@@ -345,15 +345,13 @@ def obter_precos_b3(tickers_lista):
 ALIAS_FII_TICKERS = {'GALG11': 'GARE11'}
 
 @st.cache_data(ttl=3600)
-def obter_dividendos_mes_anterior(df_lancamentos_json):
+def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
+    """
+    dividendos recebidos num mês/ano específico (auto via yfinance + lançamentos manuais
+    tipo 'dividendo' datados daquele mês). Função genérica — usada tanto pro card do mês
+    mais recente quanto pro backfill histórico mensal.
+    """
     import pandas as pd
-    from datetime import date
-    hoje    = date.today()
-    # mes de referencia = mes anterior (pagamento)
-    if hoje.month == 1:
-        mes_ref, ano_ref = 12, hoje.year - 1
-    else:
-        mes_ref, ano_ref = hoje.month - 1, hoje.year
 
     df_lanc = pd.DataFrame(df_lancamentos_json)
     if df_lanc.empty:
@@ -405,7 +403,33 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
         except:
             continue
 
+    # lançamentos manuais de tipo 'dividendo' datados dentro desse mês/ano
+    # (ex: AJUSTE-DIVIDENDOS, ou fundos sem histórico no yfinance)
+    _manuais_mes = df_lanc[
+        (df_lanc['Tipo'].str.strip().str.lower() == 'dividendo') &
+        (df_lanc['data_dt'].dt.month == mes_ref) &
+        (df_lanc['data_dt'].dt.year == ano_ref)
+    ]
+    for _, row in _manuais_mes.iterrows():
+        ativo_m = row['Ativo']
+        valor_m = float(row['Total']) if pd.notna(row['Total']) else 0.0
+        if valor_m > 0:
+            if ativo_m not in detalhes:
+                detalhes[ativo_m] = {'por_cota': 0.0, 'total': 0.0, 'qtd': 0}
+            detalhes[ativo_m]['total'] += valor_m
+            total += valor_m
+
     return total, detalhes
+
+def obter_dividendos_mes_anterior(df_lancamentos_json):
+    """dividendos do mês anterior ao atual — mantido por compatibilidade com quem já chama assim"""
+    from datetime import date
+    hoje = date.today()
+    if hoje.month == 1:
+        mes_ref, ano_ref = 12, hoje.year - 1
+    else:
+        mes_ref, ano_ref = hoje.month - 1, hoje.year
+    return calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref)
 
 def obter_preco_btc_brl():
     try:
@@ -1114,6 +1138,87 @@ def salvar_historico_taxa_mercado(df_completo):
         st.warning(f"erro ao salvar histórico de taxa de mercado: {e}")
         return False
 
+# ── dividendos mensais (persistido: valor do mês + acumulado) ─────────────────
+SHEET_DIV_MENSAL_TAB = "dividendos_mensais"
+DIV_MENSAL_HEADERS   = ["ano_mes", "valor_mes", "acumulado"]
+
+def ler_dividendos_mensais():
+    """lê o histórico de dividendos mensais já salvo — rápido, não recalcula nada"""
+    try:
+        svc = get_sheets_service()
+        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_DIV_MENSAL_TAB}!A:C").execute()
+        rows = res.get("values", [])
+        if len(rows) <= 1:
+            return pd.DataFrame(columns=DIV_MENSAL_HEADERS)
+        df_dm = pd.DataFrame(rows[1:], columns=DIV_MENSAL_HEADERS)
+        df_dm['valor_mes'] = df_dm['valor_mes'].apply(normalizar_numero)
+        df_dm['acumulado'] = df_dm['acumulado'].apply(normalizar_numero)
+        return df_dm.dropna(subset=['ano_mes']).sort_values('ano_mes').reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame(columns=DIV_MENSAL_HEADERS)
+
+def salvar_dividendos_mensais_lote(rows):
+    """adiciona novas linhas (ano_mes, valor_mes, acumulado) — nunca sobrescreve as já salvas"""
+    try:
+        svc = get_sheets_service()
+        _garantir_aba_existe(svc, SHEET_DIV_MENSAL_TAB, DIV_MENSAL_HEADERS)
+        fmt_rows = [[r[0], str(r[1]).replace('.', ','), str(r[2]).replace('.', ',')] for r in rows]
+        svc.values().append(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_DIV_MENSAL_TAB}!A:C",
+            valueInputOption="USER_ENTERED", body={"values": fmt_rows}
+        ).execute()
+        return True
+    except Exception as e:
+        st.warning(f"erro ao salvar dividendos mensais: {e}")
+        return False
+
+@st.cache_data(ttl=43200)  # 12h — evita recalcular/rebater no yfinance a cada rerun
+def atualizar_dividendos_mensais(df_lanc_json):
+    """
+    mantém a aba dividendos_mensais sempre completa até o último mês fechado: calcula e
+    grava só os meses que ainda não foram salvos (na primeira vez, faz o backfill de todos
+    os meses desde a primeira compra de FII). Meses já salvos NUNCA são recalculados —
+    são histórico fechado, inclusive preservando ajustes manuais feitos direto na planilha
+    (como o AJUSTE-DIVIDENDOS). Retorna o DataFrame completo (existente + novo).
+    """
+    import datetime as _dt_div
+
+    df_existente = ler_dividendos_mensais()
+    meses_salvos = set(df_existente['ano_mes']) if not df_existente.empty else set()
+
+    df_lanc_raw_div = pd.DataFrame(df_lanc_json)
+    if df_lanc_raw_div.empty:
+        return df_existente
+    df_lanc_raw_div['data_dt'] = pd.to_datetime(df_lanc_raw_div['data'], format='%d/%m/%Y', errors='coerce')
+    _primeira_data = df_lanc_raw_div[df_lanc_raw_div['classe'].str.upper() == 'FII']['data_dt'].min()
+    if pd.isna(_primeira_data):
+        return df_existente
+
+    hoje = _dt_div.date.today()
+    _periodo_fim = pd.Period(hoje, freq='M') - 1  # último mês fechado
+    _periodo_ini = _primeira_data.to_period('M')
+    if _periodo_ini > _periodo_fim:
+        return df_existente
+
+    _todos_meses = pd.period_range(start=_periodo_ini, end=_periodo_fim, freq='M')
+    _meses_faltando = sorted(str(m) for m in _todos_meses if str(m) not in meses_salvos)
+    if not _meses_faltando:
+        return df_existente
+
+    _acumulado = float(df_existente['acumulado'].iloc[-1]) if not df_existente.empty else 0.0
+    _novas_linhas = []
+    for _mes_str in _meses_faltando:
+        _ano_m, _mes_m = int(_mes_str[:4]), int(_mes_str[5:7])
+        _valor_mes, _ = calcular_dividendos_mes(df_lanc_json, _mes_m, _ano_m)
+        _acumulado += _valor_mes
+        _novas_linhas.append([_mes_str, round(_valor_mes, 2), round(_acumulado, 2)])
+
+    salvar_dividendos_mensais_lote(_novas_linhas)
+
+    return pd.concat([
+        df_existente, pd.DataFrame(_novas_linhas, columns=DIV_MENSAL_HEADERS)
+    ], ignore_index=True).sort_values('ano_mes').reset_index(drop=True)
+
 @st.cache_data(ttl=43200)  # 12h — evita rebater no Sheets/Tesouro Transparente a cada rerun
 def obter_historico_taxa_renda_mais():
     """
@@ -1601,15 +1706,19 @@ with aba_dash:
     _var_val     = total_geral - _custo_total
     _var_pct     = (_var_val / _custo_total * 100) if _custo_total > 0 else 0
 
-    # dividendos do mês de referência (cacheado — mesma função usada na aba FIIs)
-    _div_mes_total, _ = obter_dividendos_mes_anterior(_df_lanc_raw.to_dict(orient='records'))
+    # dividendos do mês de referência — lidos do histórico mensal persistido (calculado e
+    # gravado uma vez por mês fechado; não recalcula via yfinance a cada carregamento)
+    _df_div_mensal = atualizar_dividendos_mensais(_df_lanc_raw.to_dict(orient='records'))
     _meses_abrev3_dash = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
                            7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
-    import datetime as _dt_dash
-    _hoje_dash = _dt_dash.date.today()
-    _mes_ref_dash = _hoje_dash.month - 1 if _hoje_dash.month > 1 else 12
-    _ano_ref_dash = _hoje_dash.year if _hoje_dash.month > 1 else _hoje_dash.year - 1
-    _label_div_dash = f"{_meses_abrev3_dash[_mes_ref_dash]}/{str(_ano_ref_dash)[-2:]}"
+    if not _df_div_mensal.empty:
+        _ultimo_mes_div = _df_div_mensal.iloc[-1]
+        _ano_ref_dash, _mes_ref_dash = int(_ultimo_mes_div['ano_mes'][:4]), int(_ultimo_mes_div['ano_mes'][5:7])
+        _label_div_dash  = f"{_meses_abrev3_dash[_mes_ref_dash]}/{str(_ano_ref_dash)[-2:]}"
+        _div_mes_total   = _ultimo_mes_div['valor_mes']
+        _total_divs_geral = _ultimo_mes_div['acumulado']
+    else:
+        _label_div_dash, _div_mes_total, _total_divs_geral = "—", 0.0, 0.0
 
     with st.container(key="row_dash_resumo"):
         c1, c2, c3 = st.columns([1, 1, 1])
@@ -1617,8 +1726,7 @@ with aba_dash:
         card_valorizacao(c2, _var_val, _var_pct)
         c3.metric(f"dividendos  ·  {_label_div_dash}", formatar_brl(_div_mes_total))
 
-    # lucro total = ganho de capital (valorização) + dividendos recebidos (todos os tempos)
-    _, _total_divs_geral = calcular_dividendos_historicos(_df_lanc_raw.to_dict(orient='records'))
+    # lucro total = ganho de capital (valorização) + dividendos recebidos (acumulado persistido)
     _lucro_total = _var_val + _total_divs_geral
 
     # valor investido "do bolso": dividendos reinvestidos viram novas compras nos lançamentos,
@@ -1653,7 +1761,7 @@ with aba_dash:
             for _, row in df_resumo_classe.iterrows():
                 pct    = row['Total Atual'] / total_classe * 100
                 labels_donut.append(f"{row['Classe']}<br>{fmt_pct(pct)}".replace('.', ','))
-                hover_donut.append(f"<b>{row['Classe']}</b><br>{fmt_pct(pct)}<br>{formatar_brl(row['Total Atual'])}".replace('.', ','))
+                hover_donut.append(f"<b>{row['Classe']}</b><br>{fmt_pct(pct)}<br>{abreviar_rs(row['Total Atual'])}".replace('.', ','))
 
             fig_donut = go.Figure(go.Pie(
                 labels=labels_donut,
