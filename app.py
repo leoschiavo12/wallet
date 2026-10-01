@@ -1465,6 +1465,48 @@ def obter_serie_bcb(codigo_serie, data_inicial_str, data_final_str):
         return []
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def diagnosticar_valores_mensais(df_lanc_json, df_pm_json):
+    """
+    mesma lógica de calcular_valores_mensais(), mas expõe por mês quais ativos usaram
+    preço real (precos_mensais) vs o fallback (preço médio de compra) — pra investigar
+    saltos estranhos na rentabilidade causados por gaps no histórico de preços.
+    """
+    import datetime
+    df_lanc = pd.DataFrame(df_lanc_json)
+    df_pm   = pd.DataFrame(df_pm_json)
+    if df_lanc.empty or df_pm.empty:
+        return []
+    hoje      = datetime.date.today()
+    mes_atual = f"{hoje.year}-{hoje.month:02d}"
+    meses_pm  = sorted(df_pm['ano_mes'].unique())
+    meses_pm  = [m for m in meses_pm if m < mes_atual]
+    if not meses_pm:
+        return []
+    df_lanc['data_dt'] = pd.to_datetime(df_lanc['data'], format='%d/%m/%Y', errors='coerce')
+
+    diagnostico = []
+    for mes in meses_pm:
+        df_ate  = df_lanc[df_lanc['data_dt'].dt.to_period('M').astype(str) <= mes].copy()
+        pos_mes = calcular_posicao(df_ate)
+        total_mes, total_fallback = 0.0, 0.0
+        ativos_fallback = []
+        for _, pr in pos_mes.iterrows():
+            pm_row = df_pm[(df_pm['ano_mes'] == mes) & (df_pm['ativo'] == pr['ativo'])]
+            usou_fallback = pm_row.empty
+            preco_hist = float(pm_row['preco_fechamento'].iloc[0]) if not usou_fallback else pr['preco_medio']
+            valor_ativo = pr['qtd_atual'] * preco_hist
+            total_mes += valor_ativo
+            if usou_fallback:
+                total_fallback += valor_ativo
+                ativos_fallback.append(pr['ativo'])
+        diagnostico.append({
+            'mes': mes, 'total': total_mes,
+            'pct_fallback': (total_fallback / total_mes * 100) if total_mes > 0 else 0,
+            'ativos_fallback': ', '.join(ativos_fallback) if ativos_fallback else '—',
+        })
+    return diagnostico
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def calcular_rentabilidade_mensal(df_lanc_json, df_pm_json):
     """
     retorno mensal da carteira (método Modified Dietz) — usa o EMV de cada mês já
@@ -2877,6 +2919,29 @@ with aba_detalhe:
                 "pela data exata dentro do mês) · CDI e IPCA via API pública do Banco Central (SGS) · "
                 "só considera meses já fechados."
             )
+
+            with st.expander("diagnóstico — gaps no histórico de preços"):
+                st.caption(
+                    "se um mês usar preço médio de compra em vez do preço real de mercado (porque o histórico "
+                    "não tem esse mês salvo pra aquele ativo), a troca pro preço real no mês seguinte pode "
+                    "parecer uma valorização/desvalorização enorme que não aconteceu de verdade. "
+                    "'% da carteira em fallback' alto num mês é sinal de que o retorno daquele mês não é confiável."
+                )
+                _diag = diagnosticar_valores_mensais(
+                    _df_lanc_raw.to_dict(orient='records'), _df_pm.to_dict(orient='records')
+                )
+                if _diag:
+                    df_diag = pd.DataFrame(_diag)
+                    df_diag['total'] = df_diag['total'].apply(formatar_brl)
+                    df_diag['pct_fallback'] = df_diag['pct_fallback'].apply(lambda x: f"{x:.0f}%")
+                    df_diag = df_diag.rename(columns={
+                        'mes': 'mês', 'total': 'valor calculado',
+                        'pct_fallback': '% em fallback', 'ativos_fallback': 'ativos em fallback'
+                    })
+                    cfg_diag = {c: st.column_config.TextColumn(c, alignment="center") for c in df_diag.columns}
+                    st.dataframe(df_diag, width="stretch", hide_index=True, column_config=cfg_diag)
+                else:
+                    st.caption("sem dados pra diagnosticar.")
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
 with aba_lanc:
