@@ -487,70 +487,45 @@ def calcular_dividendos_historicos(df_lanc_json):
     return resultado, round(total_geral_divs, 2)
 
 @st.cache_data(ttl=86400)
-def calcular_dividendos_12m(df_lanc_json):
-    """soma de dividendos recebidos por FII nos últimos 12 meses (p/ yield on cost) — mesma lógica de calcular_dividendos_historicos, mas filtrando a janela de 12 meses em vez de 'desde a primeira compra'"""
-    import pandas as pd
+def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
+    """
+    soma dos proventos por cota pagos por cada FII nos últimos 12 meses — todos os
+    pagamentos do período, independente de quando você comprou ou de quanto tinha
+    em cada data (padrão de mercado: Fundamentus/StatusInvest calculam assim).
+    Yield on Cost = proventos_12m_por_cota ÷ preço médio.
+    """
     import datetime as _dt
-    df = pd.DataFrame(df_lanc_json)
-    if df.empty: return {}, 0.0
-
-    df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
-    df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
-
     janela_ini = pd.Timestamp(_dt.date.today() - _dt.timedelta(days=365))
-
     resultado = {}
-    total_geral_divs = 0.0
-    fiis = df[df['classe'] == 'FII']['ativo'].unique()
 
-    for ativo in fiis:
+    for t in tickers_tupla:
         try:
-            ativo_norm = ALIAS_FII_TICKERS.get(ativo, ativo)
-            tk   = yf.Ticker(f"{ativo_norm}.SA")
-            divs = tk.dividends
+            t_norm = ALIAS_FII_TICKERS.get(t, t)
+            divs = yf.Ticker(f"{t_norm}.SA").dividends
             if divs is None or divs.empty:
+                resultado[t] = 0.0
                 continue
             if divs.index.tz is not None:
                 divs.index = divs.index.tz_localize(None)
+            resultado[t] = round(float(divs[divs.index >= janela_ini].sum()), 4)
+        except Exception:
+            resultado[t] = 0.0
 
-            g = df[df['ativo'] == ativo].sort_values('data_dt')
-            primeira_compra = g[g['tipo'].str.lower() == 'compra']['data_dt'].min()
-            if pd.isna(primeira_compra): continue
+    # lançamentos manuais de tipo 'dividendo' (fundos sem histórico no yfinance) —
+    # aproxima o valor por cota dividindo pela quantidade que você tem hoje
+    if df_lanc_json:
+        df = pd.DataFrame(df_lanc_json)
+        if not df.empty:
+            df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
+            df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
+            _manuais = df[(df['tipo'].str.strip().str.lower() == 'dividendo') & (df['data_dt'] >= janela_ini)]
+            for ativo in _manuais['ativo'].unique():
+                _qtd_atual = (df[df['ativo'] == ativo]['quantidade'] * df[df['ativo'] == ativo]['sinal']).sum()
+                if _qtd_atual > 0:
+                    _soma_manual = _manuais[_manuais['ativo'] == ativo]['total'].sum()
+                    resultado[ativo] = resultado.get(ativo, 0.0) + (_soma_manual / _qtd_atual)
 
-            # só dividendos dos últimos 12 meses E após a primeira compra
-            _ini = max(janela_ini, primeira_compra)
-            divs_filtrados = divs[divs.index >= _ini]
-            if divs_filtrados.empty: continue
-
-            total_ativo = 0.0
-            for data_div, valor_div in divs_filtrados.items():
-                g_ate = g[g['data_dt'] <= data_div]
-                qtd = (g_ate['quantidade'] * g_ate['sinal']).sum()
-                if qtd > 0:
-                    total_ativo += qtd * valor_div
-
-            # anualiza se o ativo tem menos de 12 meses de posse — senão o YoC de
-            # posições novas fica artificialmente baixo (poucos meses de dividendo
-            # comparados a um custo de aquisição "inteiro")
-            _dias_janela = (pd.Timestamp(_dt.date.today()) - _ini).days
-            if 0 < _dias_janela < 350:
-                total_ativo = total_ativo * (365 / _dias_janela)
-
-            resultado[ativo] = round(total_ativo, 2)
-            total_geral_divs += total_ativo
-        except:
-            continue
-
-    # lançamentos manuais de tipo 'dividendo' dentro da janela de 12 meses
-    _divs_manuais = df[(df['tipo'].str.strip().str.lower() == 'dividendo') & (df['data_dt'] >= janela_ini)]
-    for _, row in _divs_manuais.iterrows():
-        ativo = row['ativo']
-        valor = float(row['total']) if pd.notna(row['total']) else 0.0
-        if valor > 0:
-            resultado[ativo] = resultado.get(ativo, 0.0) + valor
-            total_geral_divs += valor
-
-    return resultado, round(total_geral_divs, 2)
+    return resultado
 
 def _buscar_historico_btc_brl():
     """busca histórico sem cache — chamada internamente"""
@@ -1741,10 +1716,12 @@ with aba_detalhe:
 
         lanc_json = _lanc_json_cached()
         div_total, div_detalhe = obter_dividendos_mes_anterior(lanc_json)
-        _divs_12m, _total_divs_12m = calcular_dividendos_12m(lanc_json)
 
         df_fii = df[df['Classe'] == 'FII'].copy()
         total_fii = df_fii['Total Atual'].sum()
+
+        # proventos por cota dos últimos 12 meses (padrão de mercado) — base do Yield on Cost
+        _proventos_12m = obter_proventos_12m_por_cota(tuple(sorted(df_fii['Ativo'].unique())), lanc_json)
         n_tijolo  = sum(1 for t in df_fii['Ativo'] if FII_INFO.get(t, {}).get('tipo') == 'tijolo')
         n_papel   = sum(1 for t in df_fii['Ativo'] if FII_INFO.get(t, {}).get('tipo') == 'papel')
 
@@ -1795,9 +1772,10 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        # YoC (yield on cost): mês de referência e últimos 12m — ÷ custo de aquisição total dos FIIs
+        # YoC (yield on cost): proventos 12m × qtd atual (receita hipotética) ÷ custo de aquisição total
         _custo_total_fii   = df_fii['custo_total'].sum()
-        _yoc_12m_carteira  = (_total_divs_12m / _custo_total_fii * 100) if _custo_total_fii > 0 and _total_divs_12m > 0 else None
+        _receita_12m_fii   = sum(_proventos_12m.get(r['Ativo'], 0.0) * r['Qtd'] for _, r in df_fii.iterrows())
+        _yoc_12m_carteira  = (_receita_12m_fii / _custo_total_fii * 100) if _custo_total_fii > 0 and _receita_12m_fii > 0 else None
         _yoc_mes_carteira  = (div_total / _custo_total_fii * 100) if _custo_total_fii > 0 and div_total > 0 else None
 
         with st.container(key="row_fii_dividendos"):
@@ -1926,8 +1904,8 @@ with aba_detalhe:
 
             _pvp_f     = _pvp_fiis.get(_ativo_f)
             _pvp_f_str = f"{_pvp_f:.2f}".replace('.', ',') if _pvp_f else "—"
-            _yoc_f_12m_rs  = _divs_12m.get(_ativo_f, 0.0)
-            _yoc_f_12m_pct = (_yoc_f_12m_rs / _custo_f * 100) if _custo_f > 0 and _yoc_f_12m_rs > 0 else None
+            _proventos_f   = _proventos_12m.get(_ativo_f, 0.0)
+            _yoc_f_12m_pct = (_proventos_f / _pm_f * 100) if _pm_f and _pm_f > 0 and _proventos_f > 0 else None
             _yoc_f_str     = f"{_yoc_f_12m_pct:.2f}%".replace('.', ',') if _yoc_f_12m_pct else "—"
 
             with st.container(key=f"row_fii_ativo_{_ativo_f}"):
@@ -1957,7 +1935,7 @@ with aba_detalhe:
                     qtd_c   = compras['quantidade'].sum()
                     pm_fii[t] = total_c / qtd_c if qtd_c > 0 else 0
 
-        # tabela detalhada (no final) — YoC usa _divs_12m calculado no início da função
+        # tabela detalhada (no final) — YoC usa _proventos_12m calculado no início da função
         linhas_fii = []
         for _, row in df_fii.iterrows():
             t        = row['Ativo']
@@ -1966,10 +1944,9 @@ with aba_detalhe:
             pm       = pm_fii.get(t, None)
             div_info = div_detalhe.get(t, {})
             div_cota = div_info.get('por_cota', 0.0)
-            # YoC = dividendos recebidos nos últimos 12 meses ÷ custo de aquisição (preço médio × qtd)
-            _div_12m_t  = _divs_12m.get(t, 0.0)
-            _custo_t    = row['custo_total']
-            yoc_a = (_div_12m_t / _custo_t * 100) if _custo_t and _custo_t > 0 and _div_12m_t > 0 else None
+            # YoC = proventos por cota pagos nos últimos 12 meses ÷ preço médio de aquisição
+            _proventos_t = _proventos_12m.get(t, 0.0)
+            yoc_a = (_proventos_t / pm * 100) if pm and pm > 0 and _proventos_t > 0 else None
             yoc_m = yoc_a / 12 if yoc_a else None
             linhas_fii.append({
                 'ativo':      t,
