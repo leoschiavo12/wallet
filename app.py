@@ -488,15 +488,6 @@ def calcular_dividendos_historicos(df_lanc_json):
             resultado[ativo] = resultado.get(ativo, 0.0) + _soma_manual_ativo
             total_geral_divs += _soma_manual_ativo
 
-    # somar lançamentos manuais de tipo 'dividendo' (ajustes para fundos sem histórico yfinance)
-    _divs_manuais = df[df['tipo'].str.strip().str.lower() == 'dividendo']
-    for _, row in _divs_manuais.iterrows():
-        ativo = row['ativo']
-        valor = float(row['total']) if pd.notna(row['total']) else 0.0
-        if valor > 0:
-            resultado[ativo] = resultado.get(ativo, 0.0) + valor
-            total_geral_divs += valor
-
     return resultado, round(total_geral_divs, 2)
 
 @st.cache_data(ttl=86400)
