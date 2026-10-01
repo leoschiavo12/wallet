@@ -318,23 +318,6 @@ def obter_precos_b3(tickers_lista):
     except:
         return {t.upper(): 0.0 for t in tickers_lista}
 
-@st.cache_data(ttl=43200)  # 12h — P/VP não muda intraday de forma relevante
-def obter_pvp_fiis(tickers_tupla):
-    """
-    busca P/VP (priceToBook) de cada FII via yfinance. Muitos FIIs brasileiros
-    não têm esse campo preenchido pela Yahoo Finance (ao contrário de ações comuns) —
-    nesses casos retorna None para o ativo, e o app mostra '—'.
-    """
-    resultado = {}
-    for t in tickers_tupla:
-        try:
-            info = yf.Ticker(f"{t}.SA").info
-            pvp  = info.get('priceToBook')
-            resultado[t] = float(pvp) if pvp else None
-        except Exception:
-            resultado[t] = None
-    return resultado
-
 # FIIs que mudaram de ticker na B3 — lançamentos antigos guardam o nome antigo,
 # mas o yfinance só reconhece o ticker atual. Usado por toda função que busca
 # dividendos via yfinance a partir do ticker salvo em lançamentos.
@@ -1888,8 +1871,6 @@ with aba_detalhe:
         st.markdown("---")
 
         # ── cards por FII (mesmo padrão de ETFs/tesouro/cripto) ────────────────
-        _pvp_fiis = obter_pvp_fiis(tuple(sorted(df_fii['Ativo'].unique())))
-
         for _, row in df_fii.sort_values('Total Atual', ascending=False).iterrows():
             _ativo_f  = row['Ativo']
             _qtd_f    = float(row['Qtd'])
@@ -1902,8 +1883,6 @@ with aba_detalhe:
             _holding_f = holding_ponderado_meses(_ativo_f, _df_lanc_raw)
             _qtd_f_str = str(int(_qtd_f)) if _qtd_f == int(_qtd_f) else f"{_qtd_f:.2f}".replace('.', ',')
 
-            _pvp_f     = _pvp_fiis.get(_ativo_f)
-            _pvp_f_str = f"{_pvp_f:.2f}".replace('.', ',') if _pvp_f else "—"
             _proventos_f   = _proventos_12m.get(_ativo_f, 0.0)
             _yoc_f_12m_pct = (_proventos_f / _pm_f * 100) if _pm_f and _pm_f > 0 and _proventos_f > 0 else None
             _yoc_f_str     = f"{_yoc_f_12m_pct:.2f}%".replace('.', ',') if _yoc_f_12m_pct else "—"
@@ -1919,8 +1898,7 @@ with aba_detalhe:
                 r2c3.metric("~holding", fmt_holding(_holding_f))
 
                 r3c1, r3c2, r3c3 = st.columns(3)
-                r3c2.metric("P/VP", _pvp_f_str)
-                r3c3.metric("YoC (12m)", _yoc_f_str)
+                r3c2.metric("YoC (12m)", _yoc_f_str)
 
             st.markdown("---")
 
@@ -2232,8 +2210,43 @@ with aba_detalhe:
                 st.caption(f"preço manual (secrets) — API: {st.session_state.get('preco_renda_erro','')}")
 
             if ativo == 'Renda+ 2050':
+                _df_renda_taxas_chart = ler_renda_taxas()
+                if not _df_renda_taxas_chart.empty:
+                    _df_rt = _df_renda_taxas_chart.copy()
+                    _df_rt['data_dt'] = pd.to_datetime(_df_rt['data'], format='%d/%m/%Y', errors='coerce')
+                    _df_rt = _df_rt.sort_values('data_dt')
+                    _taxa_media_chart = calcular_taxa_media_ponderada_renda(_df_rt)
+
+                    fig_renda_taxas = go.Figure()
+                    fig_renda_taxas.add_trace(go.Scatter(
+                        x=_df_rt['data_dt'], y=_df_rt['taxa_contratada_pct'],
+                        mode='lines+markers', name='taxa contratada',
+                        line=dict(color='#2E86AB', width=2),
+                        marker=dict(size=7, color='#2E86AB'),
+                        hovertemplate='%{x|%d/%m/%Y}: IPCA+%{y:.2f}%<extra></extra>'
+                    ))
+                    if _taxa_media_chart is not None:
+                        fig_renda_taxas.add_hline(
+                            y=_taxa_media_chart, line_dash='dash', line_color='gray',
+                            annotation_text=f"média: IPCA+{_taxa_media_chart:.2f}%".replace('.', ','),
+                            annotation_position='top left'
+                        )
+                    fig_renda_taxas.update_layout(
+                        height=280, margin=dict(l=10, r=10, t=30, b=10),
+                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                        showlegend=False,
+                        xaxis=dict(showgrid=False, fixedrange=True),
+                        yaxis=dict(showgrid=True, gridcolor='#333', fixedrange=True, ticksuffix='%'),
+                    )
+                    st.plotly_chart(
+                        fig_renda_taxas, width="stretch",
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                    )
+                else:
+                    st.caption("sem histórico de taxas importado ainda — sobe o extrato no expander abaixo pra ver o gráfico.")
+
                 with st.expander("projeção de renda vitalícia"):
-                    _df_renda_taxas = ler_renda_taxas()
+                    _df_renda_taxas = _df_renda_taxas_chart
                     _taxa_ponderada = calcular_taxa_media_ponderada_renda(_df_renda_taxas)
 
                     if _taxa_ponderada is not None:
