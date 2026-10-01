@@ -1609,13 +1609,24 @@ with aba_dash:
     _, _total_divs_geral = calcular_dividendos_historicos(_df_lanc_raw.to_dict(orient='records'))
     _lucro_total = _var_val + _total_divs_geral
 
+    # valor investido "do bolso": dividendos reinvestidos viram novas compras nos lançamentos,
+    # então já estão dentro de custo_total como se fossem dinheiro novo — subtrai pra isolar
+    # só o que realmente saiu do seu bolso (não o que já era lucro reaplicado)
+    _valor_investido_proprio = max(_custo_total - _total_divs_geral, 0)
+
     with st.container(key="row_dash_lucro"):
         l1, l2, l3 = st.columns([1, 1, 1])
-        l1.metric("valor investido", formatar_brl(_custo_total))
-        card_valorizacao(l2, _lucro_total, (_lucro_total / _custo_total * 100) if _custo_total > 0 else 0,
-                          label="lucro total")
+        l1.metric("valor investido", formatar_brl(_valor_investido_proprio))
+        card_valorizacao(
+            l2, _lucro_total,
+            (_lucro_total / _valor_investido_proprio * 100) if _valor_investido_proprio > 0 else 0,
+            label="lucro total"
+        )
         l3.metric("dividendos recebidos (total)", formatar_brl(_total_divs_geral))
-        st.caption("lucro total (acima) = ganho de capital + dividendos recebidos de todos os tempos")
+        st.caption(
+            "valor investido = capital que saiu do seu bolso (exclui dividendos reinvestidos, que já "
+            "entram como novas compras nos lançamentos) · lucro total = ganho de capital + dividendos recebidos"
+        )
 
     st.markdown('---')
 
