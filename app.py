@@ -247,6 +247,27 @@ st.markdown("""
             [class*="st-key-row_all_"] .valorizacao-pct {
                 font-size: 0.95rem !important;
             }
+
+            /* linha 1 do dashboard: patrimônio/valorização/dividendos numa linha só */
+            .st-key-row_dash_resumo [data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 0.3rem !important;
+            }
+            .st-key-row_dash_resumo [data-testid="column"],
+            .st-key-row_dash_resumo [data-testid="stColumn"] {
+                min-width: 31% !important;
+                width: 31% !important;
+                flex: 1 1 31% !important;
+            }
+            .st-key-row_dash_resumo [data-testid="stMetric"] label {
+                font-size: 0.62rem !important;
+            }
+            .st-key-row_dash_resumo [data-testid="stMetricValue"] {
+                font-size: 1.1rem !important;
+            }
+            .st-key-row_dash_resumo .valorizacao-pct {
+                font-size: 1.1rem !important;
+            }
         }
 
         /* ── tablet: colunas de 4+ ficam em pares ───────────────── */
@@ -434,6 +455,64 @@ def calcular_dividendos_historicos(df_lanc_json):
 
     # somar lançamentos manuais de tipo 'dividendo' (ajustes para fundos sem histórico yfinance)
     _divs_manuais = df[df['tipo'].str.strip().str.lower() == 'dividendo']
+    for _, row in _divs_manuais.iterrows():
+        ativo = row['ativo']
+        valor = float(row['total']) if pd.notna(row['total']) else 0.0
+        if valor > 0:
+            resultado[ativo] = resultado.get(ativo, 0.0) + valor
+            total_geral_divs += valor
+
+    return resultado, round(total_geral_divs, 2)
+
+@st.cache_data(ttl=86400)
+def calcular_dividendos_12m(df_lanc_json):
+    """soma de dividendos recebidos por FII nos últimos 12 meses (p/ yield on cost) — mesma lógica de calcular_dividendos_historicos, mas filtrando a janela de 12 meses em vez de 'desde a primeira compra'"""
+    import pandas as pd
+    import datetime as _dt
+    df = pd.DataFrame(df_lanc_json)
+    if df.empty: return {}, 0.0
+
+    df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
+    df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
+
+    janela_ini = pd.Timestamp(_dt.date.today() - _dt.timedelta(days=365))
+
+    resultado = {}
+    total_geral_divs = 0.0
+    fiis = df[df['classe'] == 'FII']['ativo'].unique()
+
+    for ativo in fiis:
+        try:
+            tk   = yf.Ticker(f"{ativo}.SA")
+            divs = tk.dividends
+            if divs is None or divs.empty:
+                continue
+            if divs.index.tz is not None:
+                divs.index = divs.index.tz_localize(None)
+
+            g = df[df['ativo'] == ativo].sort_values('data_dt')
+            primeira_compra = g[g['tipo'].str.lower() == 'compra']['data_dt'].min()
+            if pd.isna(primeira_compra): continue
+
+            # só dividendos dos últimos 12 meses E após a primeira compra
+            _ini = max(janela_ini, primeira_compra)
+            divs_filtrados = divs[divs.index >= _ini]
+            if divs_filtrados.empty: continue
+
+            total_ativo = 0.0
+            for data_div, valor_div in divs_filtrados.items():
+                g_ate = g[g['data_dt'] <= data_div]
+                qtd = (g_ate['quantidade'] * g_ate['sinal']).sum()
+                if qtd > 0:
+                    total_ativo += qtd * valor_div
+
+            resultado[ativo] = round(total_ativo, 2)
+            total_geral_divs += total_ativo
+        except:
+            continue
+
+    # lançamentos manuais de tipo 'dividendo' dentro da janela de 12 meses
+    _divs_manuais = df[(df['tipo'].str.strip().str.lower() == 'dividendo') & (df['data_dt'] >= janela_ini)]
     for _, row in _divs_manuais.iterrows():
         ativo = row['ativo']
         valor = float(row['total']) if pd.notna(row['total']) else 0.0
@@ -727,6 +806,29 @@ def calcular_projecao_renda_mais(saldo_atual, taxa_real_aa, aporte_mensal, ano_c
         'parcela_mensal': parcela_mensal,
         'total_recebido_20anos': parcela_mensal * n_pag,
     }
+
+def calcular_trajetoria_patrimonio(saldo_atual, taxa_real_aa, aporte_mensal, ano_alvo=2055,
+                                    mes_atual=None, ano_atual=None):
+    """
+    Série anual do patrimônio total projetado (só acumulação, sem fase de resgate —
+    diferente do Renda+, aqui o horizonte é o próprio ano de aposentadoria).
+    """
+    import datetime as _dt
+    hoje = _dt.date.today()
+    ano_atual = ano_atual or hoje.year
+    mes_atual = mes_atual or hoje.month
+    taxa_m = (1 + taxa_real_aa) ** (1/12) - 1
+    meses_ate_alvo = max((ano_alvo - ano_atual) * 12 - (mes_atual - 1), 0)
+
+    pontos = []
+    saldo = saldo_atual
+    for m in range(0, meses_ate_alvo + 1):
+        ano_ref = ano_atual + (mes_atual - 1 + m) / 12
+        if m % 12 == 0 or m == meses_ate_alvo:
+            pontos.append({'ano': ano_ref, 'saldo': saldo})
+        saldo = saldo * (1 + taxa_m) + aporte_mensal
+
+    return pd.DataFrame(pontos)
 
 def calcular_trajetoria_renda_mais(saldo_atual, taxa_real_aa, aporte_mensal, ano_conversao=2050,
                                     anos_pagamento=20, mes_atual=None, ano_atual=None):
@@ -1381,10 +1483,21 @@ with aba_dash:
     _var_val     = total_geral - _custo_total
     _var_pct     = (_var_val / _custo_total * 100) if _custo_total > 0 else 0
 
-    c1, c2 = st.columns([1, 1])
-    c1.metric("patrimônio", total_k)
+    # dividendos do mês de referência (cacheado — mesma função usada na aba FIIs)
+    _div_mes_total, _ = obter_dividendos_mes_anterior(_df_lanc_raw.to_dict(orient='records'))
+    _meses_abrev3_dash = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
+                           7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
+    import datetime as _dt_dash
+    _hoje_dash = _dt_dash.date.today()
+    _mes_ref_dash = _hoje_dash.month - 1 if _hoje_dash.month > 1 else 12
+    _ano_ref_dash = _hoje_dash.year if _hoje_dash.month > 1 else _hoje_dash.year - 1
+    _label_div_dash = f"{_meses_abrev3_dash[_mes_ref_dash]}/{str(_ano_ref_dash)[-2:]}"
 
-    card_valorizacao(c2, _var_val, _var_pct)
+    with st.container(key="row_dash_resumo"):
+        c1, c2, c3 = st.columns([1, 1, 1])
+        c1.metric("patrimônio", total_k)
+        card_valorizacao(c2, _var_val, _var_pct)
+        c3.metric(f"dividendos  ·  {_label_div_dash}", formatar_brl(_div_mes_total))
 
     st.markdown('---')
 
@@ -1500,6 +1613,80 @@ with aba_dash:
 
     st.markdown('---')
 
+    # ── projeção patrimonial até 2055 ──────────────────────────────────────
+    st.markdown(
+        "<p style='font-size:1rem;font-weight:600;margin:0 0 0.5rem 0'>projeção patrimonial até 2055</p>",
+        unsafe_allow_html=True
+    )
+
+    # aporte mensal médio dos últimos 6 meses (mesma lógica usada na aba lançamentos)
+    _hoje_proj = pd.Timestamp.today()
+    if not _df_lanc_raw.empty:
+        _df_lanc_proj = _df_lanc_raw.copy()
+        _df_lanc_proj['data_dt'] = pd.to_datetime(_df_lanc_proj['data'], format='%d/%m/%Y', errors='coerce')
+        _df_lanc_proj['sinal']   = _df_lanc_proj['tipo'].map({'compra': 1, 'venda': -1}).fillna(0)
+        _meses_proj = []
+        for i in range(1, 7):
+            ref = _hoje_proj - pd.DateOffset(months=i)
+            df_ref_proj = _df_lanc_proj[
+                (_df_lanc_proj['data_dt'].dt.month == ref.month) &
+                (_df_lanc_proj['data_dt'].dt.year  == ref.year)
+            ]
+            _meses_proj.append((df_ref_proj['total'] * df_ref_proj['sinal']).sum())
+        _aporte_medio_default = max(sum(_meses_proj) / 6, 0)
+    else:
+        _aporte_medio_default = 1800.0
+
+    pc1, pc2 = st.columns(2)
+    _taxa_proj_input = pc1.text_input(
+        "taxa real anual esperada (%)", value="6,00",
+        help="Retorno real (acima da inflação) esperado para a carteira toda, em média, pelos próximos anos. "
+             "É uma estimativa que você pode ajustar — não é calculada a partir do histórico."
+    )
+    _aporte_proj_input = pc2.text_input(
+        "aporte mensal médio (R$)", value=f"{_aporte_medio_default:,.0f}".replace(',', '.'),
+        help="Pré-preenchido com a média dos seus últimos 6 meses de aportes. Ajuste se pretende mudar o ritmo."
+    )
+    try:
+        _taxa_proj   = float(_taxa_proj_input.replace(',', '.'))
+        _aporte_proj = float(_aporte_proj_input.replace('.', '').replace(',', '.'))
+    except ValueError:
+        _taxa_proj, _aporte_proj = 6.0, _aporte_medio_default
+
+    _df_traj_patrim = calcular_trajetoria_patrimonio(
+        saldo_atual=total_geral, taxa_real_aa=_taxa_proj / 100, aporte_mensal=_aporte_proj, ano_alvo=2055
+    )
+
+    fig_proj_patrim = go.Figure()
+    fig_proj_patrim.add_trace(go.Scatter(
+        x=_df_traj_patrim['ano'], y=_df_traj_patrim['saldo'],
+        fill='tozeroy', mode='lines', line=dict(color='#2E86AB', width=2),
+        fillcolor='rgba(46,134,171,0.2)',
+        hovertemplate='%{x:.0f}: R$%{y:,.0f}<extra></extra>'
+    ))
+    fig_proj_patrim.update_layout(
+        height=280, margin=dict(l=10, r=10, t=20, b=10),
+        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+        showlegend=False,
+        xaxis=dict(showgrid=False, fixedrange=True),
+        yaxis=dict(showgrid=True, gridcolor='#333', fixedrange=True,
+                   tickformat=',.0f', ticksuffix=''),
+    )
+    st.plotly_chart(
+        fig_proj_patrim, width="stretch",
+        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+    )
+
+    _saldo_2055 = _df_traj_patrim['saldo'].iloc[-1] if not _df_traj_patrim.empty else total_geral
+    _anos_ate_2055 = 2055 - _hoje_proj.year
+    st.caption(
+        f"projeção em termos reais (poder de compra de hoje) · {_anos_ate_2055} anos até 2055 · "
+        f"patrimônio estimado: {abreviar_rs(_saldo_2055)}. Estimativa simples (taxa única + aporte constante), "
+        f"não considera mudanças de alocação ao longo das 3 fases da estratégia."
+    )
+
+    st.markdown('---')
+
 
 with aba_detalhe:
     sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
@@ -1524,6 +1711,7 @@ with aba_detalhe:
 
         lanc_json = _lanc_json_cached()
         div_total, div_detalhe = obter_dividendos_mes_anterior(lanc_json)
+        _divs_12m, _total_divs_12m = calcular_dividendos_12m(lanc_json)
 
         df_fii = df[df['Classe'] == 'FII'].copy()
         total_fii = df_fii['Total Atual'].sum()
@@ -1577,15 +1765,23 @@ with aba_detalhe:
 
         st.markdown("---")
 
+        # YoC (yield on cost) agregado: dividendos dos últimos 12m ÷ custo de aquisição total dos FIIs
+        _custo_total_fii = df_fii['custo_total'].sum()
+        _yoc_12m_carteira = (_total_divs_12m / _custo_total_fii * 100) if _custo_total_fii > 0 and _total_divs_12m > 0 else None
+
         with st.container(key="row_fii_dividendos"):
             c3, c4, c5 = st.columns(3)
             _yield_str = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
+            _yoc_str   = f"{_yoc_12m_carteira:.2f}%".replace('.', ',') if _yoc_12m_carteira else "—"
             _meses_abrev3 = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
                               7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
             _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
             c3.metric(_label_mes, formatar_brl(div_total))
             c4.metric(f"yield — {_label_mes}", _yield_str)
             c5.metric("div. totais", abreviar_rs(_total_divs))
+
+            r3c1, r3c2, r3c3 = st.columns(3)
+            r3c2.metric("YoC (12m)", _yoc_str)
 
             # ── tijolo vs papel, alinhados embaixo de jun/26 e yield ──────────
             df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
@@ -1716,7 +1912,7 @@ with aba_detalhe:
                     qtd_c   = compras['quantidade'].sum()
                     pm_fii[t] = total_c / qtd_c if qtd_c > 0 else 0
 
-        # tabela detalhada (no final)
+        # tabela detalhada (no final) — YoC usa _divs_12m calculado no início da função
         linhas_fii = []
         for _, row in df_fii.iterrows():
             t        = row['Ativo']
@@ -1725,9 +1921,11 @@ with aba_detalhe:
             pm       = pm_fii.get(t, None)
             div_info = div_detalhe.get(t, {})
             div_cota = div_info.get('por_cota', 0.0)
-            # YoC = div/cota ÷ preço médio de aquisição (yield on cost)
-            yoc_m = (div_cota / pm * 100) if pm and pm > 0 and div_cota > 0 else None
-            yoc_a = yoc_m * 12 if yoc_m else None
+            # YoC = dividendos recebidos nos últimos 12 meses ÷ custo de aquisição (preço médio × qtd)
+            _div_12m_t  = _divs_12m.get(t, 0.0)
+            _custo_t    = row['custo_total']
+            yoc_a = (_div_12m_t / _custo_t * 100) if _custo_t and _custo_t > 0 and _div_12m_t > 0 else None
+            yoc_m = yoc_a / 12 if yoc_a else None
             linhas_fii.append({
                 'ativo':      t,
                 'tipo':       info['tipo'],
