@@ -1827,28 +1827,6 @@ with aba_detalhe:
                 col.metric(f"{r['tipo_fii']} ({n})  ·  {abreviar_rs(r['Total Atual'])}{sufx}".replace('.', ','),
                            f"{fmt_pct(pct)}".replace('.', ','))
 
-        with st.expander(f"detalhamento — dividendos de {_label_mes} por FII"):
-            if div_detalhe:
-                _linhas_div = []
-                for _ativo_d, _info_d in div_detalhe.items():
-                    _linhas_div.append({
-                        'ativo': _ativo_d,
-                        'valor por cota': formatar_brl(_info_d['por_cota']),
-                        'qtd considerada': f"{_info_d['qtd']:.0f}" if _info_d['qtd'] == int(_info_d['qtd']) else f"{_info_d['qtd']:.4f}".replace('.', ','),
-                        'subtotal': formatar_brl(_info_d['total']),
-                    })
-                df_div_detalhe = pd.DataFrame(_linhas_div).sort_values('ativo')
-                cfg_div = {c: st.column_config.TextColumn(c, alignment="center") for c in df_div_detalhe.columns}
-                st.dataframe(df_div_detalhe, width="stretch", hide_index=True, column_config=cfg_div)
-                st.caption(
-                    "'qtd considerada' é a quantidade que o app calcula que você tinha na véspera da data-ex de cada "
-                    "pagamento. Se o valor por cota ou a quantidade de algum ativo não bater com seu extrato real da "
-                    "corretora, é ali que está a diferença — pode ser uma data-ex divergente no yfinance, ou algum "
-                    "lançamento de compra/venda com data um pouco diferente da real."
-                )
-            else:
-                st.caption("sem dividendos detectados pra esse mês.")
-
         st.markdown("---")
 
         # donut distribuição por ativo dentro dos FIIs
@@ -1972,26 +1950,34 @@ with aba_detalhe:
             yoc_a = (_proventos_t / pm * 100) if pm and pm > 0 and _proventos_t > 0 else None
             yoc_m = yoc_a / 12 if yoc_a else None
             linhas_fii.append({
-                'ativo':      t,
-                'tipo':       info['tipo'],
-                'indexador':  info['indexador'] if info['tipo'] == 'papel' and info['indexador'] else '—',
-                'qtd':        int(row['Qtd']),
-                'preço médio': pm,
-                'preço atual': preco,
-                'total':      row['Total Atual'],
-                'part. %':    row['Part. %'],
-                'div/cota':   div_cota if div_cota > 0 else None,
-                'YoC mensal': yoc_m,
-                'YoC anual':  yoc_a,
+                'ativo':              t,
+                'tipo':               info['tipo'],
+                'indexador':          info['indexador'] if info['tipo'] == 'papel' and info['indexador'] else '—',
+                'qtd':                int(row['Qtd']),
+                'preço médio':        pm,
+                'preço atual':        preco,
+                'total':              row['Total Atual'],
+                'part. %':            row['Part. %'],
+                'div/cota':           div_cota if div_cota > 0 else None,
+                f'qtd em {_label_mes}':  div_info.get('qtd'),
+                f'dividendos {_label_mes}': div_info.get('total'),
+                'YoC mensal':         yoc_m,
+                'YoC anual':          yoc_a,
             })
 
         df_fii_num = pd.DataFrame(linhas_fii).sort_values('total', ascending=False)
         df_fii_fmt = df_fii_num.copy()
+        _col_qtd_div = f'qtd em {_label_mes}'
+        _col_div_tot = f'dividendos {_label_mes}'
         df_fii_fmt['preço médio']  = df_fii_fmt['preço médio'].apply(lambda x: formatar_brl(x) if x else '—')
         df_fii_fmt['preço atual']  = df_fii_fmt['preço atual'].apply(formatar_brl)
         df_fii_fmt['total']        = df_fii_fmt['total'].apply(formatar_brl)
         df_fii_fmt['part. %']      = df_fii_fmt['part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
         df_fii_fmt['div/cota']     = df_fii_fmt['div/cota'].apply(lambda x: formatar_brl(x) if x else '—')
+        df_fii_fmt[_col_qtd_div]   = df_fii_fmt[_col_qtd_div].apply(
+            lambda x: ('—' if pd.isna(x) else (f"{x:.0f}" if x == int(x) else f"{x:.4f}".replace('.', ',')))
+        )
+        df_fii_fmt[_col_div_tot]   = df_fii_fmt[_col_div_tot].apply(lambda x: formatar_brl(x) if pd.notna(x) else '—')
         df_fii_fmt['YoC mensal']   = df_fii_fmt['YoC mensal'].apply(lambda x: f"{x:.2f}%".replace('.', ',') if x else '—')
         df_fii_fmt['YoC anual']    = df_fii_fmt['YoC anual'].apply(lambda x: fmt_pct(x) if x else '—')
         df_fii_fmt['qtd']          = df_fii_fmt['qtd'].apply(str)
@@ -1999,6 +1985,11 @@ with aba_detalhe:
         with st.expander("ver tabela de FIIs", expanded=False):
             cfg_fii = {c: st.column_config.TextColumn(c, alignment="center") for c in df_fii_fmt.columns}
             st.dataframe(df_fii_fmt, width="stretch", hide_index=True, column_config=cfg_fii)
+            st.caption(
+                f"'qtd em {_label_mes}' é a quantidade que o app calcula que você tinha na véspera da data-ex de "
+                f"cada pagamento daquele mês — útil pra conferir contra o extrato real da corretora se o valor "
+                f"não bater (pode ser uma data-ex divergente no yfinance, por exemplo)."
+            )
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: ETFs
