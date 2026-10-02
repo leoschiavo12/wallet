@@ -248,7 +248,7 @@ st.markdown("""
                 font-size: 0.95rem !important;
             }
 
-            /* linha 1 do dashboard: patrimônio/valorização/dividendos numa linha só */
+            /* linha 1 do dashboard: patrimônio/saiu do bolso/valorização numa linha só */
             .st-key-row_dash_resumo [data-testid="stHorizontalBlock"] {
                 flex-wrap: nowrap !important;
                 gap: 0.3rem !important;
@@ -269,7 +269,7 @@ st.markdown("""
                 font-size: 1.1rem !important;
             }
 
-            /* linha de lucro total do dashboard: valor investido/lucro total/dividendos numa linha só */
+            /* linha 2 do dashboard: dividendos do mês/dividendos totais/lucro total numa linha só */
             .st-key-row_dash_lucro [data-testid="stHorizontalBlock"] {
                 flex-wrap: nowrap !important;
                 gap: 0.3rem !important;
@@ -1720,48 +1720,29 @@ with aba_dash:
     else:
         _label_div_dash, _div_mes_total, _total_divs_geral = "—", 0.0, 0.0
 
-    with st.container(key="row_dash_resumo"):
-        c1, c2, c3 = st.columns([1, 1, 1])
-        c1.metric("patrimônio", total_k)
-        card_valorizacao(c2, _var_val, _var_pct)
-        c3.metric(f"dividendos  ·  {_label_div_dash}", formatar_brl(_div_mes_total))
-
     # lucro total = ganho de capital (valorização) + dividendos recebidos (acumulado persistido)
     _lucro_total = _var_val + _total_divs_geral
 
-    # valor investido "do bolso": dividendos reinvestidos viram novas compras nos lançamentos,
+    # "saiu do bolso": dividendos reinvestidos viram novas compras nos lançamentos,
     # então já estão dentro de custo_total como se fossem dinheiro novo — subtrai pra isolar
-    # só o que realmente saiu do seu bolso (não o que já era lucro reaplicado)
+    # só o que realmente saiu do bolso (não o que já era lucro reaplicado)
     _valor_investido_proprio = max(_custo_total - _total_divs_geral, 0)
+
+    with st.container(key="row_dash_resumo"):
+        c1, c2, c3 = st.columns([1, 1, 1])
+        c1.metric("patrimônio", total_k)
+        c2.metric("saiu do bolso", formatar_brl(_valor_investido_proprio))
+        card_valorizacao(c3, _var_val, _var_pct)
 
     with st.container(key="row_dash_lucro"):
         l1, l2, l3 = st.columns([1, 1, 1])
-        l1.metric("valor investido", formatar_brl(_valor_investido_proprio))
+        l1.metric(f"dividendos  ·  {_label_div_dash}", formatar_brl(_div_mes_total))
+        l2.metric("dividendos totais", formatar_brl(_total_divs_geral))
         card_valorizacao(
-            l2, _lucro_total,
+            l3, _lucro_total,
             (_lucro_total / _valor_investido_proprio * 100) if _valor_investido_proprio > 0 else 0,
             label="lucro total"
         )
-        l3.metric("dividendos recebidos (total)", formatar_brl(_total_divs_geral))
-        st.caption(
-            "valor investido = capital que saiu do seu bolso (exclui dividendos reinvestidos, que já "
-            "entram como novas compras nos lançamentos) · lucro total = ganho de capital + dividendos recebidos"
-        )
-
-    with st.expander("ver histórico mensal de dividendos salvo"):
-        if not _df_div_mensal.empty:
-            _df_dm_view = _df_div_mensal.copy()
-            _df_dm_view['valor_mes'] = _df_dm_view['valor_mes'].apply(formatar_brl)
-            _df_dm_view['acumulado'] = _df_dm_view['acumulado'].apply(formatar_brl)
-            _df_dm_view = _df_dm_view.sort_values('ano_mes', ascending=False)
-            cfg_dm = {c: st.column_config.TextColumn(c, alignment="center") for c in _df_dm_view.columns}
-            st.dataframe(_df_dm_view, width="stretch", hide_index=True, column_config=cfg_dm)
-            st.caption(
-                "cada linha é um mês fechado, salvo uma única vez — não é recalculado depois. Se algum "
-                "valor estiver errado, corrija direto na aba 'dividendos_mensais' do Google Sheets."
-            )
-        else:
-            st.caption("sem histórico mensal salvo ainda.")
 
     st.markdown('---')
 
@@ -2227,6 +2208,21 @@ with aba_detalhe:
                     st.rerun()
                 else:
                     st.warning("nenhuma linha válida encontrada pra lançar.")
+
+        with st.expander("ver histórico mensal de dividendos salvo"):
+            if not _df_div_mensal.empty:
+                _df_dm_view = _df_div_mensal.copy()
+                _df_dm_view['valor_mes'] = _df_dm_view['valor_mes'].apply(formatar_brl)
+                _df_dm_view['acumulado'] = _df_dm_view['acumulado'].apply(formatar_brl)
+                _df_dm_view = _df_dm_view.sort_values('ano_mes', ascending=False)
+                cfg_dm = {c: st.column_config.TextColumn(c, alignment="center") for c in _df_dm_view.columns}
+                st.dataframe(_df_dm_view, width="stretch", hide_index=True, column_config=cfg_dm)
+                st.caption(
+                    "cada linha é um mês fechado, salvo uma única vez — não é recalculado depois. Se algum "
+                    "valor estiver errado, corrija direto na aba 'dividendos_mensais' do Google Sheets."
+                )
+            else:
+                st.caption("sem histórico mensal salvo ainda.")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: ETFs
