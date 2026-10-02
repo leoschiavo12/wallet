@@ -1999,6 +1999,14 @@ with aba_detalhe:
 
         lanc_json = _lanc_json_cached()
         div_total, div_detalhe = obter_dividendos_mes_anterior(lanc_json)
+        # total do mês vem da aba dividendos_mensais quando o mês já está gravado (mesmo número
+        # do dashboard e respeita correções feitas na planilha); o cálculo ao vivo fica só
+        # para o detalhamento por FII e para o caso de o mês ainda não ter sido gravado
+        _linha_mes_planilha = _df_div_mensal[_df_div_mensal['ano_mes'] == f"{ano_ref_f}-{mes_ref_f:02d}"] \
+            if _df_div_mensal is not None and not _df_div_mensal.empty else None
+        if _linha_mes_planilha is not None and not _linha_mes_planilha.empty \
+                and pd.notna(_linha_mes_planilha['valor_mes'].iloc[-1]):
+            div_total = float(_linha_mes_planilha['valor_mes'].iloc[-1])
 
         df_fii = df[df['Classe'] == 'FII'].copy()
         total_fii = df_fii['Total Atual'].sum()
