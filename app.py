@@ -492,8 +492,8 @@ def calcular_dividendos_historicos(df_lanc_json):
 
             total_ativo = 0.0
             for data_div, valor_div in divs_filtrados.items():
-                # qtd de cotas na data do dividendo
-                g_ate = g[g['data_dt'] <= data_div]
+                # qtd de cotas na véspera da data-ex (quem compra na data-ex não recebe)
+                g_ate = g[g['data_dt'].dt.normalize() < pd.Timestamp(data_div).normalize()]
                 qtd = (g_ate['quantidade'] * g_ate['sinal']).sum()
                 if qtd > 0:
                     total_ativo += qtd * valor_div
@@ -1922,10 +1922,9 @@ with aba_detalhe:
 
         yield_mensal = (div_total / _total_fii_base * 100) if _total_fii_base > 0 and div_total > 0 else None
 
-        # calcular total histórico de dividendos (cacheado 24h)
-        _divs_hist, _total_divs = calcular_dividendos_historicos(
-            _df_lanc_raw.to_dict(orient='records')
-        )
+        # total histórico de dividendos = acumulado da aba dividendos_mensais
+        # (mesma fonte do dashboard; respeita ajustes manuais feitos na planilha)
+        _total_divs = _total_divs_geral
 
         _var_fii_rs  = total_fii - df_fii['custo_total'].sum()
         _var_fii_pct = _var_fii_rs / df_fii['custo_total'].sum() * 100 if df_fii['custo_total'].sum() > 0 else 0
@@ -1953,7 +1952,7 @@ with aba_detalhe:
             _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
             c3.metric(_label_mes, formatar_brl(div_total))
             c4.metric(f"yield — {_label_mes}", _yield_str)
-            c5.metric("div. totais", abreviar_rs(_total_divs))
+            c5.metric("div. totais", formatar_brl(_total_divs))
 
             r3c1, r3c2, r3c3 = st.columns(3)
             r3c1.metric(f"YoC — {_label_mes}", _yoc_mes_str)
