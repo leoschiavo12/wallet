@@ -319,12 +319,57 @@ def obter_precos_b3(tickers_lista):
 # dividendos via yfinance a partir do ticker salvo em lançamentos.
 ALIAS_FII_TICKERS = {'GALG11': 'GARE11'}
 
+@st.cache_data(ttl=43200, show_spinner=False)  # 12h
+def obter_proventos_fii(ticker):
+    """
+    proventos por cota de um FII: DataFrame [data_com, data_pag, valor, fonte].
+    1º StatusInvest (tem data-com E data de pagamento reais);
+    2º fallback yfinance (só tem data-ex): data-com = dia útil anterior à data-ex e
+       pagamento ESTIMADO em data-com + 7 dias (prazo típico dos FIIs).
+    amortizações ficam de fora (devolução de capital, não rendimento).
+    """
+    cols = ['data_com', 'data_pag', 'valor', 'fonte']
+    t = ALIAS_FII_TICKERS.get(ticker, ticker).upper()
+    try:
+        r = requests.get("https://statusinvest.com.br/fii/companytickerprovents",
+                         params={"ticker": t, "chartProventsType": 2},
+                         headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                         timeout=10)
+        modelos = r.json().get("assetEarningsModels") or []
+        linhas = []
+        for m in modelos:
+            if 'amortiza' in str(m.get('et', '')).lower():
+                continue
+            d_com = pd.to_datetime(m.get('ed'), format='%d/%m/%Y', errors='coerce')
+            d_pag = pd.to_datetime(m.get('pd'), format='%d/%m/%Y', errors='coerce')
+            v = m.get('v')
+            if pd.notna(d_com) and v:
+                linhas.append([d_com.normalize(), d_pag.normalize() if pd.notna(d_pag) else pd.NaT,
+                               float(v), 'statusinvest'])
+        if linhas:
+            return pd.DataFrame(linhas, columns=cols).sort_values('data_com').reset_index(drop=True)
+    except Exception:
+        pass
+    try:
+        divs = yf.Ticker(f"{t}.SA").dividends
+        if divs is None or divs.empty:
+            return pd.DataFrame(columns=cols)
+        idx = pd.to_datetime(divs.index)
+        idx = (idx.tz_localize(None) if idx.tz is not None else idx).normalize()
+        d_com = idx - pd.offsets.BDay(1)
+        df_y = pd.DataFrame({'data_com': d_com, 'data_pag': d_com + pd.Timedelta(days=7),
+                             'valor': divs.values.astype(float), 'fonte': 'yfinance (pagamento estimado)'})
+        return df_y[df_y['valor'] > 0].sort_values('data_com').reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame(columns=cols)
+
 @st.cache_data(ttl=3600)
 def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
     """
-    dividendos recebidos num mês/ano específico (auto via yfinance + lançamentos manuais
-    tipo 'dividendo' datados daquele mês). Função genérica — usada tanto pro card do mês
-    mais recente quanto pro backfill histórico mensal.
+    dividendos RECEBIDOS num mês/ano: soma os proventos com DATA DE PAGAMENTO no mês
+    (o que caiu na conta). A data-com só decide o direito: conta as cotas compradas até
+    a data-com, inclusive (= antes da data-ex). + lançamentos manuais tipo 'dividendo'
+    datados no mês. Usada pelo card do mês e pelo histórico mensal.
     """
     import pandas as pd
 
@@ -340,42 +385,33 @@ def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
     detalhes = {}
 
     # Classe vem como 'FII' do Sheets — após title() fica 'Fii'
-    fiis = list(df_lanc[df_lanc['Classe'].str.upper() == 'FII']['Ativo'].unique())
+    # agrupa pelo ticker atual: lançamentos com ticker antigo (GALG11) e novo (GARE11)
+    # somam cotas no mesmo FII, sem contar o provento duas vezes
+    df_lanc['Ativo_norm'] = df_lanc['Ativo'].map(lambda a: ALIAS_FII_TICKERS.get(a, a))
+    fiis = list(df_lanc[df_lanc['Classe'].str.upper() == 'FII']['Ativo_norm'].unique())
 
-    for fii in fiis:
-        fii_norm = ALIAS_FII_TICKERS.get(fii, fii)
+    for fii_norm in fiis:
         try:
-            tk = yf.Ticker(f"{fii_norm}.SA")
-            divs = tk.dividends
-            if divs is None or divs.empty:
+            prov = obter_proventos_fii(fii_norm)
+            if prov.empty:
                 continue
-            divs.index = divs.index.tz_localize(None) if divs.index.tzinfo else divs.index
-
-            # filtrar pelo mes de referencia apenas
-            mask   = (divs.index.month == mes_ref) & (divs.index.year == ano_ref)
-            divs_ex = divs[mask]
-            if divs_ex.empty:
-                continue
-
-            for data_ex, val_cota in divs_ex.items():
-                try:
-                    data_ex_date = pd.Timestamp(data_ex).normalize()
-                    ticker_ops = fii if fii in df_lanc['Ativo'].values else fii_norm
-                    ops = df_lanc[
-                        (df_lanc['Ativo'] == ticker_ops) &
-                        (df_lanc['data_dt'].dt.normalize() < data_ex_date)
-                    ]
-                    qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
-                    if qtd_na_data > 0:
-                        val_total = float(val_cota) * qtd_na_data
-                        if fii_norm not in detalhes:
-                            detalhes[fii_norm] = {'por_cota': 0.0, 'total': 0.0, 'qtd': qtd_na_data}
-                        detalhes[fii_norm]['por_cota'] += float(val_cota)
-                        detalhes[fii_norm]['total']    += val_total
-                        total += val_total
-                except:
-                    continue
-        except:
+            _hoje_d = pd.Timestamp.today().normalize()
+            prov_mes = prov[(prov['data_pag'].dt.month == mes_ref) &
+                            (prov['data_pag'].dt.year == ano_ref) &
+                            (prov['data_pag'] <= _hoje_d)]          # só o que já foi pago
+            for _, p in prov_mes.iterrows():
+                ops = df_lanc[(df_lanc['Ativo_norm'] == fii_norm) &
+                              (df_lanc['data_dt'].dt.normalize() <= p['data_com'])]
+                qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
+                if qtd_na_data > 0:
+                    val_total = float(p['valor']) * qtd_na_data
+                    if fii_norm not in detalhes:
+                        detalhes[fii_norm] = {'por_cota': 0.0, 'total': 0.0, 'qtd': qtd_na_data,
+                                              'fonte': p['fonte']}
+                    detalhes[fii_norm]['por_cota'] += float(p['valor'])
+                    detalhes[fii_norm]['total']    += val_total
+                    total += val_total
+        except Exception:
             continue
 
     # lançamentos manuais de tipo 'dividendo' datados dentro desse mês/ano
@@ -503,23 +539,19 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
 
     for t in tickers_tupla:
         try:
-            t_norm = ALIAS_FII_TICKERS.get(t, t)
-            divs = yf.Ticker(f"{t_norm}.SA").dividends
-            if divs is None or divs.empty:
+            prov = obter_proventos_fii(t)
+            if prov.empty:
                 resultado[t] = 0.0
                 continue
-            if divs.index.tz is not None:
-                divs.index = divs.index.tz_localize(None)
-            _w = divs[divs.index >= janela_ini]
-            _w = _w[_w > 0]
-            _soma = float(_w.sum())
+            _w = prov[prov['data_com'] >= janela_ini]
+            _soma = float(_w['valor'].sum())
             # o yfinance às vezes "pula" meses de FIIs da B3 (ex.: GARE11 vinha com 10 dos 12
-            # pagamentos). Se o padrão é mensal (≥6 pagamentos, intervalo mediano ~1 mês) e
-            # faltam meses na janela, anualiza pela média dos pagamentos encontrados.
-            if 6 <= len(_w) < 12:
-                _gap = pd.Series(_w.index).diff().dt.days.median()
+            # pagamentos). Só no fallback: se o padrão é mensal (≥6 pagamentos, intervalo
+            # mediano ~1 mês) e faltam meses na janela, anualiza pela média dos encontrados.
+            if (prov['fonte'] != 'statusinvest').all() and 6 <= len(_w) < 12:
+                _gap = _w['data_com'].diff().dt.days.median()
                 if 25 <= _gap <= 35:
-                    _soma = float(_w.mean()) * 12
+                    _soma = float(_w['valor'].mean()) * 12
             resultado[t] = round(_soma, 4)
         except Exception:
             resultado[t] = 0.0
@@ -2093,6 +2125,11 @@ with aba_detalhe:
             r3c2.metric(f"YoC — {_label_mes}", _yoc_mes_str)
             r3c3.metric("YoC (12m)", _yoc_12m_str)
 
+
+        _fii_estimados = sorted(t for t, d in div_detalhe.items()
+                                if d.get('fonte') and d.get('fonte') != 'statusinvest')
+        if _fii_estimados:
+            st.caption(f"data de pagamento estimada (StatusInvest indisponível) para: {', '.join(_fii_estimados)}")
         st.markdown("---")
 
         # ── linha 2: tijolo vs papel ─────────────────────────────────────────
