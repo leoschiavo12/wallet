@@ -1285,6 +1285,47 @@ def parse_extrato_renda_mais(arquivo_upload):
 
     return pd.DataFrame(registros)
 
+def taxas_aportes_renda_mais(df_lanc, df_hist_taxa, df_extrato=None):
+    """
+    taxa contratada de cada aporte no Renda+ 2050, sem upload manual:
+    para cada compra nos lançamentos, pega a taxa de mercado do dia (Taxa Compra Manhã do
+    Tesouro Transparente; em fim de semana/feriado, a do último dia útil anterior).
+    Se a aba renda_mais_taxas (extrato antigo) tiver a mesma data, usa a taxa do extrato,
+    que é a exata. retorna DataFrame [data, data_dt, valor_investido, taxa_contratada_pct, fonte]
+    """
+    cols = ['data', 'data_dt', 'valor_investido', 'taxa_contratada_pct', 'fonte']
+    if df_lanc is None or df_lanc.empty or df_hist_taxa is None or df_hist_taxa.empty:
+        return pd.DataFrame(columns=cols)
+    c = df_lanc[(df_lanc['ativo'].astype(str).str.contains('renda', case=False)) &
+                (df_lanc['tipo'].astype(str).str.strip().str.lower() == 'compra')].copy()
+    if c.empty:
+        return pd.DataFrame(columns=cols)
+    c['data_dt'] = pd.to_datetime(c['data'], format='%d/%m/%Y', errors='coerce').dt.normalize()
+    c = c.dropna(subset=['data_dt'])
+    c['valor_investido'] = (pd.to_numeric(c['quantidade'], errors='coerce') *
+                            pd.to_numeric(c['preco_unitario'], errors='coerce'))
+    c = c[c['valor_investido'] > 0]
+
+    hist = df_hist_taxa[['data_dt', 'taxa']].dropna().copy()
+    hist['data_dt'] = pd.to_datetime(hist['data_dt']).dt.normalize()
+    hist = hist.sort_values('data_dt').drop_duplicates('data_dt')
+    c = pd.merge_asof(c.sort_values('data_dt'), hist, on='data_dt', direction='backward')
+    c['taxa_contratada_pct'] = c['taxa']
+    c['fonte'] = 'mercado'
+
+    # extrato antigo (taxa exata) prevalece na mesma data
+    if df_extrato is not None and not df_extrato.empty:
+        ext = df_extrato.copy()
+        ext['data_dt'] = pd.to_datetime(ext['data'], format='%d/%m/%Y', errors='coerce').dt.normalize()
+        ext = ext.dropna(subset=['data_dt']).groupby('data_dt')['taxa_contratada_pct'].mean()
+        _m = c['data_dt'].isin(ext.index)
+        c.loc[_m, 'taxa_contratada_pct'] = c.loc[_m, 'data_dt'].map(ext)
+        c.loc[_m, 'fonte'] = 'extrato'
+
+    c = c.dropna(subset=['taxa_contratada_pct'])
+    c['data'] = c['data_dt'].dt.strftime('%d/%m/%Y')
+    return c[cols].reset_index(drop=True)
+
 def calcular_taxa_media_ponderada_renda(df_taxas):
     """taxa média ponderada pelo valor investido em cada aporte. retorna None se não houver dados."""
     if df_taxas is None or df_taxas.empty:
@@ -2464,43 +2505,12 @@ with aba_detalhe:
                 st.caption(f"preço manual (secrets) — API: {st.session_state.get('preco_renda_erro','')}")
 
             if ativo == 'Renda+ 2050':
-                _df_renda_taxas_chart = ler_renda_taxas()
-                if not _df_renda_taxas_chart.empty:
-                    _df_rt = _df_renda_taxas_chart.copy()
-                    _df_rt['data_dt'] = pd.to_datetime(_df_rt['data'], format='%d/%m/%Y', errors='coerce')
-                    _df_rt = _df_rt.sort_values('data_dt')
-                    _taxa_media_chart = calcular_taxa_media_ponderada_renda(_df_rt)
-
-                    fig_renda_taxas = go.Figure()
-                    fig_renda_taxas.add_trace(go.Scatter(
-                        x=_df_rt['data_dt'], y=_df_rt['taxa_contratada_pct'],
-                        mode='lines+markers', name='taxa contratada',
-                        line=dict(color='#2E86AB', width=2),
-                        marker=dict(size=7, color='#2E86AB'),
-                        hovertemplate='%{x|%d/%m/%Y}: IPCA+%{y:.2f}%<extra></extra>'
-                    ))
-                    if _taxa_media_chart is not None:
-                        fig_renda_taxas.add_hline(
-                            y=_taxa_media_chart, line_dash='dash', line_color='gray',
-                            annotation_text=f"média: IPCA+{fmt_pct(_taxa_media_chart, 2)}",
-                            annotation_position='top left'
-                        )
-                    fig_renda_taxas.update_layout(
-                        height=280, margin=dict(l=10, r=10, t=30, b=10),
-                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                        showlegend=False,
-                        xaxis=dict(showgrid=False, fixedrange=True),
-                        yaxis=dict(showgrid=True, gridcolor='#333', fixedrange=True, ticksuffix='%'),
-                    )
-                    st.plotly_chart(
-                        fig_renda_taxas, width="stretch",
-                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
-                    )
-                else:
-                    st.caption("sem histórico de taxas importado ainda — sobe o extrato no expander abaixo pra ver o gráfico.")
-
-                # ── gráfico 2: variação real da taxa de mercado + meus aportes ──────
+                # taxa de cada aporte = taxa de mercado no dia da compra (lançamentos),
+                # sem upload manual; datas que já estavam no extrato antigo usam a taxa exata dele
                 _df_hist_taxa, _erro_hist_taxa = obter_historico_taxa_renda_mais()
+                _df_rt = taxas_aportes_renda_mais(_df_lanc_raw, _df_hist_taxa, ler_renda_taxas())
+                _taxa_media_chart = calcular_taxa_media_ponderada_renda(_df_rt)
+
                 if not _df_hist_taxa.empty:
                     fig_taxa_mercado = go.Figure()
                     fig_taxa_mercado.add_trace(go.Scatter(
@@ -2509,11 +2519,12 @@ with aba_detalhe:
                         line=dict(color='#A8A8A8', width=1.5),
                         hovertemplate='%{x|%d/%m/%Y}: IPCA+%{y:.2f}%<extra></extra>'
                     ))
-                    if not _df_renda_taxas_chart.empty:
+                    if not _df_rt.empty:
                         fig_taxa_mercado.add_trace(go.Scatter(
                             x=_df_rt['data_dt'], y=_df_rt['taxa_contratada_pct'],
                             mode='markers', name='meus aportes',
-                            marker=dict(size=8, color='#2E86AB'),
+                            marker=dict(size=9, color='#F59E0B',
+                                        line=dict(width=1, color='#0E1117')),
                             hovertemplate='%{x|%d/%m/%Y}: IPCA+%{y:.2f}%<extra></extra>'
                         ))
                     if _taxa_media_chart is not None:
@@ -2534,142 +2545,8 @@ with aba_detalhe:
                         fig_taxa_mercado, width="stretch",
                         config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
-                    _data_min = _df_hist_taxa['data_dt'].min().strftime('%d/%m/%Y')
-                    st.caption(
-                        f"histórico de mercado disponível desde {_data_min} · dados guardados permanentemente "
-                        f"(aba renda_mais_taxa_mercado) — só os dias novos são buscados a cada atualização."
-                    )
                 else:
                     st.caption(f"não consegui obter o histórico de taxa de mercado ({_erro_hist_taxa}).")
-
-                with st.expander("projeção de renda vitalícia"):
-                    _df_renda_taxas = _df_renda_taxas_chart
-                    _taxa_ponderada = calcular_taxa_media_ponderada_renda(_df_renda_taxas)
-
-                    if _taxa_ponderada is not None:
-                        _taxa_default = _taxa_ponderada
-                        _fonte_taxa = f"média ponderada real de {len(_df_renda_taxas)} aportes (extrato Tesouro Direto)"
-                    else:
-                        _taxa_auto = st.session_state.get('taxa_renda_auto')
-                        _taxa_default = float(_taxa_auto) if _taxa_auto else 7.2
-                        _fonte_taxa = "taxa de mercado hoje — sem extrato importado ainda"
-
-                    # estimativa de aporte mensal futuro: alvo % do Renda+ × aporte médio informado
-                    _alvo_renda_pct = (_get_banda(_cfg_alvos, 'Renda+ 2050').get('alvo') or 20) if '_cfg_alvos' in dir() else 20
-                    _aporte_default = round(1900 * (_alvo_renda_pct / 100))
-
-                    pc1, pc2 = st.columns(2)
-                    _taxa_input = pc1.text_input(
-                        "taxa real contratada (IPCA+ % a.a.)",
-                        value=f"{_taxa_default:.2f}".replace('.', ','),
-                        help=f"Fonte atual: {_fonte_taxa}. Ajuste manualmente se quiser simular outro cenário."
-                    )
-                    _aporte_input = pc2.text_input(
-                        "aporte mensal futuro estimado (R$)",
-                        value=str(_aporte_default),
-                        help="Quanto por mês, em média, deve seguir para o Renda+ 2050 até 2050 (baseado no alvo % configurado)."
-                    )
-                    st.caption(f"↳ {_fonte_taxa}")
-
-                    try:
-                        _taxa_pct = float(_taxa_input.replace(',', '.'))
-                        _aporte_v = float(_aporte_input.replace(',', '.'))
-                    except ValueError:
-                        _taxa_pct, _aporte_v = _taxa_default, _aporte_default
-
-                    _proj = calcular_projecao_renda_mais(
-                        saldo_atual=total_atual,
-                        taxa_real_aa=_taxa_pct / 100,
-                        aporte_mensal=_aporte_v,
-                    )
-
-                    _anos_restantes = _proj['meses_ate_conversao'] / 12
-                    r1, r2, r3 = st.columns(3)
-                    r1.metric("saldo em 2050 (valor de hoje)", abreviar_rs(_proj['saldo_conversao']))
-                    r2.metric("renda mensal vitalícia (valor de hoje)", formatar_brl(_proj['parcela_mensal']))
-                    r3.metric("total em 20 anos (2050–2069)", abreviar_rs(_proj['total_recebido_20anos']))
-
-                    st.caption(
-                        f"projeção em termos reais (poder de compra de hoje) · {_anos_restantes:.0f} anos até a conversão · "
-                        f"não desconta IR (tabela regressiva) nem taxa de custódia sobre excedente de 6 salários mínimos."
-                    )
-
-                    # gráfico de trajetória: acumulação até 2050 + consumo da anuidade até ~2069/2070
-                    _df_traj = calcular_trajetoria_renda_mais(
-                        saldo_atual=total_atual, taxa_real_aa=_taxa_pct / 100, aporte_mensal=_aporte_v
-                    )
-                    _fig_traj = go.Figure()
-                    _df_acum = _df_traj[_df_traj['fase'] == 'acumulação']
-                    _df_pag  = _df_traj[_df_traj['fase'] == 'pagamento']
-                    _fig_traj.add_trace(go.Scatter(
-                        x=_df_acum['ano'], y=_df_acum['saldo'], name='acumulação (aportes + juros)',
-                        fill='tozeroy', mode='lines', line=dict(color='#2E86AB', width=2),
-                        fillcolor='rgba(46,134,171,0.2)',
-                        hovertemplate='%{x:.0f}: R$%{y:,.0f}<extra></extra>'
-                    ))
-                    _fig_traj.add_trace(go.Scatter(
-                        x=_df_pag['ano'], y=_df_pag['saldo'], name='pagamento (renda vitalícia)',
-                        fill='tozeroy', mode='lines', line=dict(color='#06A77D', width=2),
-                        fillcolor='rgba(6,167,125,0.2)',
-                        hovertemplate='%{x:.0f}: R$%{y:,.0f}<extra></extra>'
-                    ))
-                    _fig_traj.add_vline(x=2050, line_dash='dash', line_color='gray',
-                                         annotation_text='conversão em renda', annotation_position='top')
-                    _fig_traj.update_layout(
-                        height=280, margin=dict(l=10, r=10, t=30, b=10),
-                        legend=dict(orientation='h', yanchor='bottom', y=1.02, x=0),
-                        xaxis_title=None, yaxis_title=None, showlegend=True,
-                    )
-                    st.plotly_chart(_fig_traj, use_container_width=True)
-
-                    # sensibilidade: como a renda mensal muda com ±1 p.p. na taxa
-                    st.caption("sensibilidade da renda mensal à taxa (as próximas compras podem travar taxa diferente da atual)")
-                    _cenarios = [
-                        ("taxa −1 p.p.", max(_taxa_pct - 1, 0.1)),
-                        ("taxa atual", _taxa_pct),
-                        ("taxa +1 p.p.", _taxa_pct + 1),
-                    ]
-                    _labels_c, _valores_c = [], []
-                    for _label_c, _t_c in _cenarios:
-                        _proj_c = calcular_projecao_renda_mais(
-                            saldo_atual=total_atual, taxa_real_aa=_t_c / 100, aporte_mensal=_aporte_v
-                        )
-                        _labels_c.append(f"{_label_c}<br>(IPCA+{fmt_pct(_t_c, 2)})")
-                        _valores_c.append(_proj_c['parcela_mensal'])
-
-                    _fig_sens = go.Figure(go.Bar(
-                        x=_labels_c, y=_valores_c,
-                        text=[formatar_brl(v) for v in _valores_c], textposition='outside',
-                        marker_color=['#A8A8A8', '#2E86AB', '#A8A8A8'],
-                        hovertemplate='%{text}<extra></extra>'
-                    ))
-                    _fig_sens.update_layout(
-                        height=260, margin=dict(l=10, r=10, t=20, b=10),
-                        yaxis_title=None, showlegend=False,
-                    )
-                    st.plotly_chart(_fig_sens, use_container_width=True)
-
-                    st.markdown("---")
-                    st.caption("atualizar taxas contratadas — sobe o Extrato Analítico do Tesouro Renda+ (xlsx) sempre que tiver um novo")
-                    _upload_extrato = st.file_uploader(
-                        "extrato analítico (.xlsx)", type=["xlsx"], key="upload_extrato_renda",
-                        label_visibility="collapsed"
-                    )
-                    if _upload_extrato is not None:
-                        try:
-                            _df_novo = parse_extrato_renda_mais(_upload_extrato)
-                            if _df_novo.empty:
-                                st.error("não encontrei linhas de aporte reconhecíveis nesse arquivo.")
-                            else:
-                                if salvar_renda_taxas(_df_novo):
-                                    _nova_taxa = calcular_taxa_media_ponderada_renda(_df_novo)
-                                    st.success(
-                                        f"✓ {len(_df_novo)} aportes importados — nova taxa média ponderada: "
-                                        f"IPCA + {fmt_pct(_nova_taxa, 2)}"
-                                    )
-                                    st.cache_data.clear()
-                        except Exception as e:
-                            st.error(f"erro ao ler o extrato: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: CARTEIRA
