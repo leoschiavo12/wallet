@@ -771,11 +771,11 @@ def card_html(col, label, valor, tom=None):
         unsafe_allow_html=True
     )
 
-def card_valorizacao(col, rs, pct, label="valorização"):
+def card_valorizacao(col, rs, pct, label="variação"):
     """card de valorização: label (padrão 'valorização') · R$X, valor colorido ▲/▼ %"""
     sinal    = "▲" if rs >= 0 else "▼"
     _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
-    _rs_str  = ("-" if rs < 0 else "") + abreviar_rs(abs(rs))
+    _rs_str  = f"({abreviar_rs(abs(rs))})" if rs < 0 else abreviar_rs(rs)   # negativo entre parênteses
     card_html(col, f"{label}  ·  {_rs_str}", f"{sinal} {_pct_str}", "pos" if rs >= 0 else "neg")
 
 def metric_tag(col, label, valor, rs, pct):
@@ -2461,7 +2461,7 @@ with aba_detalhe:
                 if valorizacao is not None and valorizacao_pct is not None:
                     card_valorizacao(r2c3, valorizacao, valorizacao_pct)
                 else:
-                    r2c3.metric("valorização", "—")
+                    r2c3.metric("variação", "—")
 
             if 'preco_renda_auto' in st.session_state:
                 st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
