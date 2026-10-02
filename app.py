@@ -122,9 +122,9 @@ st.markdown("""
                 font-size: 0.95rem !important;
             }
 
-            /* linha de dividendos dos FIIs: 3 itens numa linha só */
+            /* linha 1 dos FIIs: 7 cards, quebram em 3 por linha no mobile */
             .st-key-row_fii_dividendos [data-testid="stHorizontalBlock"] {
-                flex-wrap: nowrap !important;
+                flex-wrap: wrap !important;
                 gap: 0.25rem !important;
             }
             .st-key-row_fii_dividendos [data-testid="column"],
@@ -137,6 +137,27 @@ st.markdown("""
                 font-size: 0.62rem !important;
             }
             .st-key-row_fii_dividendos [data-testid="stMetricValue"] {
+                font-size: 1rem !important;
+            }
+            .st-key-row_fii_dividendos .valorizacao-pct {
+                font-size: 1rem !important;
+            }
+
+            /* linha 2 dos FIIs: tijolo e papel lado a lado */
+            .st-key-row_fii_tipo [data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 0.25rem !important;
+            }
+            .st-key-row_fii_tipo [data-testid="column"],
+            .st-key-row_fii_tipo [data-testid="stColumn"] {
+                min-width: 48% !important;
+                width: 48% !important;
+                flex: 1 1 48% !important;
+            }
+            .st-key-row_fii_tipo [data-testid="stMetric"] label {
+                font-size: 0.62rem !important;
+            }
+            .st-key-row_fii_tipo [data-testid="stMetricValue"] {
                 font-size: 1rem !important;
             }
 
@@ -1930,56 +1951,53 @@ with aba_detalhe:
         _var_fii_pct = _var_fii_rs / df_fii['custo_total'].sum() * 100 if df_fii['custo_total'].sum() > 0 else 0
         _pct_fii_carteira = total_fii / total_geral * 100 if total_geral > 0 else 0
 
-        c1, c2 = st.columns(2)
-        c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
-        card_valorizacao(c2, _var_fii_rs, _var_fii_pct)
-
-        st.markdown("---")
-
         # YoC (yield on cost): proventos 12m × qtd atual (receita hipotética) ÷ custo de aquisição total
         _custo_total_fii   = df_fii['custo_total'].sum()
         _receita_12m_fii   = sum(_proventos_12m.get(r['Ativo'], 0.0) * r['Qtd'] for _, r in df_fii.iterrows())
         _yoc_12m_carteira  = (_receita_12m_fii / _custo_total_fii * 100) if _custo_total_fii > 0 and _receita_12m_fii > 0 else None
         _yoc_mes_carteira  = (div_total / _custo_total_fii * 100) if _custo_total_fii > 0 and div_total > 0 else None
 
+        _yield_str     = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
+        _yoc_12m_str   = f"{_yoc_12m_carteira:.2f}%".replace('.', ',') if _yoc_12m_carteira else "—"
+        _yoc_mes_str   = f"{_yoc_mes_carteira:.2f}%".replace('.', ',') if _yoc_mes_carteira else "—"
+        _meses_abrev3 = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
+                          7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
+        _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
+
+        # ── linha 1: total, valorização, dividendos do mês, yield, YoC, dividendos totais ──
         with st.container(key="row_fii_dividendos"):
-            c3, c4, c5 = st.columns(3)
-            _yield_str     = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
-            _yoc_12m_str   = f"{_yoc_12m_carteira:.2f}%".replace('.', ',') if _yoc_12m_carteira else "—"
-            _yoc_mes_str   = f"{_yoc_mes_carteira:.2f}%".replace('.', ',') if _yoc_mes_carteira else "—"
-            _meses_abrev3 = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
-                              7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
-            _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
+            c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+            c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
+            card_valorizacao(c2, _var_fii_rs, _var_fii_pct)
             c3.metric(_label_mes, formatar_brl(div_total))
             c4.metric(f"yield — {_label_mes}", _yield_str)
-            c5.metric("div. totais", formatar_brl(_total_divs))
+            c5.metric(f"YoC — {_label_mes}", _yoc_mes_str)
+            c6.metric("YoC (12m)", _yoc_12m_str)
+            c7.metric("dividendos totais", formatar_brl(_total_divs))
 
-            r3c1, r3c2, r3c3 = st.columns(3)
-            r3c1.metric(f"YoC — {_label_mes}", _yoc_mes_str)
-            r3c2.metric("YoC (12m)", _yoc_12m_str)
+        # ── linha 2: tijolo vs papel ─────────────────────────────────────────
+        df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
+        resumo_tipo = df_fii.groupby('tipo_fii')['Total Atual'].sum().reset_index()
 
-            # ── tijolo vs papel, alinhados embaixo de jun/26 e yield ──────────
-            df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
-            resumo_tipo = df_fii.groupby('tipo_fii')['Total Atual'].sum().reset_index()
+        df_papel = df_fii[df_fii['tipo_fii'] == 'papel'].copy()
+        df_papel['indexador'] = df_papel['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('indexador', '?'))
+        total_papel = df_papel['Total Atual'].sum() if not df_papel.empty else 0
 
-            df_papel = df_fii[df_fii['tipo_fii'] == 'papel'].copy()
-            df_papel['indexador'] = df_papel['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('indexador', '?'))
-            total_papel = df_papel['Total Atual'].sum() if not df_papel.empty else 0
+        # montar subtexto CDI/IPCA para o card papel
+        idx_info = ""
+        if not df_papel.empty:
+            resumo_idx = df_papel.groupby('indexador')['Total Atual'].sum().reset_index()
+            partes = []
+            for _, ri in resumo_idx.sort_values('Total Atual', ascending=False).iterrows():
+                pct_idx = ri['Total Atual'] / total_papel * 100 if total_papel > 0 else 0
+                partes.append(f"{ri['indexador']} {pct_idx:.0f}%".replace('.', ','))
+            idx_info = "  ·  " + " / ".join(partes)
 
-            # montar subtexto CDI/IPCA para o card papel
-            idx_info = ""
-            if not df_papel.empty:
-                resumo_idx = df_papel.groupby('indexador')['Total Atual'].sum().reset_index()
-                partes = []
-                for _, ri in resumo_idx.sort_values('Total Atual', ascending=False).iterrows():
-                    pct_idx = ri['Total Atual'] / total_papel * 100 if total_papel > 0 else 0
-                    partes.append(f"{ri['indexador']} {pct_idx:.0f}%".replace('.', ','))
-                idx_info = "  ·  " + " / ".join(partes)
-
-            c6, c7, c8 = st.columns(3)
+        with st.container(key="row_fii_tipo"):
+            c_tij, c_pap = st.columns(2)
             for _, r in resumo_tipo.sort_values('Total Atual', ascending=False).iterrows():
                 pct  = r['Total Atual'] / total_fii * 100 if total_fii > 0 else 0
-                col  = c6 if r['tipo_fii'] == 'tijolo' else c7
+                col  = c_tij if r['tipo_fii'] == 'tijolo' else c_pap
                 n    = n_tijolo if r['tipo_fii'] == 'tijolo' else n_papel
                 sufx = idx_info if r['tipo_fii'] == 'papel' else ""
                 col.metric(f"{r['tipo_fii']} ({n})  ·  {abreviar_rs(r['Total Atual'])}{sufx}".replace('.', ','),
