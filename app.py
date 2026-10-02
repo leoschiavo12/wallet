@@ -1051,6 +1051,77 @@ HEADERS    = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario",
 
 # ── taxas contratadas do Renda+ (extrato analítico Tesouro Direto) ────────────
 SHEET_RENDA_TAB = "renda_mais_taxas"
+
+# classificação dos ativos (tipo/indexador dos FIIs, país dos ETFs) — editável pelo app
+SHEET_ATIVOS_INFO_TAB = "ativos_info"
+ATIVOS_INFO_HEADERS   = ["ativo", "classe", "tipo", "indexador", "pais"]
+
+# valores de partida (os ativos que já existiam antes da aba); a aba prevalece sobre eles
+FII_INFO_PADRAO = {
+    'TRXF11': {'tipo': 'tijolo',  'indexador': None},
+    'XPML11': {'tipo': 'tijolo',  'indexador': None},
+    'XPLG11': {'tipo': 'tijolo',  'indexador': None},
+    'KNRI11': {'tipo': 'tijolo',  'indexador': None},
+    'BTLG11': {'tipo': 'tijolo',  'indexador': None},
+    'GARE11': {'tipo': 'tijolo',  'indexador': None},
+    'RZTR11': {'tipo': 'tijolo',  'indexador': None},
+    'BTCI11': {'tipo': 'papel',   'indexador': 'IPCA'},
+    'VGIR11': {'tipo': 'papel',   'indexador': 'CDI'},
+    'MCCI11': {'tipo': 'papel',   'indexador': 'IPCA'},
+    'KNCR11': {'tipo': 'papel',   'indexador': 'CDI'},
+}
+GEO_ETF_PADRAO = {'IVVB11': 'EUA', 'DIVO11': 'Brasil', 'PKIN11': 'China', 'LFTB11': 'Brasil'}
+PAISES_ETF     = ['Brasil', 'EUA', 'China', 'Europa', 'Emergentes', 'Global']
+
+def ler_ativos_info():
+    """lê a aba ativos_info → dict {ativo: {classe, tipo, indexador, pais}} (vazio se não existir)"""
+    try:
+        svc  = get_sheets_service()
+        rows = svc.values().get(spreadsheetId=SHEET_ID,
+                                range=f"{SHEET_ATIVOS_INFO_TAB}!A:E").execute().get("values", [])
+    except Exception:
+        return {}
+    info = {}
+    for r in rows[1:]:
+        r = (r + [''] * 5)[:5]
+        a = r[0].strip().upper()
+        if a:
+            info[a] = {'classe': r[1].strip(), 'tipo': r[2].strip() or None,
+                       'indexador': r[3].strip() or None, 'pais': r[4].strip() or None}
+    return info
+
+def salvar_ativo_info(ativo, classe, tipo=None, indexador=None, pais=None):
+    """grava/atualiza a classificação de um ativo na aba ativos_info (cria a aba se precisar)"""
+    svc = get_sheets_service()
+    _garantir_aba_existe(svc, SHEET_ATIVOS_INFO_TAB, ATIVOS_INFO_HEADERS)
+    rows = svc.values().get(spreadsheetId=SHEET_ID,
+                            range=f"{SHEET_ATIVOS_INFO_TAB}!A:E").execute().get("values", [])
+    nova = [ativo.upper(), classe, tipo or '', indexador or '', pais or '']
+    for i, r in enumerate(rows[1:], start=2):
+        if r and r[0].strip().upper() == ativo.upper():
+            svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_ATIVOS_INFO_TAB}!A{i}:E{i}",
+                                valueInputOption="RAW", body={"values": [nova]}).execute()
+            break
+    else:
+        svc.values().append(spreadsheetId=SHEET_ID, range=f"{SHEET_ATIVOS_INFO_TAB}!A:E",
+                            valueInputOption="RAW", body={"values": [nova]}).execute()
+    st.session_state.pop("_ativos_info", None)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def validar_ticker_b3(ticker):
+    """último fechamento do ticker na B3 (0 se não existir) — valida ativo novo antes de salvar"""
+    try:
+        h = yf.download(f"{ticker.upper()}.SA", period="5d", progress=False,
+                        auto_adjust=True, threads=False)
+        if h is None or h.empty:
+            return 0.0
+        c = h['Close']
+        if isinstance(c, pd.DataFrame):
+            c = c.iloc[:, 0]
+        c = c.dropna()
+        return float(c.iloc[-1]) if not c.empty else 0.0
+    except Exception:
+        return 0.0
 RENDA_HEADERS   = ["data", "valor_investido", "taxa_contratada_pct"]
 
 @st.cache_data(ttl=3600)
@@ -1727,20 +1798,21 @@ if "_df_pm" not in st.session_state:
 
 _df_pm = st.session_state["_df_pm"]
 
-# ── Classificação dos FIIs ───────────────────────────────────────────────────
-FII_INFO = {
-    'TRXF11': {'tipo': 'tijolo',  'indexador': None},
-    'XPML11': {'tipo': 'tijolo',  'indexador': None},
-    'XPLG11': {'tipo': 'tijolo',  'indexador': None},
-    'KNRI11': {'tipo': 'tijolo',  'indexador': None},
-    'BTLG11': {'tipo': 'tijolo',  'indexador': None},
-    'GARE11': {'tipo': 'tijolo',  'indexador': None},
-    'RZTR11': {'tipo': 'tijolo',  'indexador': None},
-    'BTCI11': {'tipo': 'papel',   'indexador': 'IPCA'},
-    'VGIR11': {'tipo': 'papel',   'indexador': 'CDI'},
-    'MCCI11': {'tipo': 'papel',   'indexador': 'IPCA'},
-    'KNCR11': {'tipo': 'papel',   'indexador': 'CDI'},
-}
+# ── Classificação dos ativos (padrões do código + aba ativos_info) ──────────
+if "_ativos_info" not in st.session_state:
+    st.session_state["_ativos_info"] = ler_ativos_info()
+_ativos_info = st.session_state["_ativos_info"]
+
+FII_INFO = {a: dict(v) for a, v in FII_INFO_PADRAO.items()}
+GEO_ETF  = dict(GEO_ETF_PADRAO)
+for _a, _v in _ativos_info.items():
+    if _v.get('classe') == 'FII':
+        FII_INFO[_a] = {'tipo': _v.get('tipo') or 'tijolo', 'indexador': _v.get('indexador')}
+    elif _v.get('classe') == 'ETF' and _v.get('pais'):
+        GEO_ETF[_a] = _v['pais']
+
+# classe de cada ativo em carteira (base das listas do simulador e das configurações)
+_classe_de = dict(zip(_posicao['ativo'], _posicao['classe'])) if not _posicao.empty else {}
 
 aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simulador", "configurações"])
 
@@ -2568,8 +2640,8 @@ with aba_detalhe:
     # ══════════════════════════════════════════════════════════════════════════
     with sub_resumo:
         # ── linha 1: exposição geográfica ─────────────────────────────────────
-        GEO_FLAG = {'Brasil': '🇧🇷', 'EUA': '🇺🇸', 'China': '🇨🇳', 'Global (cripto)': '🌍'}
-        GEO_ETF  = {'IVVB11': 'EUA', 'DIVO11': 'Brasil', 'PKIN11': 'China', 'LFTB11': 'Brasil'}
+        GEO_FLAG = {'Brasil': '🇧🇷', 'EUA': '🇺🇸', 'China': '🇨🇳', 'Europa': '🇪🇺',
+                    'Emergentes': '🌏', 'Global': '🌐', 'Global (cripto)': '🌍'}
         geo_totais = {}
         for _, row in df[df['Classe'] == 'ETF'].iterrows():
             pais = GEO_ETF.get(row['Ativo'], 'Brasil')
@@ -2642,9 +2714,9 @@ with aba_detalhe:
         for i, row in df_ativo_sorted.reset_index(drop=True).iterrows():
             _ativo_n = row['Ativo']
             # FIIs usam alvo da classe dividido
-            if _ativo_n in FII_INFO:
+            if _classe_de.get(_ativo_n) == 'FII':
                 _banda_c = _get_banda(_cfg_alvos, '__FIIs__')
-                _n_f = len([a for a in _posicao['ativo'] if a in FII_INFO])
+                _n_f = len([a for a, c in _classe_de.items() if c == 'FII'])
                 _alvo_i = (_banda_c.get('alvo') or 0) / _n_f if _n_f > 0 else None
                 _min_i  = (_banda_c.get('min')  or 0) / _n_f if _n_f > 0 else None
                 _max_i  = (_banda_c.get('max')  or 0) / _n_f if _n_f > 0 else None
@@ -2722,7 +2794,8 @@ with aba_lanc:
         _opcoes.append((t, 'FII'))
     _opcoes.append(('BTC', 'Cripto'))
     _opcoes.append(('Renda+ 2050', 'Tesouro Direto'))
-    _nomes = [t for t, _ in _opcoes]
+    _opcoes.append(('__novo__', None))
+    _nomes = ['novo ativo…' if t == '__novo__' else t for t, _ in _opcoes]
 
     @st.fragment
     def aba_lancamentos_fragment():
@@ -2791,6 +2864,24 @@ with aba_lanc:
                                        label_visibility="collapsed")
                     f_ativo  = _opcoes[idx][0]
                     f_classe = _opcoes[idx][1]
+
+                # ── ativo novo: ticker + classe + classificação ────────────────
+                _novo = f_ativo == '__novo__'
+                n_tipo = n_idx = n_pais = None
+                if _novo:
+                    n1, n2, n3 = st.columns([1.1, 0.8, 1.2])
+                    with n1:
+                        f_ativo = st.text_input("ticker", placeholder="ticker (ex.: HGLG11)",
+                                                label_visibility="collapsed").strip().upper()
+                    with n2:
+                        f_classe = st.selectbox("classe", ["FII", "ETF"], label_visibility="collapsed")
+                    with n3:
+                        if f_classe == "FII":
+                            n_tipo = st.selectbox("tipo FII", ["tijolo", "papel"], label_visibility="collapsed")
+                        else:
+                            n_pais = st.selectbox("país", PAISES_ETF, label_visibility="collapsed")
+                    if f_classe == "FII" and n_tipo == "papel":
+                        n_idx = st.selectbox("indexador", ["CDI", "IPCA"], label_visibility="collapsed")
                 c4, c5, c6 = st.columns([0.9, 1.1, 0.9])
                 with c4:
                     f_qtd_str = st.text_input("qtd", placeholder="quantidade",
@@ -2811,7 +2902,23 @@ with aba_lanc:
                 ca, cb = st.columns([1, 5])
                 with ca:
                     if st.button("salvar", type="primary", width="stretch"):
-                        if f_qtd > 0 and f_preco > 0:
+                        _erro_novo = None
+                        if _novo:
+                            import re as _re
+                            if not _re.fullmatch(r"[A-Z]{4}\d{1,2}", f_ativo or ""):
+                                _erro_novo = "ticker inválido — use o formato da B3 (ex.: HGLG11)."
+                            elif f_ativo in _classe_de:
+                                _erro_novo = f"{f_ativo} já está na carteira — selecione na lista."
+                            elif f_tipo != "compra":
+                                _erro_novo = "o primeiro lançamento de um ativo novo precisa ser compra."
+                            elif validar_ticker_b3(f_ativo) <= 0:
+                                _erro_novo = f"não encontrei cotação para {f_ativo} na B3."
+                        if _erro_novo:
+                            st.warning(_erro_novo)
+                        elif f_qtd > 0 and f_preco > 0:
+                            if _novo:
+                                salvar_ativo_info(f_ativo, f_classe, tipo=n_tipo,
+                                                  indexador=n_idx, pais=n_pais)
                             salvar_lancamento([
                                 f_data.strftime("%d/%m/%Y"),
                                 f_tipo, f_ativo, f_classe,
@@ -2923,8 +3030,8 @@ with aba_aportes:
         st.warning("configure os alvos por ativo na aba ⚙️ configurações antes de simular.")
     else:
         # ── calcular desvios ──────────────────────────────────────────────────
-        _etfs_sim   = ['IVVB11', 'DIVO11', 'PKIN11', 'LFTB11']
-        _fiis_sim   = [a for a in _posicao['ativo'].tolist() if a in FII_INFO]
+        _etfs_sim   = sorted(a for a, c in _classe_de.items() if c == 'ETF')
+        _fiis_sim   = sorted(a for a, c in _classe_de.items() if c == 'FII')
         _outros_sim = ['Renda+ 2050', 'BTC']
         _n_fiis_sim = len(_fiis_sim)
 
@@ -3216,8 +3323,8 @@ with aba_aportes:
 # ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
     _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
-    _fiis_cfg   = [a for a in _ativos_cfg if a in FII_INFO]
-    _etfs_cfg   = [a for a in _ativos_cfg if a in ['IVVB11','DIVO11','PKIN11','LFTB11']]
+    _fiis_cfg   = [a for a in _ativos_cfg if _classe_de.get(a) == 'FII']
+    _etfs_cfg   = [a for a in _ativos_cfg if _classe_de.get(a) == 'ETF']
     _td_cfg     = [a for a in _ativos_cfg if a in ['Renda+ 2050']]
     _cripto_cfg = [a for a in _ativos_cfg if a in ['BTC']]
     _alvos_edit = dict(st.session_state.get("cfg_alvos", {}))
