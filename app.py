@@ -21,6 +21,48 @@ st.markdown("""
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
         [data-testid="stMetricDelta"] { display: none !important; }
 
+        /* ── cards (st.metric + cards HTML): tipografia única para o app inteiro ──
+           tudo que é "rótulo em cima / número embaixo" usa estes tokens; nenhum container
+           deve redefinir tamanho de fonte de card. Mobile só troca os valores das variáveis. */
+        :root {
+            --card-label-size:  0.85rem;
+            --card-value-size:  1.6rem;
+            --card-label-color: rgba(250, 250, 250, 0.6);
+            --card-value-color: rgba(250, 250, 250, 0.95);
+            --card-gap:         0.2rem;   /* espaço entre rótulo e valor */
+        }
+        [data-testid="stMetric"] { padding: 0 !important; }
+        [data-testid="stMetricLabel"],
+        [data-testid="stMetric"] label {
+            min-height: 0 !important;
+            height: auto !important;
+            margin: 0 0 var(--card-gap) 0 !important;
+            padding: 0 !important;
+        }
+        [data-testid="stMetricLabel"] p,
+        [data-testid="stMetricLabel"] div,
+        [data-testid="stMetric"] label,
+        .card-label {
+            font-size: var(--card-label-size) !important;
+            line-height: 1.3 !important;
+            font-weight: 400 !important;
+            color: var(--card-label-color) !important;
+        }
+        [data-testid="stMetricValue"],
+        [data-testid="stMetricValue"] div,
+        .card-value {
+            font-size: var(--card-value-size) !important;
+            line-height: 1.25 !important;
+            font-weight: 500 !important;
+        }
+        [data-testid="stMetricValue"] { color: var(--card-value-color) !important; }
+        .card { margin: 0; padding: 0; }
+        .card-label { margin: 0 0 var(--card-gap) 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card-value { margin: 0; white-space: nowrap; color: var(--card-value-color); }
+        .card-value.card-pos    { color: #22c55e !important; }
+        .card-value.card-neg    { color: #ef4444 !important; }
+        .card-value.card-neutro { color: #888888 !important; }
+
         /* ── mobile: 2 colunas lado a lado, padding compacto ───── */
         @media (max-width: 768px) {
             /* container-pai das colunas: por padrão o Streamlit empilha (flex-direction:column)
@@ -48,11 +90,10 @@ st.markdown("""
                 padding-top: 0.75rem !important;
             }
             /* métricas menores no mobile */
-            [data-testid="stMetric"] label {
-                font-size: 0.68rem !important;
-            }
-            [data-testid="stMetricValue"] {
-                font-size: 1.25rem !important;
+            /* cards: mesmos tokens, escala menor */
+            :root {
+                --card-label-size: 0.68rem;
+                --card-value-size: 1.05rem;
             }
             /* tabs com scroll horizontal */
             [data-testid="stTabs"] > div:first-child {
@@ -81,12 +122,6 @@ st.markdown("""
                 width: 23% !important;
                 flex: 1 1 23% !important;
             }
-            .st-key-row_geo [data-testid="stMetric"] label {
-                font-size: 0.6rem !important;
-            }
-            .st-key-row_geo [data-testid="stMetricValue"] {
-                font-size: 0.95rem !important;
-            }
 
             /* linha donut + gráfico mensal: empilha em vez de espremer lado a lado */
             .st-key-row_dashboard_chart [data-testid="stHorizontalBlock"] {
@@ -100,9 +135,6 @@ st.markdown("""
             }
 
             /* card de valorização: alinhar tamanho de fonte ao st.metric nativo */
-            .valorizacao-pct {
-                font-size: 1.25rem !important;
-            }
 
             /* linha RF/RV/CDI/IPCA+: 4 itens numa linha só, rótulos curtos */
             .st-key-row_indices [data-testid="stHorizontalBlock"] {
@@ -114,12 +146,6 @@ st.markdown("""
                 min-width: 23% !important;
                 width: 23% !important;
                 flex: 1 1 23% !important;
-            }
-            .st-key-row_indices [data-testid="stMetric"] label {
-                font-size: 0.6rem !important;
-            }
-            .st-key-row_indices [data-testid="stMetricValue"] {
-                font-size: 0.95rem !important;
             }
 
             /* bloco resumo dos FIIs: grade 3 colunas, igual aos cards por ativo */
@@ -133,15 +159,6 @@ st.markdown("""
                 width: 31% !important;
                 flex: 1 1 31% !important;
             }
-            .st-key-row_fii_dividendos [data-testid="stMetric"] label {
-                font-size: 0.62rem !important;
-            }
-            .st-key-row_fii_dividendos [data-testid="stMetricValue"] {
-                font-size: 0.95rem !important;
-            }
-            .st-key-row_fii_dividendos .valorizacao-pct {
-                font-size: 0.95rem !important;
-            }
 
             /* linha 2 dos FIIs: tijolo e papel lado a lado */
             .st-key-row_fii_tipo [data-testid="stHorizontalBlock"] {
@@ -154,12 +171,6 @@ st.markdown("""
                 width: 48% !important;
                 flex: 1 1 48% !important;
             }
-            .st-key-row_fii_tipo [data-testid="stMetric"] label {
-                font-size: 0.62rem !important;
-            }
-            .st-key-row_fii_tipo [data-testid="stMetricValue"] {
-                font-size: 0.95rem !important;
-            }
 
             /* cards por ETF: 3 infos por linha (ativo/preço/total em cima, valorização/holding embaixo) */
             [class*="st-key-row_etf_"] [data-testid="stHorizontalBlock"] {
@@ -171,15 +182,6 @@ st.markdown("""
                 min-width: 31% !important;
                 width: 31% !important;
                 flex: 1 1 31% !important;
-            }
-            [class*="st-key-row_etf_"] [data-testid="stMetric"] label {
-                font-size: 0.62rem !important;
-            }
-            [class*="st-key-row_etf_"] [data-testid="stMetricValue"] {
-                font-size: 0.95rem !important;
-            }
-            [class*="st-key-row_etf_"] .valorizacao-pct {
-                font-size: 0.95rem !important;
             }
 
             /* mesma estrutura (3 colunas, 2 linhas) para cripto, tesouro e FIIs */
@@ -199,21 +201,6 @@ st.markdown("""
                 width: 31% !important;
                 flex: 1 1 31% !important;
             }
-            [class*="st-key-row_cripto_"] [data-testid="stMetric"] label,
-            [class*="st-key-row_tesouro_"] [data-testid="stMetric"] label,
-            [class*="st-key-row_fii_ativo_"] [data-testid="stMetric"] label {
-                font-size: 0.62rem !important;
-            }
-            [class*="st-key-row_cripto_"] [data-testid="stMetricValue"],
-            [class*="st-key-row_tesouro_"] [data-testid="stMetricValue"],
-            [class*="st-key-row_fii_ativo_"] [data-testid="stMetricValue"] {
-                font-size: 0.95rem !important;
-            }
-            [class*="st-key-row_cripto_"] .valorizacao-pct,
-            [class*="st-key-row_tesouro_"] .valorizacao-pct,
-            [class*="st-key-row_fii_ativo_"] .valorizacao-pct {
-                font-size: 0.95rem !important;
-            }
 
             /* resumo ETF (total/valorização/holding médio): 3 numa linha */
             .st-key-row_etf_resumo [data-testid="stHorizontalBlock"] {
@@ -225,15 +212,6 @@ st.markdown("""
                 min-width: 31% !important;
                 width: 31% !important;
                 flex: 1 1 31% !important;
-            }
-            .st-key-row_etf_resumo [data-testid="stMetric"] label {
-                font-size: 0.62rem !important;
-            }
-            .st-key-row_etf_resumo [data-testid="stMetricValue"] {
-                font-size: 0.95rem !important;
-            }
-            .st-key-row_etf_resumo .valorizacao-pct {
-                font-size: 0.95rem !important;
             }
 
             /* variações do BTC: 3 colunas x 2 linhas alinhadas */
@@ -259,15 +237,6 @@ st.markdown("""
                 width: 31% !important;
                 flex: 1 1 31% !important;
             }
-            [class*="st-key-row_all_"] [data-testid="stMetric"] label {
-                font-size: 0.62rem !important;
-            }
-            [class*="st-key-row_all_"] [data-testid="stMetricValue"] {
-                font-size: 0.95rem !important;
-            }
-            [class*="st-key-row_all_"] .valorizacao-pct {
-                font-size: 0.95rem !important;
-            }
 
             /* linha 1 do dashboard: patrimônio/saiu do bolso/valorização numa linha só */
             .st-key-row_dash_resumo [data-testid="stHorizontalBlock"] {
@@ -280,15 +249,6 @@ st.markdown("""
                 width: 31% !important;
                 flex: 1 1 31% !important;
             }
-            .st-key-row_dash_resumo [data-testid="stMetric"] label {
-                font-size: 0.62rem !important;
-            }
-            .st-key-row_dash_resumo [data-testid="stMetricValue"] {
-                font-size: 1.1rem !important;
-            }
-            .st-key-row_dash_resumo .valorizacao-pct {
-                font-size: 1.1rem !important;
-            }
 
             /* linha 2 do dashboard: dividendos do mês/dividendos totais/lucro total numa linha só */
             .st-key-row_dash_lucro [data-testid="stHorizontalBlock"] {
@@ -300,15 +260,6 @@ st.markdown("""
                 min-width: 31% !important;
                 width: 31% !important;
                 flex: 1 1 31% !important;
-            }
-            .st-key-row_dash_lucro [data-testid="stMetric"] label {
-                font-size: 0.62rem !important;
-            }
-            .st-key-row_dash_lucro [data-testid="stMetricValue"] {
-                font-size: 1.1rem !important;
-            }
-            .st-key-row_dash_lucro .valorizacao-pct {
-                font-size: 1.1rem !important;
             }
         }
 
@@ -795,20 +746,22 @@ def tag_var(rs, pct):
     return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
-def card_valorizacao(col, rs, pct, label="valorização"):
-    """card HTML de valorização: label (padrão 'valorização') · R$X, valor grande colorido"""
-    sinal    = "▲" if rs >= 0 else "▼"
-    cor      = "#22c55e" if rs >= 0 else "#ef4444"
-    _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
-    _rs_str  = ("-" if rs < 0 else "") + abreviar_rs(abs(rs))
+def card_html(col, label, valor, tom=None):
+    """card HTML com a mesma tipografia do st.metric (tokens .card-label / .card-value no CSS).
+    tom: None (cor padrão) · 'pos' (verde) · 'neg' (vermelho) · 'neutro' (cinza)"""
+    _cls = f" card-{tom}" if tom else ""
     col.markdown(
-        f"<div style='padding-top:4px'>"
-        f"<p style='font-size:0.875rem;color:rgba(250,250,250,0.6);margin:0 0 6px 0'>"
-        f"{label} · {_rs_str}</p>"
-        f"<p class='valorizacao-pct' style='font-size:1.75rem;font-weight:500;color:{cor};margin:0;line-height:1.1'>"
-        f"{sinal} {_pct_str}</p></div>",
+        f"<div class='card'><p class='card-label'>{label}</p>"
+        f"<p class='card-value{_cls}'>{valor}</p></div>",
         unsafe_allow_html=True
     )
+
+def card_valorizacao(col, rs, pct, label="valorização"):
+    """card de valorização: label (padrão 'valorização') · R$X, valor colorido ▲/▼ %"""
+    sinal    = "▲" if rs >= 0 else "▼"
+    _pct_str = ("+" if pct >= 0 else "") + fmt_pct(pct)
+    _rs_str  = ("-" if rs < 0 else "") + abreviar_rs(abs(rs))
+    card_html(col, f"{label}  ·  {_rs_str}", f"{sinal} {_pct_str}", "pos" if rs >= 0 else "neg")
 
 def metric_tag(col, label, valor, rs, pct):
     """st.metric nativo — col já é a coluna certa"""
@@ -2425,16 +2378,12 @@ with aba_detalhe:
                 (r2c3, "5 anos",  var_5a),
             ]:
                 if v is None:
-                    cor, texto = "#888888", "—"
+                    tom, texto = "neutro", "—"
                 elif v >= 0:
-                    cor, texto = "#22c55e", f"▲ +{fmt_pct(v)}".replace('.', ',')
+                    tom, texto = "pos", f"▲ +{fmt_pct(v)}".replace('.', ',')
                 else:
-                    cor, texto = "#ef4444", f"▼ {fmt_pct(v)}".replace('.', ',')
-                col.markdown(
-                    f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:4px;font-family:inherit'>{label}</div>"
-                    f"<div style='font-size:1.6rem;font-weight:500;color:{cor};font-family:inherit'>{texto}</div>",
-                    unsafe_allow_html=True
-                )
+                    tom, texto = "neg", f"▼ {fmt_pct(v)}".replace('.', ',')
+                card_html(col, label, texto, tom)
 
         st.markdown("---")
         if hist is not None and not hist.empty:
