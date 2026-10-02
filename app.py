@@ -319,37 +319,82 @@ def obter_precos_b3(tickers_lista):
 # dividendos via yfinance a partir do ticker salvo em lançamentos.
 ALIAS_FII_TICKERS = {'GALG11': 'GARE11'}
 
+def _proventos_b3(t):
+    """proventos do FII direto da B3 (GetListedSupplementFunds) — data-com, pagamento e valor"""
+    import base64, json
+    payload = base64.b64encode(json.dumps(
+        {"cnpj": "0", "identifierFund": t[:4], "typeFund": 7}).encode()).decode()
+    url = f"https://sistemaswebb3-listados.b3.com.br/fundsProxy/fundsCall/GetListedSupplementFunds/{payload}"
+    hdr = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+    try:
+        r = requests.get(url, headers=hdr, timeout=12)
+    except requests.exceptions.SSLError:
+        # o certificado da B3 às vezes vem com cadeia incompleta
+        import urllib3
+        urllib3.disable_warnings()
+        r = requests.get(url, headers=hdr, timeout=12, verify=False)
+    if r.status_code != 200:
+        raise RuntimeError(f"B3 HTTP {r.status_code}")
+    data = r.json()
+    if isinstance(data, str):            # alguns endpoints da B3 devolvem JSON dentro de string
+        data = json.loads(data)
+    itens = (data or {}).get("cashDividends") or []
+    linhas = []
+    for c in itens:
+        if 'amortiza' in str(c.get('label', '')).lower():
+            continue
+        d_com = pd.to_datetime(c.get('lastDatePrior'), format='%d/%m/%Y', errors='coerce')
+        d_pag = pd.to_datetime(c.get('paymentDate'), format='%d/%m/%Y', errors='coerce')
+        try:
+            v = float(str(c.get('rate', '')).replace('.', '').replace(',', '.'))
+        except ValueError:
+            continue
+        if pd.notna(d_com) and v > 0:
+            linhas.append([d_com.normalize(), d_pag.normalize() if pd.notna(d_pag) else pd.NaT, v, 'B3'])
+    if not linhas:
+        raise RuntimeError("B3 sem proventos")
+    return linhas
+
+def _proventos_statusinvest(t):
+    r = requests.get("https://statusinvest.com.br/fii/companytickerprovents",
+                     params={"ticker": t, "chartProventsType": 2},
+                     headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                              "Accept": "application/json", "Referer": f"https://statusinvest.com.br/fundos-imobiliarios/{t.lower()}"},
+                     timeout=10)
+    if r.status_code != 200:
+        raise RuntimeError(f"StatusInvest HTTP {r.status_code}")
+    linhas = []
+    for m in r.json().get("assetEarningsModels") or []:
+        if 'amortiza' in str(m.get('et', '')).lower():
+            continue
+        d_com = pd.to_datetime(m.get('ed'), format='%d/%m/%Y', errors='coerce')
+        d_pag = pd.to_datetime(m.get('pd'), format='%d/%m/%Y', errors='coerce')
+        v = m.get('v')
+        if pd.notna(d_com) and v:
+            linhas.append([d_com.normalize(), d_pag.normalize() if pd.notna(d_pag) else pd.NaT,
+                           float(v), 'StatusInvest'])
+    if not linhas:
+        raise RuntimeError("StatusInvest sem proventos")
+    return linhas
+
 @st.cache_data(ttl=43200, show_spinner=False)  # 12h
 def obter_proventos_fii(ticker):
     """
     proventos por cota de um FII: DataFrame [data_com, data_pag, valor, fonte].
-    1º StatusInvest (tem data-com E data de pagamento reais);
-    2º fallback yfinance (só tem data-ex): data-com = dia útil anterior à data-ex e
-       pagamento ESTIMADO em data-com + 7 dias (prazo típico dos FIIs).
-    amortizações ficam de fora (devolução de capital, não rendimento).
+    tenta, nesta ordem: B3 (oficial) → StatusInvest → yfinance. As duas primeiras têm
+    data-com e data de pagamento reais; o yfinance só tem data-ex, então o pagamento é
+    ESTIMADO em data-com + 7 dias. Amortizações ficam de fora (devolução de capital).
+    'fonte' registra de onde veio (e, no fallback, por que as outras falharam).
     """
     cols = ['data_com', 'data_pag', 'valor', 'fonte']
     t = ALIAS_FII_TICKERS.get(ticker, ticker).upper()
-    try:
-        r = requests.get("https://statusinvest.com.br/fii/companytickerprovents",
-                         params={"ticker": t, "chartProventsType": 2},
-                         headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-                         timeout=10)
-        modelos = r.json().get("assetEarningsModels") or []
-        linhas = []
-        for m in modelos:
-            if 'amortiza' in str(m.get('et', '')).lower():
-                continue
-            d_com = pd.to_datetime(m.get('ed'), format='%d/%m/%Y', errors='coerce')
-            d_pag = pd.to_datetime(m.get('pd'), format='%d/%m/%Y', errors='coerce')
-            v = m.get('v')
-            if pd.notna(d_com) and v:
-                linhas.append([d_com.normalize(), d_pag.normalize() if pd.notna(d_pag) else pd.NaT,
-                               float(v), 'statusinvest'])
-        if linhas:
+    erros = []
+    for nome, fn in (("B3", _proventos_b3), ("StatusInvest", _proventos_statusinvest)):
+        try:
+            linhas = fn(t)
             return pd.DataFrame(linhas, columns=cols).sort_values('data_com').reset_index(drop=True)
-    except Exception:
-        pass
+        except Exception as e:
+            erros.append(f"{nome}: {str(e)[:60]}")
     try:
         divs = yf.Ticker(f"{t}.SA").dividends
         if divs is None or divs.empty:
@@ -358,7 +403,8 @@ def obter_proventos_fii(ticker):
         idx = (idx.tz_localize(None) if idx.tz is not None else idx).normalize()
         d_com = idx - pd.offsets.BDay(1)
         df_y = pd.DataFrame({'data_com': d_com, 'data_pag': d_com + pd.Timedelta(days=7),
-                             'valor': divs.values.astype(float), 'fonte': 'yfinance (pagamento estimado)'})
+                             'valor': divs.values.astype(float),
+                             'fonte': f"estimado ({'; '.join(erros)})"})
         return df_y[df_y['valor'] > 0].sort_values('data_com').reset_index(drop=True)
     except Exception:
         return pd.DataFrame(columns=cols)
@@ -548,7 +594,7 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
             # o yfinance às vezes "pula" meses de FIIs da B3 (ex.: GARE11 vinha com 10 dos 12
             # pagamentos). Só no fallback: se o padrão é mensal (≥6 pagamentos, intervalo
             # mediano ~1 mês) e faltam meses na janela, anualiza pela média dos encontrados.
-            if (prov['fonte'] != 'statusinvest').all() and 6 <= len(_w) < 12:
+            if prov['fonte'].astype(str).str.startswith('estimado').all() and 6 <= len(_w) < 12:
                 _gap = _w['data_com'].diff().dt.days.median()
                 if 25 <= _gap <= 35:
                     _soma = float(_w['valor'].mean()) * 12
@@ -2126,10 +2172,11 @@ with aba_detalhe:
             r3c3.metric("YoC (12m)", _yoc_12m_str)
 
 
-        _fii_estimados = sorted(t for t, d in div_detalhe.items()
-                                if d.get('fonte') and d.get('fonte') != 'statusinvest')
+        _fii_estimados = {t: d.get('fonte') for t, d in div_detalhe.items()
+                          if str(d.get('fonte', '')).startswith('estimado')}
         if _fii_estimados:
-            st.caption(f"data de pagamento estimada (StatusInvest indisponível) para: {', '.join(_fii_estimados)}")
+            _motivo = next(iter(_fii_estimados.values()))
+            st.caption(f"data de pagamento estimada para: {', '.join(sorted(_fii_estimados))} — {_motivo}")
         st.markdown("---")
 
         # ── linha 2: tijolo vs papel ─────────────────────────────────────────
