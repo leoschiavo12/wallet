@@ -1948,11 +1948,13 @@ with aba_detalhe:
         _ultimo_dia_ref = pd.Timestamp(ano_ref_f, mes_ref_f,
                           _cal.monthrange(ano_ref_f, mes_ref_f)[1])
         _total_fii_base = 0.0
+        _preco_fech_ref = {}   # fechamento de cada FII no último dia do mês de referência
         if not _df_pm.empty and not _df_lanc_raw.empty:
             for _, _pm_row_g in _df_pm[_df_pm['ano_mes'] == _mes_base].iterrows():
                 _ativo_pm = _pm_row_g['ativo']
                 if _ativo_pm not in [r['Ativo'] for _, r in df_fii.iterrows()]:
                     continue
+                _preco_fech_ref[_ativo_pm] = float(_pm_row_g['preco_fechamento'])
                 # quantidade no último dia do mês ref pelos lançamentos
                 _ops_ref = _df_lanc_raw[
                     (_df_lanc_raw['ativo'] == _ativo_pm) &
@@ -2126,17 +2128,23 @@ with aba_detalhe:
             _yoc_f_12m_pct = (_proventos_f / _pm_f * 100) if _pm_f and _pm_f > 0 and _proventos_f > 0 else None
             _yoc_f_str     = fmt_pct(_yoc_f_12m_pct, 2) if _yoc_f_12m_pct else "—"
 
+            # yield do mês de referência = provento por cota ÷ fechamento do último dia do mês
+            _div_cota_f  = div_detalhe.get(_ativo_f, {}).get('por_cota', 0.0)
+            _base_yld_f  = _preco_fech_ref.get(_ativo_f) or _preco_f
+            _yield_f_str = fmt_pct(_div_cota_f / _base_yld_f * 100, 2) if _div_cota_f > 0 and _base_yld_f else "—"
+
             with st.container(key=f"row_fii_ativo_{_ativo_f}"):
                 r1c1, r1c2, r1c3 = st.columns(3)
                 r1c1.metric("ativo", _ativo_f)
-                r1c2.metric(f"preço  ·  (~{formatar_brl(_pm_f)})", formatar_brl(_preco_f))
-                card_valorizacao(r1c3, _var_f_rs, _var_f_pct)
+                r1c2.metric(f"total  ·  ({_qtd_f_str})", abreviar_rs(_total_f))
+                r1c3.metric("~holding", fmt_holding(_holding_f))
 
                 r2c1, r2c2, r2c3 = st.columns(3)
-                r2c2.metric(f"total  ·  ({_qtd_f_str})", abreviar_rs(_total_f))
-                r2c3.metric("~holding", fmt_holding(_holding_f))
+                r2c2.metric(f"preço  ·  (~{formatar_brl(_pm_f)})", formatar_brl(_preco_f))
+                card_valorizacao(r2c3, _var_f_rs, _var_f_pct)
 
                 r3c1, r3c2, r3c3 = st.columns(3)
+                r3c1.metric(f"yield — {_label_mes}", _yield_f_str)
                 r3c2.metric("YoC (12m)", _yoc_f_str)
 
             st.markdown("---")
@@ -2378,12 +2386,12 @@ with aba_detalhe:
                 _qtd_str = fmt_num(qtd, 2)
                 r1c1, r1c2, r1c3 = st.columns(3)
                 r1c1.metric("ativo", ativo)
-                r1c2.metric(f"preço  ·  (~{formatar_brl(pm)})", formatar_brl(preco))
-                card_valorizacao(r1c3, var_rs, var_pct_e)
+                r1c2.metric(f"total  ·  ({_qtd_str})", abreviar_rs(total_atual))
+                r1c3.metric("~holding", fmt_holding(holding))
 
                 r2c1, r2c2, r2c3 = st.columns(3)
-                r2c2.metric(f"total  ·  ({_qtd_str})", abreviar_rs(total_atual))
-                r2c3.metric("~holding", fmt_holding(holding))
+                r2c2.metric(f"preço  ·  (~{formatar_brl(pm)})", formatar_brl(preco))
+                card_valorizacao(r2c3, var_rs, var_pct_e)
 
             st.markdown("---")
 
@@ -2426,12 +2434,12 @@ with aba_detalhe:
         with st.container(key="row_cripto_BTC"):
             r1c1, r1c2, r1c3 = st.columns(3)
             r1c1.metric("ativo", "BTC")
-            r1c2.metric(f"preço  ·  (~{abreviar_rs(_btc_pm)})", abreviar_rs(preco_btc_atual))
-            card_valorizacao(r1c3, _btc_var_rs, _btc_var_pct)
+            r1c2.metric(f"total  ·  ({_btc_qtd_str})", abreviar_rs(total_btc))
+            r1c3.metric("~holding", fmt_holding(_btc_holding))
 
             r2c1, r2c2, r2c3 = st.columns(3)
-            r2c2.metric(f"total  ·  ({_btc_qtd_str})", abreviar_rs(total_btc))
-            r2c3.metric("~holding", fmt_holding(_btc_holding))
+            r2c2.metric(f"preço  ·  (~{abreviar_rs(_btc_pm)})", abreviar_rs(preco_btc_atual))
+            card_valorizacao(r2c3, _btc_var_rs, _btc_var_pct)
 
         st.markdown("---")
 
@@ -2499,15 +2507,15 @@ with aba_detalhe:
             with st.container(key=f"row_tesouro_{ativo}"):
                 r1c1, r1c2, r1c3 = st.columns(3)
                 r1c1.metric("ativo", ativo)
-                r1c2.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
-                if valorizacao is not None and valorizacao_pct is not None:
-                    card_valorizacao(r1c3, valorizacao, valorizacao_pct)
-                else:
-                    r1c3.metric("valorização", "—")
+                r1c2.metric(f"total  ·  ({_qtd_fmt})", abreviar_rs(total_atual))
+                r1c3.metric("~holding", fmt_holding(_td_holding))
 
                 r2c1, r2c2, r2c3 = st.columns(3)
-                r2c2.metric(f"total  ·  ({_qtd_fmt})", abreviar_rs(total_atual))
-                r2c3.metric("~holding", fmt_holding(_td_holding))
+                r2c2.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
+                if valorizacao is not None and valorizacao_pct is not None:
+                    card_valorizacao(r2c3, valorizacao, valorizacao_pct)
+                else:
+                    r2c3.metric("valorização", "—")
 
             if 'preco_renda_auto' in st.session_state:
                 st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
@@ -2697,12 +2705,12 @@ with aba_detalhe:
             with st.container(key=f"row_all_{_ativo_g}"):
                 r1c1, r1c2, r1c3 = st.columns(3)
                 r1c1.metric("ativo", _ativo_g)
-                r1c2.metric(f"preço  ·  (~{_fmt_preco_geral(_ativo_g, _pm_g)})", _fmt_preco_geral(_ativo_g, _preco_g))
-                r1c3.metric(f"total  ·  ({_qtd_g_str})", abreviar_rs(_total_g))
+                r1c2.metric(f"total  ·  ({_qtd_g_str})", abreviar_rs(_total_g))
+                r1c3.metric("~holding", fmt_holding(_holding_g))
 
                 r2c1, r2c2, r2c3 = st.columns(3)
-                card_valorizacao(r2c2, _var_g_rs, _var_g_pct)
-                r2c3.metric("~holding", fmt_holding(_holding_g))
+                r2c2.metric(f"preço  ·  (~{_fmt_preco_geral(_ativo_g, _pm_g)})", _fmt_preco_geral(_ativo_g, _preco_g))
+                card_valorizacao(r2c3, _var_g_rs, _var_g_pct)
 
             st.markdown("---")
 
