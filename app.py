@@ -2052,7 +2052,15 @@ with aba_detalhe:
         _custo_total_fii   = df_fii['custo_total'].sum()
         _receita_12m_fii   = sum(_proventos_12m.get(r['Ativo'], 0.0) * r['Qtd'] for _, r in df_fii.iterrows())
         _yoc_12m_carteira  = (_receita_12m_fii / _custo_total_fii * 100) if _custo_total_fii > 0 and _receita_12m_fii > 0 else None
-        _yoc_mes_carteira  = (div_total / _custo_total_fii * 100) if _custo_total_fii > 0 and div_total > 0 else None
+        # YoC do mês: base = custo da posição em FIIs no fim do mês de referência
+        # (Σ cotas no fim do mês × preço médio até ali) — compras feitas depois não diluem o mês
+        _lanc_ate_ref = _df_lanc_raw[
+            pd.to_datetime(_df_lanc_raw['data'], format='%d/%m/%Y', errors='coerce').dt.normalize() <= _ultimo_dia_ref
+        ] if not _df_lanc_raw.empty else _df_lanc_raw
+        _pos_ref = calcular_posicao(_lanc_ate_ref)
+        _pos_ref = _pos_ref[_pos_ref['classe'] == 'FII'] if not _pos_ref.empty else _pos_ref
+        _custo_fii_ref = float((_pos_ref['qtd_atual'] * _pos_ref['preco_medio']).sum()) if not _pos_ref.empty else 0.0
+        _yoc_mes_carteira  = (div_total / _custo_fii_ref * 100) if _custo_fii_ref > 0 and div_total > 0 else None
 
         _yield_str     = fmt_pct(yield_mensal, 2) if yield_mensal else "—"
         _yoc_12m_str   = fmt_pct(_yoc_12m_carteira, 2) if _yoc_12m_carteira else "—"
