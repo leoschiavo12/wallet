@@ -830,100 +830,149 @@ def obter_variacao_90d(tickers_tupla):
 JANELAS_VARIACAO = [("hoje", 1), ("7 dias", 7), ("30 dias", 30),
                     ("6 meses", 182), ("1 ano", 365), ("5 anos", 1825)]
 
+_MESES3 = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
+           7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
+
 @st.cache_data(ttl=21600, show_spinner=False)  # 6h
-def obter_fechamentos_b3(tickers_tupla):
+def obter_historico_b3(tickers_tupla, inicio_str):
     """
-    fechamentos diários SEM ajuste (só preço, sem proventos — mesmo critério do BTC) dos
-    últimos ~6 anos, um ticker por coluna. Baixa um ticker por vez com threads=False
-    (mesmo padrão de obter_variacao_90d, evita segfault do yfinance).
+    fechamentos diários SEM ajuste + proventos por cota (na data-ex), desde inicio_str.
+    um ticker por vez (mesmo cuidado de obter_variacao_90d com o yfinance).
+    retorna (df_close, df_div) — uma coluna por ticker; tickers sem dados ficam de fora.
     """
-    series = {}
-    for ativo in tickers_tupla:
+    closes, divs = {}, {}
+    for tk in tickers_tupla:
         try:
-            tk = f"{ALIAS_FII_TICKERS.get(ativo, ativo)}.SA"
-            h = yf.download(tk, period="6y", interval="1d", progress=False,
-                            auto_adjust=False, threads=False)
-            if h is None or h.empty:
+            h = yf.Ticker(f"{tk}.SA").history(start=inicio_str, interval="1d",
+                                             auto_adjust=False, actions=True)
+            if h is None or h.empty or 'Close' not in h.columns:
                 continue
-            close = h['Close']
-            if isinstance(close, pd.DataFrame):      # yfinance novo: colunas MultiIndex
-                close = close.iloc[:, 0]
-            close = close.dropna()
-            if close.empty:
+            idx = pd.to_datetime(h.index)
+            idx = idx.tz_localize(None) if idx.tz is not None else idx
+            h.index = idx.normalize()
+            h = h[~h.index.duplicated(keep='last')]
+            c = h['Close'].dropna().astype(float)
+            if c.empty:
                 continue
-            idx = pd.to_datetime(close.index)
-            close.index = idx.tz_localize(None) if idx.tz is not None else idx
-            series[ativo] = close.astype(float)
+            closes[tk] = c
+            if 'Dividends' in h.columns:
+                d = h['Dividends'].fillna(0.0).astype(float)
+                divs[tk] = d[d > 0]
         except Exception:
             continue
-    if not series:
-        return pd.DataFrame()
-    return pd.DataFrame(series).sort_index()
+    if not closes:
+        return pd.DataFrame(), pd.DataFrame()
+    df_c = pd.DataFrame(closes).sort_index()
+    df_d = pd.DataFrame(divs).reindex(columns=df_c.columns).fillna(0.0) if divs else pd.DataFrame(columns=df_c.columns)
+    return df_c, df_d
 
-def variacoes_cesta(df_classe, fechamentos, janelas=JANELAS_VARIACAO):
+def rentabilidade_real_classe(df_lanc, classe, df_classe, janelas=JANELAS_VARIACAO):
     """
-    variação de preço da SUA cesta da classe: Σ qtd_atual × preço, hoje vs. N dias atrás,
-    com as quantidades de hoje (mede o desempenho da seleção, sem distorção de aportes).
-    Ativos sem cotação no início da janela ficam de fora daquela janela; a cobertura
-    (fração do valor atual da classe considerada) volta junto pra sinalizar no card.
-    retorna {label: (variação_% ou None, cobertura 0–1)}
+    rentabilidade REAL da classe na sua carteira, por janela — retorno ponderado pelo tempo
+    (TWR, o mesmo critério de extrato de corretora/fundo):
+      • valor diário da classe = Σ cotas que você tinha naquele dia × fechamento do dia
+        (inclui ativos que você já vendeu, enquanto os tinha);
+      • aportes/vendas do dia são descontados (dinheiro novo não conta como ganho);
+      • proventos entram como ganho na data-ex (cotas na véspera × provento por cota);
+      • retorno diário = (valor_fim + proventos − aportes_do_dia) / valor_ontem − 1,
+        encadeado. Janela = índice hoje / índice no início da janela − 1.
+    janelas anteriores à 1ª compra da classe = "—"; a última vira "desde mm/aa".
+    retorna (dict {label: (variação_% ou None, 1.0)}, lista de tickers fora do cálculo)
     """
-    res = {lbl: (None, 0.0) for lbl, _ in janelas}
-    if fechamentos is None or fechamentos.empty or df_classe.empty:
-        return res
-    pos = df_classe[(df_classe['Qtd'] > 0) & (df_classe['preco_unit'] > 0)]
-    pos = pos[pos['Ativo'].isin(fechamentos.columns)]
-    v_total_hoje = float((df_classe['Qtd'] * df_classe['preco_unit']).sum())
-    if pos.empty or v_total_hoje <= 0:
-        return res
-
-    datas = fechamentos.index
     hoje = pd.Timestamp.today().normalize()
+    janelas = list(janelas)
+    vazio = lambda js: {lbl: (None, 1.0) for lbl, _ in js}
+    if df_lanc is None or df_lanc.empty:
+        return vazio(janelas), []
+
+    L = df_lanc.copy()
+    L = L[(L['classe'].astype(str).str.strip().str.upper() == classe.upper()) &
+          (L['tipo'].astype(str).str.strip().str.lower().isin(['compra', 'venda']))]
+    L['dt'] = pd.to_datetime(L['data'], format='%d/%m/%Y', errors='coerce').dt.normalize()
+    L = L.dropna(subset=['dt'])
+    if L.empty:
+        return vazio(janelas), []
+    L['tk']    = L['ativo'].astype(str).str.strip().map(lambda a: ALIAS_FII_TICKERS.get(a, a))
+    L['sinal'] = L['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1})
+    L['qtd_s'] = pd.to_numeric(L['quantidade'], errors='coerce').fillna(0) * L['sinal']
+    L['cf']    = L['qtd_s'] * pd.to_numeric(L['preco_unitario'], errors='coerce').fillna(0)
+
+    inicio = L['dt'].min()
+    janelas[-1] = (f"desde {_MESES3[inicio.month]}/{str(inicio.year)[-2:]}", None)
+    res = vazio(janelas)
+
+    df_c, df_d = obter_historico_b3(tuple(sorted(L['tk'].unique())),
+                                    (inicio - pd.Timedelta(days=10)).strftime('%Y-%m-%d'))
+    fora = sorted(set(L['tk']) - set(df_c.columns))
+    if df_c.empty:
+        return res, fora
+    L = L[L['tk'].isin(df_c.columns)]
+    if L.empty:
+        return res, fora
+
+    # calendário: pregões desde a 1ª compra + hoje (preço atual do app)
+    datas = df_c.index[df_c.index >= inicio]
+    datas = datas[datas < hoje].append(pd.DatetimeIndex([hoje])).union(pd.DatetimeIndex(L['dt'].unique()))
+    precos = df_c.reindex(df_c.index.union(datas)).sort_index().ffill().reindex(datas)
+    _p_hoje = {ALIAS_FII_TICKERS.get(a, a): p for a, p in zip(df_classe['Ativo'], df_classe['preco_unit']) if p and p > 0}
+    for tk, p in _p_hoje.items():
+        if tk in precos.columns:
+            precos.loc[hoje, tk] = p
+
+    # cotas no fim de cada dia, aportes líquidos e proventos por dia
+    mov  = L.pivot_table(index='dt', columns='tk', values='qtd_s', aggfunc='sum').reindex(datas).fillna(0)
+    cotas = mov.reindex(columns=precos.columns).fillna(0).cumsum().clip(lower=0)
+    cf   = L.groupby('dt')['cf'].sum().reindex(datas).fillna(0)
+    if not df_d.empty:
+        prov = df_d.reindex(datas).fillna(0).reindex(columns=precos.columns).fillna(0)
+    else:
+        prov = pd.DataFrame(0.0, index=datas, columns=precos.columns)
+    cotas_vespera = cotas.shift(1).fillna(0)
+
+    valor = (cotas * precos.fillna(0)).sum(axis=1)
+    proventos = (cotas_vespera * prov).sum(axis=1)
+    # fluxo no fim do dia (critério padrão de TWR diário): o ganho do dia é sobre o valor de
+    # ontem; se ontem não havia posição (1ª compra / recompra após zerar), mede sobre o aporte
+    ontem = valor.shift(1).fillna(0)
+    ret = pd.Series(0.0, index=datas)
+    _m1 = ontem > 1e-6
+    _m2 = (~_m1) & (cf > 1e-6)
+    ret[_m1] = (valor[_m1] + proventos[_m1] - cf[_m1]) / ontem[_m1] - 1
+    ret[_m2] = (valor[_m2] + proventos[_m2]) / cf[_m2] - 1
+    indice = (1 + ret).cumprod()
+
+    i_hoje = float(indice.iloc[-1])
     for lbl, dias in janelas:
-        if dias == 1:
-            # último pregão: fechamento anterior ao último disponível (ou ao de hoje, se já houver)
-            anteriores = datas[datas < hoje] if datas.max() >= hoje else datas[:-1]
-            if len(anteriores) == 0:
+        if dias is None:                         # desde a 1ª compra
+            i_ref = 1.0
+        elif dias == 1:                          # último pregão antes de hoje
+            if len(indice) < 2:
                 continue
-            data_ref = anteriores.max()
+            i_ref = float(indice.iloc[-2])
         else:
             data_ref = hoje - pd.Timedelta(days=dias)
-            if data_ref < datas.min():
-                data_ref = None
-        if data_ref is None:
-            continue
-        v_hoje, v_ref = 0.0, 0.0
-        for _, r in pos.iterrows():
-            s = fechamentos[r['Ativo']].loc[:data_ref].dropna()
-            # precisa ter cotação até 10 dias antes da data-alvo (ativo já existia e negociava)
-            if s.empty or (data_ref - s.index[-1]).days > 10:
-                continue
-            v_hoje += r['Qtd'] * r['preco_unit']
-            v_ref  += r['Qtd'] * float(s.iloc[-1])
-        if v_ref > 0:
-            res[lbl] = ((v_hoje / v_ref - 1) * 100, v_hoje / v_total_hoje)
-    return res
+            if data_ref < inicio:
+                continue                         # antes de você ter a classe
+            i_ref = float(indice.loc[:data_ref].iloc[-1])
+        if i_ref > 0:
+            res[lbl] = ((i_hoje / i_ref - 1) * 100, 1.0)
+    return res, fora
 
-def render_variacoes(key, variacoes):
-    """grade 3×2 de variação por janela (mesmo visual da aba cripto). '*' = cobertura parcial."""
-    parcial = False
+def render_variacoes(key, variacoes, nota=None):
+    """grade 3×2 de variação por janela (mesmo visual da aba cripto)"""
     with st.container(key=key):
         r1 = st.columns(3)
         r2 = st.columns(3)
-        for col, (lbl, (v, cob)) in zip(r1 + r2, variacoes.items()):
+        for col, (lbl, (v, _)) in zip(r1 + r2, variacoes.items()):
             if v is None:
                 tom, texto = "neutro", "—"
             elif v >= 0:
                 tom, texto = "pos", f"▲ +{fmt_pct(v)}"
             else:
                 tom, texto = "neg", f"▼ {fmt_pct(v)}"
-            if v is not None and cob < 0.999:
-                lbl = f"{lbl}*"
-                parcial = True
             card_html(col, lbl, texto, tom)
-    if parcial:
-        st.caption("\\* só com os ativos que já tinham cotação no início do período — "
-                   "os que entraram na B3 depois ficam de fora dessa janela.")
+    if nota:
+        st.caption(nota)
 
 @st.cache_data(ttl=86400)
 def obter_preco_renda_mais_cached():
@@ -2078,9 +2127,12 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        # ── variação de preço da cesta de FIIs (quantidades atuais) ─────────
-        _fech_fii = obter_fechamentos_b3(tuple(sorted(df_fii['Ativo'].unique())))
-        render_variacoes("row_var_fii", variacoes_cesta(df_fii, _fech_fii))
+        # ── rentabilidade real da classe por janela (TWR) ──────────────────
+        _var_fii, _fora_fii = rentabilidade_real_classe(_df_lanc_raw, 'FII', df_fii)
+        render_variacoes("row_var_fii", _var_fii, nota=(
+            f"rentabilidade real (aportes descontados, proventos incluídos). "
+            f"fora do cálculo, sem histórico no yfinance: {', '.join(_fora_fii)}"
+            if _fora_fii else "rentabilidade real (aportes descontados, proventos incluídos)."))
 
         st.markdown("---")
 
@@ -2347,9 +2399,12 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        # ── variação de preço da cesta de ETFs (quantidades atuais) ─────────
-        _fech_etf = obter_fechamentos_b3(tuple(sorted(df_etf['Ativo'].unique())))
-        render_variacoes("row_var_etf", variacoes_cesta(df_etf, _fech_etf))
+        # ── rentabilidade real da classe por janela (TWR) ──────────────────
+        _var_etf, _fora_etf = rentabilidade_real_classe(_df_lanc_raw, 'ETF', df_etf)
+        render_variacoes("row_var_etf", _var_etf, nota=(
+            f"rentabilidade real (aportes descontados, proventos incluídos). "
+            f"fora do cálculo, sem histórico no yfinance: {', '.join(_fora_etf)}"
+            if _fora_etf else "rentabilidade real (aportes descontados, proventos incluídos)."))
 
         st.markdown("---")
 
