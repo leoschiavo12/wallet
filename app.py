@@ -1699,7 +1699,6 @@ FII_INFO = {
 aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simulador", "configurações"])
 
 with aba_dash:
-    total_k = abreviar_rs(total_geral)
 
     # total investido = custo de todas as compras − total de vendas
     _custo_total = df['custo_total'].sum()
@@ -1730,7 +1729,7 @@ with aba_dash:
 
     with st.container(key="row_dash_resumo"):
         c1, c2, c3 = st.columns([1, 1, 1])
-        c1.metric("patrimônio", total_k)
+        c1.metric("patrimônio", formatar_brl(total_geral))
         c2.metric("saiu do bolso", formatar_brl(_valor_investido_proprio))
         card_valorizacao(c3, _var_val, _var_pct)
 
@@ -1757,7 +1756,7 @@ with aba_dash:
             for _, row in df_resumo_classe.iterrows():
                 pct    = row['Total Atual'] / total_classe * 100
                 labels_donut.append(f"{row['Classe']}<br>{fmt_pct(pct)}".replace('.', ','))
-                hover_donut.append(f"<b>{row['Classe']}</b><br>{fmt_pct(pct)}<br>{abreviar_rs(row['Total Atual'])}".replace('.', ','))
+                hover_donut.append(f"<b>{row['Classe']}</b><br>{fmt_pct(pct)}<br>{formatar_brl(row['Total Atual'])}")
 
             fig_donut = go.Figure(go.Pie(
                 labels=labels_donut,
