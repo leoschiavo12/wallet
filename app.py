@@ -319,6 +319,17 @@ def obter_precos_b3(tickers_lista):
 # dividendos via yfinance a partir do ticker salvo em lançamentos.
 ALIAS_FII_TICKERS = {'GALG11': 'GARE11'}
 
+def _parse_valor_provento(x):
+    """valor por cota vindo da fonte, aceitando '0,08300000', '0.083', 0.083 ou '1.234,56'"""
+    if isinstance(x, (int, float)):
+        return float(x)
+    s = str(x).strip()
+    if not s:
+        raise ValueError("vazio")
+    if ',' in s:                                   # formato BR: ponto = milhar, vírgula = decimal
+        s = s.replace('.', '').replace(',', '.')
+    return float(s)
+
 def _proventos_b3(t):
     """proventos do FII direto da B3 (GetListedSupplementFunds) — data-com, pagamento e valor"""
     import base64, json
@@ -346,7 +357,7 @@ def _proventos_b3(t):
         d_com = pd.to_datetime(c.get('lastDatePrior'), format='%d/%m/%Y', errors='coerce')
         d_pag = pd.to_datetime(c.get('paymentDate'), format='%d/%m/%Y', errors='coerce')
         try:
-            v = float(str(c.get('rate', '')).replace('.', '').replace(',', '.'))
+            v = _parse_valor_provento(c.get('rate', ''))
         except ValueError:
             continue
         if pd.notna(d_com) and v > 0:
@@ -392,7 +403,10 @@ def obter_proventos_fii(ticker):
     for nome, fn in (("B3", _proventos_b3), ("StatusInvest", _proventos_statusinvest)):
         try:
             linhas = fn(t)
-            return pd.DataFrame(linhas, columns=cols).sort_values('data_com').reset_index(drop=True)
+            df_p = pd.DataFrame(linhas, columns=cols)
+            # a mesma distribuição pode vir repetida (reapresentações/retificações)
+            df_p = df_p.drop_duplicates(subset=['data_com', 'data_pag', 'valor'])
+            return df_p.sort_values('data_com').reset_index(drop=True)
         except Exception as e:
             erros.append(f"{nome}: {str(e)[:60]}")
     try:
