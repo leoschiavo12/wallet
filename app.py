@@ -122,10 +122,10 @@ st.markdown("""
                 font-size: 0.95rem !important;
             }
 
-            /* linha 1 dos FIIs: 7 cards, quebram em 3 por linha no mobile */
+            /* bloco resumo dos FIIs: grade 3 colunas, igual aos cards por ativo */
             .st-key-row_fii_dividendos [data-testid="stHorizontalBlock"] {
                 flex-wrap: wrap !important;
-                gap: 0.25rem !important;
+                gap: 0.3rem !important;
             }
             .st-key-row_fii_dividendos [data-testid="column"],
             .st-key-row_fii_dividendos [data-testid="stColumn"] {
@@ -137,10 +137,10 @@ st.markdown("""
                 font-size: 0.62rem !important;
             }
             .st-key-row_fii_dividendos [data-testid="stMetricValue"] {
-                font-size: 1rem !important;
+                font-size: 0.95rem !important;
             }
             .st-key-row_fii_dividendos .valorizacao-pct {
-                font-size: 1rem !important;
+                font-size: 0.95rem !important;
             }
 
             /* linha 2 dos FIIs: tijolo e papel lado a lado */
@@ -158,7 +158,7 @@ st.markdown("""
                 font-size: 0.62rem !important;
             }
             .st-key-row_fii_tipo [data-testid="stMetricValue"] {
-                font-size: 1rem !important;
+                font-size: 0.95rem !important;
             }
 
             /* cards por ETF: 3 infos por linha (ativo/preço/total em cima, valorização/holding embaixo) */
@@ -1964,16 +1964,23 @@ with aba_detalhe:
                           7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
         _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
 
-        # ── linha 1: total, valorização, dividendos do mês, yield, YoC, dividendos totais ──
+        # ── bloco resumo: grade 3 colunas, mesmo padrão dos cards por ativo ──
+        #    patrimônio/acumulado em cima · mês de referência no meio · YoC 12m embaixo do YoC do mês
         with st.container(key="row_fii_dividendos"):
-            c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-            c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
-            card_valorizacao(c2, _var_fii_rs, _var_fii_pct)
-            c3.metric(_label_mes, formatar_brl(div_total))
-            c4.metric(f"yield — {_label_mes}", _yield_str)
-            c5.metric(f"YoC — {_label_mes}", _yoc_mes_str)
-            c6.metric("YoC (12m)", _yoc_12m_str)
-            c7.metric("dividendos totais", formatar_brl(_total_divs))
+            r1c1, r1c2, r1c3 = st.columns(3)
+            r1c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
+            card_valorizacao(r1c2, _var_fii_rs, _var_fii_pct)
+            r1c3.metric("dividendos totais", formatar_brl(_total_divs))
+
+            r2c1, r2c2, r2c3 = st.columns(3)
+            r2c1.metric(_label_mes, formatar_brl(div_total))
+            r2c2.metric(f"yield — {_label_mes}", _yield_str)
+            r2c3.metric(f"YoC — {_label_mes}", _yoc_mes_str)
+
+            r3c1, r3c2, r3c3 = st.columns(3)
+            r3c3.metric("YoC (12m)", _yoc_12m_str)
+
+        st.markdown("---")
 
         # ── linha 2: tijolo vs papel ─────────────────────────────────────────
         df_fii['tipo_fii'] = df_fii['Ativo'].map(lambda t: FII_INFO.get(t, {}).get('tipo', '?'))
