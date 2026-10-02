@@ -322,12 +322,9 @@ ALIAS_FII_TICKERS = {'GALG11': 'GARE11'}
 @st.cache_data(ttl=3600)
 def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
     """
-    dividendos RECEBIDOS num mês/ano (yfinance + lançamentos manuais tipo 'dividendo').
-    O yfinance só traz a data-ex, então:
-      • direito: cotas compradas antes da data-ex (= até a data-com);
-      • mês do provento: mês de PAGAMENTO, estimado em data-com + 7 dias (prazo típico
-        dos FIIs) — só entra depois dessa data, ou seja, quando já caiu na conta.
-    Usada pelo card do mês e pelos meses novos gravados em dividendos_mensais.
+    dividendos recebidos num mês/ano específico (auto via yfinance + lançamentos manuais
+    tipo 'dividendo' datados daquele mês). Função genérica — usada tanto pro card do mês
+    mais recente quanto pro backfill histórico mensal.
     """
     import pandas as pd
 
@@ -342,39 +339,43 @@ def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
     total    = 0.0
     detalhes = {}
 
-    # Classe vem como 'FII' do Sheets — após title() fica 'Fii'.
-    # agrupa pelo ticker atual: lançamentos com ticker antigo (GALG11) e novo (GARE11)
-    # somam cotas no mesmo FII, sem contar o provento duas vezes
-    df_lanc['Ativo_norm'] = df_lanc['Ativo'].map(lambda a: ALIAS_FII_TICKERS.get(a, a))
-    fiis = list(df_lanc[df_lanc['Classe'].str.upper() == 'FII']['Ativo_norm'].unique())
-    _hoje_d = pd.Timestamp.today().normalize()
+    # Classe vem como 'FII' do Sheets — após title() fica 'Fii'
+    fiis = list(df_lanc[df_lanc['Classe'].str.upper() == 'FII']['Ativo'].unique())
 
-    for fii_norm in fiis:
+    for fii in fiis:
+        fii_norm = ALIAS_FII_TICKERS.get(fii, fii)
         try:
-            divs = yf.Ticker(f"{fii_norm}.SA").dividends
+            tk = yf.Ticker(f"{fii_norm}.SA")
+            divs = tk.dividends
             if divs is None or divs.empty:
                 continue
-            idx = pd.to_datetime(divs.index)
-            idx = (idx.tz_localize(None) if idx.tz is not None else idx).normalize()
-            for data_ex, val_cota in zip(idx, divs.values):
-                if not val_cota or val_cota <= 0:
+            divs.index = divs.index.tz_localize(None) if divs.index.tzinfo else divs.index
+
+            # filtrar pelo mes de referencia apenas
+            mask   = (divs.index.month == mes_ref) & (divs.index.year == ano_ref)
+            divs_ex = divs[mask]
+            if divs_ex.empty:
+                continue
+
+            for data_ex, val_cota in divs_ex.items():
+                try:
+                    data_ex_date = pd.Timestamp(data_ex).normalize()
+                    ticker_ops = fii if fii in df_lanc['Ativo'].values else fii_norm
+                    ops = df_lanc[
+                        (df_lanc['Ativo'] == ticker_ops) &
+                        (df_lanc['data_dt'].dt.normalize() < data_ex_date)
+                    ]
+                    qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
+                    if qtd_na_data > 0:
+                        val_total = float(val_cota) * qtd_na_data
+                        if fii_norm not in detalhes:
+                            detalhes[fii_norm] = {'por_cota': 0.0, 'total': 0.0, 'qtd': qtd_na_data}
+                        detalhes[fii_norm]['por_cota'] += float(val_cota)
+                        detalhes[fii_norm]['total']    += val_total
+                        total += val_total
+                except:
                     continue
-                data_com = data_ex - pd.offsets.BDay(1)
-                data_pag = data_com + pd.Timedelta(days=7)      # pagamento estimado
-                if (data_pag.month != mes_ref or data_pag.year != ano_ref
-                        or data_pag > _hoje_d):
-                    continue
-                ops = df_lanc[(df_lanc['Ativo_norm'] == fii_norm) &
-                              (df_lanc['data_dt'].dt.normalize() < data_ex)]
-                qtd_na_data = (ops['Quantidade'] * ops['sinal']).sum()
-                if qtd_na_data > 0:
-                    val_total = float(val_cota) * qtd_na_data
-                    if fii_norm not in detalhes:
-                        detalhes[fii_norm] = {'por_cota': 0.0, 'total': 0.0, 'qtd': qtd_na_data}
-                    detalhes[fii_norm]['por_cota'] += float(val_cota)
-                    detalhes[fii_norm]['total']    += val_total
-                    total += val_total
-        except Exception:
+        except:
             continue
 
     # lançamentos manuais de tipo 'dividendo' datados dentro desse mês/ano
