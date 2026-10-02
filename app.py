@@ -55,8 +55,11 @@ st.markdown("""
             line-height: 1.25 !important;
             font-weight: 500 !important;
         }
-        [data-testid="stMetricValue"] { color: var(--card-value-color) !important; }
+        [data-testid="stMetricValue"] { color: var(--card-value-color) !important; padding: 0 !important; }
         .card { margin: 0; padding: 0; }
+        /* st.markdown tem margin-bottom:-1rem por padrão — sem isso o card "encolhe" e
+           linhas só de cards HTML ficam coladas, ao contrário das linhas de st.metric */
+        [data-testid="stMarkdownContainer"]:has(> .card) { margin-bottom: 0 !important; }
         .card-label { margin: 0 0 var(--card-gap) 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .card-value { margin: 0; white-space: nowrap; color: var(--card-value-color); }
         .card-value.card-pos    { color: #22c55e !important; }
@@ -184,13 +187,16 @@ st.markdown("""
                 flex: 1 1 31% !important;
             }
 
-            /* mesma estrutura (3 colunas, 2 linhas) para cripto, tesouro e FIIs */
+            /* mesma estrutura (3 colunas, 2 linhas) para cripto, tesouro, FIIs e variações */
+            [class*="st-key-row_var_"] [data-testid="stHorizontalBlock"],
             [class*="st-key-row_cripto_"] [data-testid="stHorizontalBlock"],
             [class*="st-key-row_tesouro_"] [data-testid="stHorizontalBlock"],
             [class*="st-key-row_fii_ativo_"] [data-testid="stHorizontalBlock"] {
                 flex-wrap: wrap !important;
                 gap: 0.3rem !important;
             }
+            [class*="st-key-row_var_"] [data-testid="column"],
+            [class*="st-key-row_var_"] [data-testid="stColumn"],
             [class*="st-key-row_cripto_"] [data-testid="column"],
             [class*="st-key-row_cripto_"] [data-testid="stColumn"],
             [class*="st-key-row_tesouro_"] [data-testid="column"],
@@ -820,6 +826,104 @@ def obter_variacao_90d(tickers_tupla):
         except Exception:
             continue
     return var_90d
+
+JANELAS_VARIACAO = [("hoje", 1), ("7 dias", 7), ("30 dias", 30),
+                    ("6 meses", 182), ("1 ano", 365), ("5 anos", 1825)]
+
+@st.cache_data(ttl=21600, show_spinner=False)  # 6h
+def obter_fechamentos_b3(tickers_tupla):
+    """
+    fechamentos diários SEM ajuste (só preço, sem proventos — mesmo critério do BTC) dos
+    últimos ~6 anos, um ticker por coluna. Baixa um ticker por vez com threads=False
+    (mesmo padrão de obter_variacao_90d, evita segfault do yfinance).
+    """
+    series = {}
+    for ativo in tickers_tupla:
+        try:
+            tk = f"{ALIAS_FII_TICKERS.get(ativo, ativo)}.SA"
+            h = yf.download(tk, period="6y", interval="1d", progress=False,
+                            auto_adjust=False, threads=False)
+            if h is None or h.empty:
+                continue
+            close = h['Close']
+            if isinstance(close, pd.DataFrame):      # yfinance novo: colunas MultiIndex
+                close = close.iloc[:, 0]
+            close = close.dropna()
+            if close.empty:
+                continue
+            idx = pd.to_datetime(close.index)
+            close.index = idx.tz_localize(None) if idx.tz is not None else idx
+            series[ativo] = close.astype(float)
+        except Exception:
+            continue
+    if not series:
+        return pd.DataFrame()
+    return pd.DataFrame(series).sort_index()
+
+def variacoes_cesta(df_classe, fechamentos, janelas=JANELAS_VARIACAO):
+    """
+    variação de preço da SUA cesta da classe: Σ qtd_atual × preço, hoje vs. N dias atrás,
+    com as quantidades de hoje (mede o desempenho da seleção, sem distorção de aportes).
+    Ativos sem cotação no início da janela ficam de fora daquela janela; a cobertura
+    (fração do valor atual da classe considerada) volta junto pra sinalizar no card.
+    retorna {label: (variação_% ou None, cobertura 0–1)}
+    """
+    res = {lbl: (None, 0.0) for lbl, _ in janelas}
+    if fechamentos is None or fechamentos.empty or df_classe.empty:
+        return res
+    pos = df_classe[(df_classe['Qtd'] > 0) & (df_classe['preco_unit'] > 0)]
+    pos = pos[pos['Ativo'].isin(fechamentos.columns)]
+    v_total_hoje = float((df_classe['Qtd'] * df_classe['preco_unit']).sum())
+    if pos.empty or v_total_hoje <= 0:
+        return res
+
+    datas = fechamentos.index
+    hoje = pd.Timestamp.today().normalize()
+    for lbl, dias in janelas:
+        if dias == 1:
+            # último pregão: fechamento anterior ao último disponível (ou ao de hoje, se já houver)
+            anteriores = datas[datas < hoje] if datas.max() >= hoje else datas[:-1]
+            if len(anteriores) == 0:
+                continue
+            data_ref = anteriores.max()
+        else:
+            data_ref = hoje - pd.Timedelta(days=dias)
+            if data_ref < datas.min():
+                data_ref = None
+        if data_ref is None:
+            continue
+        v_hoje, v_ref = 0.0, 0.0
+        for _, r in pos.iterrows():
+            s = fechamentos[r['Ativo']].loc[:data_ref].dropna()
+            # precisa ter cotação até 10 dias antes da data-alvo (ativo já existia e negociava)
+            if s.empty or (data_ref - s.index[-1]).days > 10:
+                continue
+            v_hoje += r['Qtd'] * r['preco_unit']
+            v_ref  += r['Qtd'] * float(s.iloc[-1])
+        if v_ref > 0:
+            res[lbl] = ((v_hoje / v_ref - 1) * 100, v_hoje / v_total_hoje)
+    return res
+
+def render_variacoes(key, variacoes):
+    """grade 3×2 de variação por janela (mesmo visual da aba cripto). '*' = cobertura parcial."""
+    parcial = False
+    with st.container(key=key):
+        r1 = st.columns(3)
+        r2 = st.columns(3)
+        for col, (lbl, (v, cob)) in zip(r1 + r2, variacoes.items()):
+            if v is None:
+                tom, texto = "neutro", "—"
+            elif v >= 0:
+                tom, texto = "pos", f"▲ +{fmt_pct(v)}"
+            else:
+                tom, texto = "neg", f"▼ {fmt_pct(v)}"
+            if v is not None and cob < 0.999:
+                lbl = f"{lbl}*"
+                parcial = True
+            card_html(col, lbl, texto, tom)
+    if parcial:
+        st.caption("\\* só com os ativos que já tinham cotação no início do período — "
+                   "os que entraram na B3 depois ficam de fora dessa janela.")
 
 @st.cache_data(ttl=86400)
 def obter_preco_renda_mais_cached():
@@ -1936,10 +2040,10 @@ with aba_detalhe:
             r2c1, r2c2, r2c3 = st.columns(3)
             r2c1.metric(_label_mes, formatar_brl(div_total))
             r2c2.metric(f"yield — {_label_mes}", _yield_str)
-            r2c3.metric(f"YoC — {_label_mes}", _yoc_mes_str)
 
             r3c1, r3c2, r3c3 = st.columns(3)
             r3c1.metric("dividendos totais", formatar_brl(_total_divs))
+            r3c2.metric(f"YoC — {_label_mes}", _yoc_mes_str)
             r3c3.metric("YoC (12m)", _yoc_12m_str)
 
         st.markdown("---")
@@ -1971,6 +2075,12 @@ with aba_detalhe:
                 sufx = idx_info if r['tipo_fii'] == 'papel' else ""
                 col.metric(f"{r['tipo_fii']} ({n})  ·  {abreviar_rs(r['Total Atual'])}{sufx}".replace('.', ','),
                            f"{fmt_pct(pct)}".replace('.', ','))
+
+        st.markdown("---")
+
+        # ── variação de preço da cesta de FIIs (quantidades atuais) ─────────
+        _fech_fii = obter_fechamentos_b3(tuple(sorted(df_fii['Ativo'].unique())))
+        render_variacoes("row_var_fii", variacoes_cesta(df_fii, _fech_fii))
 
         st.markdown("---")
 
@@ -2235,7 +2345,11 @@ with aba_detalhe:
             card_valorizacao(c2, var_etf_rs, var_etf_pct)
             c3.metric("holding médio", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
 
+        st.markdown("---")
 
+        # ── variação de preço da cesta de ETFs (quantidades atuais) ─────────
+        _fech_etf = obter_fechamentos_b3(tuple(sorted(df_etf['Ativo'].unique())))
+        render_variacoes("row_var_etf", variacoes_cesta(df_etf, _fech_etf))
 
         st.markdown("---")
 
@@ -2366,24 +2480,10 @@ with aba_detalhe:
 
         st.markdown("---")
 
-        with st.container(key="row_cripto_variacoes"):
-            r1c1, r1c2, r1c3 = st.columns(3)
-            r2c1, r2c2, r2c3 = st.columns(3)
-            for col, label, v in [
-                (r1c1, "hoje",    var_1d),
-                (r1c2, "7 dias",  var_7d),
-                (r1c3, "30 dias", var_30d),
-                (r2c1, "6 meses", var_6m),
-                (r2c2, "1 ano",   var_1a),
-                (r2c3, "5 anos",  var_5a),
-            ]:
-                if v is None:
-                    tom, texto = "neutro", "—"
-                elif v >= 0:
-                    tom, texto = "pos", f"▲ +{fmt_pct(v)}".replace('.', ',')
-                else:
-                    tom, texto = "neg", f"▼ {fmt_pct(v)}".replace('.', ',')
-                card_html(col, label, texto, tom)
+        render_variacoes("row_cripto_variacoes", {
+            "hoje": (var_1d, 1.0), "7 dias": (var_7d, 1.0), "30 dias": (var_30d, 1.0),
+            "6 meses": (var_6m, 1.0), "1 ano": (var_1a, 1.0), "5 anos": (var_5a, 1.0),
+        })
 
         st.markdown("---")
         if hist is not None and not hist.empty:
