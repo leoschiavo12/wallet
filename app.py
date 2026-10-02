@@ -187,16 +187,13 @@ st.markdown("""
                 flex: 1 1 31% !important;
             }
 
-            /* mesma estrutura (3 colunas, 2 linhas) para cripto, tesouro, FIIs e variações */
-            [class*="st-key-row_var_"] [data-testid="stHorizontalBlock"],
+            /* mesma estrutura (3 colunas, 2 linhas) para cripto, tesouro e FIIs */
             [class*="st-key-row_cripto_"] [data-testid="stHorizontalBlock"],
             [class*="st-key-row_tesouro_"] [data-testid="stHorizontalBlock"],
             [class*="st-key-row_fii_ativo_"] [data-testid="stHorizontalBlock"] {
                 flex-wrap: wrap !important;
                 gap: 0.3rem !important;
             }
-            [class*="st-key-row_var_"] [data-testid="column"],
-            [class*="st-key-row_var_"] [data-testid="stColumn"],
             [class*="st-key-row_cripto_"] [data-testid="column"],
             [class*="st-key-row_cripto_"] [data-testid="stColumn"],
             [class*="st-key-row_tesouro_"] [data-testid="column"],
@@ -709,8 +706,7 @@ def gerar_ticks_pct(max_pct_ativo, step=5):
 
 def abreviar_rs(valor):
     if valor >= 1_000_000:
-        v = f"{valor/1_000_000:.1f}".replace('.', ',')
-        return f"R${v}M"
+        return f"R${fmt_num(valor/1_000_000, 1)}M"
     elif valor >= 1_000:
         v = valor / 1_000
         s = f"{v:.1f}".replace('.', ',')
@@ -720,30 +716,33 @@ def abreviar_rs(valor):
     else:
         return f"R${int(valor)}"
 
-def formatar_brl(valor):
-    s = f"{valor:,.2f}"
+def fmt_num(valor, casas=2, milhar=False):
+    """número com vírgula decimal; esconde a parte decimal quando ela é toda zero
+    (31,00 → 31 · 4,0 → 4 · 0,92 → 0,92). milhar=True usa ponto como separador de milhar."""
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return "—"
+    s = f"{float(valor):,.{casas}f}" if milhar else f"{float(valor):.{casas}f}"
+    if casas > 0:
+        inteiro, dec = s.split('.')
+        s = inteiro if set(dec) <= {'0'} else f"{inteiro}.{dec}"
     s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
-    return f"R${s}"
+    return "0" if s in ("-0", "-0,0") else s
 
-def fmt_pct(valor):
-    """formata % sem casa decimal se for ,0"""
-    s = f"{valor:.1f}".replace('.', ',')
-    if s.endswith(',0'):
-        s = s[:-2]
-    return f"{s}%"
+def formatar_brl(valor):
+    return f"R${fmt_num(valor, 2, milhar=True)}"
+
+def fmt_pct(valor, casas=1):
+    """formata % sem casa decimal se for zero"""
+    return f"{fmt_num(valor, casas)}%"
 
 def fmt_holding(meses):
-    """formata holding em meses (<12) ou anos (>=12), com vírgula"""
-    if meses is None: return "—"
-    if meses < 12:
-        s = f"{meses:.1f}".replace('.', ',')
-        if s.endswith(',0'): s = s[:-2]
-        return f"{s} meses"
-    else:
-        anos = meses / 12
-        s = f"{anos:.1f}".replace('.', ',')
-        if s.endswith(',0'): s = s[:-2]
-        return f"{s} anos"
+    """holding em meses (até 12) ou anos (acima de 12), sem decimal quando for zero"""
+    if meses is None or meses <= 0: return "—"
+    if round(meses, 1) <= 12:
+        s = fmt_num(meses, 1)
+        return f"{s} mês" if s == "1" else f"{s} meses"
+    s = fmt_num(meses / 12, 1)
+    return f"{s} ano" if s == "1" else f"{s} anos"
 
 def tag_var(rs, pct):
     """tag colorida de valorização ▲/▼ %  ·  R$"""
@@ -826,137 +825,6 @@ def obter_variacao_90d(tickers_tupla):
         except Exception:
             continue
     return var_90d
-
-JANELAS_VARIACAO = [("hoje", 1), ("7 dias", 7), ("30 dias", 30),
-                    ("6 meses", 182), ("1 ano", 365), ("5 anos", 1825)]
-
-_MESES3 = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
-           7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
-
-@st.cache_data(ttl=21600, show_spinner=False)  # 6h
-def obter_historico_b3(tickers_tupla, inicio_str):
-    """
-    fechamentos diários SEM ajuste + proventos por cota (na data-ex), desde inicio_str.
-    um ticker por vez (mesmo cuidado de obter_variacao_90d com o yfinance).
-    retorna (df_close, df_div) — uma coluna por ticker; tickers sem dados ficam de fora.
-    """
-    closes, divs = {}, {}
-    for tk in tickers_tupla:
-        try:
-            h = yf.Ticker(f"{tk}.SA").history(start=inicio_str, interval="1d",
-                                             auto_adjust=False, actions=True)
-            if h is None or h.empty or 'Close' not in h.columns:
-                continue
-            idx = pd.to_datetime(h.index)
-            idx = idx.tz_localize(None) if idx.tz is not None else idx
-            h.index = idx.normalize()
-            h = h[~h.index.duplicated(keep='last')]
-            c = h['Close'].dropna().astype(float)
-            if c.empty:
-                continue
-            closes[tk] = c
-            if 'Dividends' in h.columns:
-                d = h['Dividends'].fillna(0.0).astype(float)
-                divs[tk] = d[d > 0]
-        except Exception:
-            continue
-    if not closes:
-        return pd.DataFrame(), pd.DataFrame()
-    df_c = pd.DataFrame(closes).sort_index()
-    df_d = pd.DataFrame(divs).reindex(columns=df_c.columns).fillna(0.0) if divs else pd.DataFrame(columns=df_c.columns)
-    return df_c, df_d
-
-def rentabilidade_real_classe(df_lanc, classe, df_classe, janelas=JANELAS_VARIACAO):
-    """
-    rentabilidade REAL da classe na sua carteira, por janela — retorno ponderado pelo tempo
-    (TWR, o mesmo critério de extrato de corretora/fundo):
-      • valor diário da classe = Σ cotas que você tinha naquele dia × fechamento do dia
-        (inclui ativos que você já vendeu, enquanto os tinha);
-      • aportes/vendas do dia são descontados (dinheiro novo não conta como ganho);
-      • proventos entram como ganho na data-ex (cotas na véspera × provento por cota);
-      • retorno diário = (valor_fim + proventos − aportes_do_dia) / valor_ontem − 1,
-        encadeado. Janela = índice hoje / índice no início da janela − 1.
-    janelas anteriores à 1ª compra da classe = "—"; a última vira "desde mm/aa".
-    retorna (dict {label: (variação_% ou None, 1.0)}, lista de tickers fora do cálculo)
-    """
-    hoje = pd.Timestamp.today().normalize()
-    janelas = list(janelas)
-    vazio = lambda js: {lbl: (None, 1.0) for lbl, _ in js}
-    if df_lanc is None or df_lanc.empty:
-        return vazio(janelas), []
-
-    L = df_lanc.copy()
-    L = L[(L['classe'].astype(str).str.strip().str.upper() == classe.upper()) &
-          (L['tipo'].astype(str).str.strip().str.lower().isin(['compra', 'venda']))]
-    L['dt'] = pd.to_datetime(L['data'], format='%d/%m/%Y', errors='coerce').dt.normalize()
-    L = L.dropna(subset=['dt'])
-    if L.empty:
-        return vazio(janelas), []
-    L['tk']    = L['ativo'].astype(str).str.strip().map(lambda a: ALIAS_FII_TICKERS.get(a, a))
-    L['sinal'] = L['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1})
-    L['qtd_s'] = pd.to_numeric(L['quantidade'], errors='coerce').fillna(0) * L['sinal']
-    L['cf']    = L['qtd_s'] * pd.to_numeric(L['preco_unitario'], errors='coerce').fillna(0)
-
-    inicio = L['dt'].min()
-    janelas[-1] = (f"desde {_MESES3[inicio.month]}/{str(inicio.year)[-2:]}", None)
-    res = vazio(janelas)
-
-    df_c, df_d = obter_historico_b3(tuple(sorted(L['tk'].unique())),
-                                    (inicio - pd.Timedelta(days=10)).strftime('%Y-%m-%d'))
-    fora = sorted(set(L['tk']) - set(df_c.columns))
-    if df_c.empty:
-        return res, fora
-    L = L[L['tk'].isin(df_c.columns)]
-    if L.empty:
-        return res, fora
-
-    # calendário: pregões desde a 1ª compra + hoje (preço atual do app)
-    datas = df_c.index[df_c.index >= inicio]
-    datas = datas[datas < hoje].append(pd.DatetimeIndex([hoje])).union(pd.DatetimeIndex(L['dt'].unique()))
-    precos = df_c.reindex(df_c.index.union(datas)).sort_index().ffill().reindex(datas)
-    _p_hoje = {ALIAS_FII_TICKERS.get(a, a): p for a, p in zip(df_classe['Ativo'], df_classe['preco_unit']) if p and p > 0}
-    for tk, p in _p_hoje.items():
-        if tk in precos.columns:
-            precos.loc[hoje, tk] = p
-
-    # cotas no fim de cada dia, aportes líquidos e proventos por dia
-    mov  = L.pivot_table(index='dt', columns='tk', values='qtd_s', aggfunc='sum').reindex(datas).fillna(0)
-    cotas = mov.reindex(columns=precos.columns).fillna(0).cumsum().clip(lower=0)
-    cf   = L.groupby('dt')['cf'].sum().reindex(datas).fillna(0)
-    if not df_d.empty:
-        prov = df_d.reindex(datas).fillna(0).reindex(columns=precos.columns).fillna(0)
-    else:
-        prov = pd.DataFrame(0.0, index=datas, columns=precos.columns)
-    cotas_vespera = cotas.shift(1).fillna(0)
-
-    valor = (cotas * precos.fillna(0)).sum(axis=1)
-    proventos = (cotas_vespera * prov).sum(axis=1)
-    # fluxo no fim do dia (critério padrão de TWR diário): o ganho do dia é sobre o valor de
-    # ontem; se ontem não havia posição (1ª compra / recompra após zerar), mede sobre o aporte
-    ontem = valor.shift(1).fillna(0)
-    ret = pd.Series(0.0, index=datas)
-    _m1 = ontem > 1e-6
-    _m2 = (~_m1) & (cf > 1e-6)
-    ret[_m1] = (valor[_m1] + proventos[_m1] - cf[_m1]) / ontem[_m1] - 1
-    ret[_m2] = (valor[_m2] + proventos[_m2]) / cf[_m2] - 1
-    indice = (1 + ret).cumprod()
-
-    i_hoje = float(indice.iloc[-1])
-    for lbl, dias in janelas:
-        if dias is None:                         # desde a 1ª compra
-            i_ref = 1.0
-        elif dias == 1:                          # último pregão antes de hoje
-            if len(indice) < 2:
-                continue
-            i_ref = float(indice.iloc[-2])
-        else:
-            data_ref = hoje - pd.Timedelta(days=dias)
-            if data_ref < inicio:
-                continue                         # antes de você ter a classe
-            i_ref = float(indice.loc[:data_ref].iloc[-1])
-        if i_ref > 0:
-            res[lbl] = ((i_hoje / i_ref - 1) * 100, 1.0)
-    return res, fora
 
 def render_variacoes(key, variacoes, nota=None):
     """grade 3×2 de variação por janela (mesmo visual da aba cripto)"""
@@ -2063,9 +1931,9 @@ with aba_detalhe:
         _yoc_12m_carteira  = (_receita_12m_fii / _custo_total_fii * 100) if _custo_total_fii > 0 and _receita_12m_fii > 0 else None
         _yoc_mes_carteira  = (div_total / _custo_total_fii * 100) if _custo_total_fii > 0 and div_total > 0 else None
 
-        _yield_str     = f"{yield_mensal:.2f}%".replace('.', ',') if yield_mensal else "—"
-        _yoc_12m_str   = f"{_yoc_12m_carteira:.2f}%".replace('.', ',') if _yoc_12m_carteira else "—"
-        _yoc_mes_str   = f"{_yoc_mes_carteira:.2f}%".replace('.', ',') if _yoc_mes_carteira else "—"
+        _yield_str     = fmt_pct(yield_mensal, 2) if yield_mensal else "—"
+        _yoc_12m_str   = fmt_pct(_yoc_12m_carteira, 2) if _yoc_12m_carteira else "—"
+        _yoc_mes_str   = fmt_pct(_yoc_mes_carteira, 2) if _yoc_mes_carteira else "—"
         _meses_abrev3 = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
                           7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
         _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
@@ -2083,8 +1951,7 @@ with aba_detalhe:
             r1c1, r1c2, r1c3 = st.columns(3)
             r1c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
             card_valorizacao(r1c2, _var_fii_rs, _var_fii_pct)
-            r1c3.metric("holding médio",
-                        f"{round(_holding_fii_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_fii_classe > 0 else "—")
+            r1c3.metric("holding médio", fmt_holding(_holding_fii_classe))
 
             r2c1, r2c2, r2c3 = st.columns(3)
             r2c1.metric(_label_mes, formatar_brl(div_total))
@@ -2124,15 +1991,6 @@ with aba_detalhe:
                 sufx = idx_info if r['tipo_fii'] == 'papel' else ""
                 col.metric(f"{r['tipo_fii']} ({n})  ·  {abreviar_rs(r['Total Atual'])}{sufx}".replace('.', ','),
                            f"{fmt_pct(pct)}".replace('.', ','))
-
-        st.markdown("---")
-
-        # ── rentabilidade real da classe por janela (TWR) ──────────────────
-        _var_fii, _fora_fii = rentabilidade_real_classe(_df_lanc_raw, 'FII', df_fii)
-        render_variacoes("row_var_fii", _var_fii, nota=(
-            f"rentabilidade real (aportes descontados, proventos incluídos). "
-            f"fora do cálculo, sem histórico no yfinance: {', '.join(_fora_fii)}"
-            if _fora_fii else "rentabilidade real (aportes descontados, proventos incluídos)."))
 
         st.markdown("---")
 
@@ -2211,20 +2069,20 @@ with aba_detalhe:
             _var_f_rs  = _total_f - _custo_f
             _var_f_pct = _var_f_rs / _custo_f * 100 if _custo_f > 0 else 0
             _holding_f = holding_ponderado_meses(_ativo_f, _df_lanc_raw)
-            _qtd_f_str = str(int(_qtd_f)) if _qtd_f == int(_qtd_f) else f"{_qtd_f:.2f}".replace('.', ',')
+            _qtd_f_str = fmt_num(_qtd_f, 2)
 
             _proventos_f   = _proventos_12m.get(_ativo_f, 0.0)
             _yoc_f_12m_pct = (_proventos_f / _pm_f * 100) if _pm_f and _pm_f > 0 and _proventos_f > 0 else None
-            _yoc_f_str     = f"{_yoc_f_12m_pct:.2f}%".replace('.', ',') if _yoc_f_12m_pct else "—"
+            _yoc_f_str     = fmt_pct(_yoc_f_12m_pct, 2) if _yoc_f_12m_pct else "—"
 
             with st.container(key=f"row_fii_ativo_{_ativo_f}"):
                 r1c1, r1c2, r1c3 = st.columns(3)
                 r1c1.metric("ativo", _ativo_f)
                 r1c2.metric(f"preço  ·  (~{formatar_brl(_pm_f)})", formatar_brl(_preco_f))
-                r1c3.metric(f"total  ·  ({_qtd_f_str})", abreviar_rs(_total_f))
+                card_valorizacao(r1c3, _var_f_rs, _var_f_pct)
 
                 r2c1, r2c2, r2c3 = st.columns(3)
-                card_valorizacao(r2c2, _var_f_rs, _var_f_pct)
+                r2c2.metric(f"total  ·  ({_qtd_f_str})", abreviar_rs(_total_f))
                 r2c3.metric("~holding", fmt_holding(_holding_f))
 
                 r3c1, r3c2, r3c3 = st.columns(3)
@@ -2279,13 +2137,13 @@ with aba_detalhe:
         df_fii_fmt['preço médio']  = df_fii_fmt['preço médio'].apply(lambda x: formatar_brl(x) if x else '—')
         df_fii_fmt['preço atual']  = df_fii_fmt['preço atual'].apply(formatar_brl)
         df_fii_fmt['total']        = df_fii_fmt['total'].apply(formatar_brl)
-        df_fii_fmt['part. %']      = df_fii_fmt['part. %'].apply(lambda x: f"{x:.2f}%".replace('.', ','))
+        df_fii_fmt['part. %']      = df_fii_fmt['part. %'].apply(lambda x: fmt_pct(x, 2))
         df_fii_fmt['div/cota']     = df_fii_fmt['div/cota'].apply(lambda x: formatar_brl(x) if x else '—')
         df_fii_fmt[_col_qtd_div]   = df_fii_fmt[_col_qtd_div].apply(
-            lambda x: ('—' if pd.isna(x) else (f"{x:.0f}" if x == int(x) else f"{x:.4f}".replace('.', ',')))
+            lambda x: ('—' if pd.isna(x) else fmt_num(x, 4))
         )
         df_fii_fmt[_col_div_tot]   = df_fii_fmt[_col_div_tot].apply(lambda x: formatar_brl(x) if pd.notna(x) else '—')
-        df_fii_fmt['YoC mensal']   = df_fii_fmt['YoC mensal'].apply(lambda x: f"{x:.2f}%".replace('.', ',') if x else '—')
+        df_fii_fmt['YoC mensal']   = df_fii_fmt['YoC mensal'].apply(lambda x: fmt_pct(x, 2) if x else '—')
         df_fii_fmt['YoC anual']    = df_fii_fmt['YoC anual'].apply(lambda x: fmt_pct(x) if x else '—')
         df_fii_fmt['qtd']          = df_fii_fmt['qtd'].apply(str)
 
@@ -2395,16 +2253,7 @@ with aba_detalhe:
             _pct_etf_carteira = total_etf / total_geral * 100 if total_geral > 0 else 0
             c1.metric(f"total ETFs  ·  {abreviar_rs(total_etf)}", fmt_pct(_pct_etf_carteira))
             card_valorizacao(c2, var_etf_rs, var_etf_pct)
-            c3.metric("holding médio", f"{round(_holding_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_classe > 0 else "—")
-
-        st.markdown("---")
-
-        # ── rentabilidade real da classe por janela (TWR) ──────────────────
-        _var_etf, _fora_etf = rentabilidade_real_classe(_df_lanc_raw, 'ETF', df_etf)
-        render_variacoes("row_var_etf", _var_etf, nota=(
-            f"rentabilidade real (aportes descontados, proventos incluídos). "
-            f"fora do cálculo, sem histórico no yfinance: {', '.join(_fora_etf)}"
-            if _fora_etf else "rentabilidade real (aportes descontados, proventos incluídos)."))
+            c3.metric("holding médio", fmt_holding(_holding_classe))
 
         st.markdown("---")
 
@@ -2475,14 +2324,14 @@ with aba_detalhe:
             holding     = holding_ponderado_meses(ativo, _df_lanc_raw)
 
             with st.container(key=f"row_etf_{ativo}"):
-                _qtd_str = str(int(qtd)) if qtd == int(qtd) else f"{qtd:.2f}".replace('.', ',')
+                _qtd_str = fmt_num(qtd, 2)
                 r1c1, r1c2, r1c3 = st.columns(3)
                 r1c1.metric("ativo", ativo)
                 r1c2.metric(f"preço  ·  (~{formatar_brl(pm)})", formatar_brl(preco))
-                r1c3.metric(f"total  ·  ({_qtd_str})", abreviar_rs(total_atual))
+                card_valorizacao(r1c3, var_rs, var_pct_e)
 
                 r2c1, r2c2, r2c3 = st.columns(3)
-                card_valorizacao(r2c2, var_rs, var_pct_e)
+                r2c2.metric(f"total  ·  ({_qtd_str})", abreviar_rs(total_atual))
                 r2c3.metric("~holding", fmt_holding(holding))
 
             st.markdown("---")
@@ -2521,16 +2370,16 @@ with aba_detalhe:
         _btc_var_rs  = total_btc - _btc_custo
         _btc_var_pct = (_btc_var_rs / _btc_custo * 100) if _btc_custo > 0 else 0.0
 
-        _btc_qtd_str  = f"{qtd_btc:.4f}".replace('.', ',')
+        _btc_qtd_str  = fmt_num(qtd_btc, 4)
         _btc_holding  = holding_ponderado_meses('BTC', _df_lanc_raw)
         with st.container(key="row_cripto_BTC"):
             r1c1, r1c2, r1c3 = st.columns(3)
             r1c1.metric("ativo", "BTC")
             r1c2.metric(f"preço  ·  (~{abreviar_rs(_btc_pm)})", abreviar_rs(preco_btc_atual))
-            r1c3.metric(f"total  ·  ({_btc_qtd_str})", abreviar_rs(total_btc))
+            card_valorizacao(r1c3, _btc_var_rs, _btc_var_pct)
 
             r2c1, r2c2, r2c3 = st.columns(3)
-            card_valorizacao(r2c2, _btc_var_rs, _btc_var_pct)
+            r2c2.metric(f"total  ·  ({_btc_qtd_str})", abreviar_rs(total_btc))
             r2c3.metric("~holding", fmt_holding(_btc_holding))
 
         st.markdown("---")
@@ -2593,20 +2442,20 @@ with aba_detalhe:
             valorizacao     = total_atual - total_investido if total_investido > 0 else None
             valorizacao_pct = (valorizacao / total_investido * 100) if total_investido > 0 and valorizacao else None
 
-            _qtd_fmt    = f"{qtd:.2f}".replace(".", ",") if qtd != int(qtd) else str(int(qtd))
+            _qtd_fmt    = fmt_num(qtd, 2)
             _pm_fmt     = formatar_brl(pm) if pm > 0 else "—"
             _td_holding = holding_ponderado_meses(ativo, _df_lanc_raw)
             with st.container(key=f"row_tesouro_{ativo}"):
                 r1c1, r1c2, r1c3 = st.columns(3)
                 r1c1.metric("ativo", ativo)
                 r1c2.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
-                r1c3.metric(f"total  ·  ({_qtd_fmt})", abreviar_rs(total_atual))
+                if valorizacao is not None and valorizacao_pct is not None:
+                    card_valorizacao(r1c3, valorizacao, valorizacao_pct)
+                else:
+                    r1c3.metric("valorização", "—")
 
                 r2c1, r2c2, r2c3 = st.columns(3)
-                if valorizacao is not None and valorizacao_pct is not None:
-                    card_valorizacao(r2c2, valorizacao, valorizacao_pct)
-                else:
-                    r2c2.metric("valorização", "—")
+                r2c2.metric(f"total  ·  ({_qtd_fmt})", abreviar_rs(total_atual))
                 r2c3.metric("~holding", fmt_holding(_td_holding))
 
             if 'preco_renda_auto' in st.session_state:
@@ -2633,7 +2482,7 @@ with aba_detalhe:
                     if _taxa_media_chart is not None:
                         fig_renda_taxas.add_hline(
                             y=_taxa_media_chart, line_dash='dash', line_color='gray',
-                            annotation_text=f"média: IPCA+{_taxa_media_chart:.2f}%".replace('.', ','),
+                            annotation_text=f"média: IPCA+{fmt_pct(_taxa_media_chart, 2)}",
                             annotation_position='top left'
                         )
                     fig_renda_taxas.update_layout(
@@ -2670,7 +2519,7 @@ with aba_detalhe:
                     if _taxa_media_chart is not None:
                         fig_taxa_mercado.add_hline(
                             y=_taxa_media_chart, line_dash='dash', line_color='gray',
-                            annotation_text=f"média: IPCA+{_taxa_media_chart:.2f}%".replace('.', ','),
+                            annotation_text=f"média: IPCA+{fmt_pct(_taxa_media_chart, 2)}",
                             annotation_position='top left'
                         )
                     fig_taxa_mercado.update_layout(
@@ -2785,7 +2634,7 @@ with aba_detalhe:
                         _proj_c = calcular_projecao_renda_mais(
                             saldo_atual=total_atual, taxa_real_aa=_t_c / 100, aporte_mensal=_aporte_v
                         )
-                        _labels_c.append(f"{_label_c}<br>(IPCA+{_t_c:.2f}%)".replace('.', ','))
+                        _labels_c.append(f"{_label_c}<br>(IPCA+{fmt_pct(_t_c, 2)})")
                         _valores_c.append(_proj_c['parcela_mensal'])
 
                     _fig_sens = go.Figure(go.Bar(
@@ -2816,7 +2665,7 @@ with aba_detalhe:
                                     _nova_taxa = calcular_taxa_media_ponderada_renda(_df_novo)
                                     st.success(
                                         f"✓ {len(_df_novo)} aportes importados — nova taxa média ponderada: "
-                                        f"IPCA + {_nova_taxa:.2f}%".replace('.', ',')
+                                        f"IPCA + {fmt_pct(_nova_taxa, 2)}"
                                     )
                                     st.cache_data.clear()
                         except Exception as e:
@@ -2956,12 +2805,7 @@ with aba_detalhe:
             _var_g_rs  = _total_g - _custo_g
             _var_g_pct = _var_g_rs / _custo_g * 100 if _custo_g > 0 else 0
             _holding_g = holding_ponderado_meses(_ativo_g, _df_lanc_raw)
-            _qtd_g_str = (
-                f"{_qtd_g:.6f}".replace('.', ',') if _qtd_g < 1
-                else f"{_qtd_g:.2f}".replace('.', ',') if row['Classe'] == 'Tesouro Direto'
-                else str(int(_qtd_g)) if _qtd_g == int(_qtd_g)
-                else f"{_qtd_g:.2f}".replace('.', ',')
-            )
+            _qtd_g_str = fmt_num(_qtd_g, 6 if _qtd_g < 1 else 2)
 
             with st.container(key=f"row_all_{_ativo_g}"):
                 r1c1, r1c2, r1c3 = st.columns(3)
@@ -3354,7 +3198,7 @@ with aba_aportes:
                     _display = abreviar_rs(valor)
                 elif ativo in _FRACIONADOS:
                     _qtd_f = valor / _preco_a if _preco_a > 0 else 0
-                    _display = f"{_qtd_f:.4f} un".replace('.', ',')
+                    _display = f"{fmt_num(_qtd_f, 4)} un"
                 else:
                     _display = f"{int(round(valor/_preco_a))} cotas" if _preco_a > 0 else "—"
                 _cols_sug[i % len(_cols_sug)].metric(ativo, _display)
@@ -3383,7 +3227,7 @@ with aba_aportes:
                     _display = abreviar_rs(_compra_val)
                 elif _compra_alt in _FRACIONADOS:
                     _qtd_f = _compra_val / _preco_a if _preco_a > 0 else 0
-                    _display = f"{_qtd_f:.4f} un".replace('.', ',')
+                    _display = f"{fmt_num(_qtd_f, 4)} un"
                 else:
                     _display = f"{int(round(_compra_val/_preco_a))} cotas" if _preco_a > 0 else "—"
                 st.columns([1,3])[0].metric(_compra_alt, _display)
@@ -3455,19 +3299,19 @@ with aba_aportes:
             _preco_a = _precos_sim.get(row['ativo'], 0)
             if _sug > 0 and _preco_a > 0:
                 if row['ativo'] in _FRACIONADOS:
-                    _cotas_str = f"{_sug/_preco_a:.4f}".replace('.', ',')
+                    _cotas_str = fmt_num(_sug/_preco_a, 4)
                 else:
                     _cotas_str = str(int(round(_sug / _preco_a)))
             else:
                 _cotas_str = '—'
             _rows_disp.append({
                 'ativo':          row['ativo'],
-                'atual %':        f"{row['atual_pct']:.1f}%".replace('.', ','),
-                'alvo %':         f"{row['alvo_pct']:.1f}%".replace('.', ','),
+                'atual %':        fmt_pct(row['atual_pct']),
+                'alvo %':         fmt_pct(row['alvo_pct']),
                 'desvio R$':      ('+' if row['desvio_rs'] >= 0 else '') + formatar_brl(row['desvio_rs']),
                 'status':         _status,
                 'sugestão':       _cotas_str if row['ativo'] != 'BTC' else (abreviar_rs(_sug) if _sug > 0 else '—'),
-                'após aporte %':  f"{_novo_pct:.1f}%".replace('.', ','),
+                'após aporte %':  fmt_pct(_novo_pct),
             })
 
         df_disp = pd.DataFrame(_rows_disp)
@@ -3517,7 +3361,7 @@ with aba_config:
         _soma_cri_r  = sum(_alvo_c(a) for a in _cripto_cfg)
         _soma_total_r = _soma_etfs_r + _alvo_fii_cl + _soma_td_r + _soma_cri_r
         _cor_r = "🟢" if abs(_soma_total_r - 100) < 0.01 else "🔴"
-        st.caption(f"{_cor_r} soma dos alvos: **{_soma_total_r:.1f}%**")
+        st.caption(f"{_cor_r} soma dos alvos: **{fmt_pct(_soma_total_r)}**")
         _cols_rc = st.columns(4)
         _cols_rc[0].metric("ETFs", fmt_pct(_soma_etfs_r))
         _cols_rc[1].metric("FIIs", fmt_pct(_alvo_fii_cl))
@@ -3617,7 +3461,7 @@ with aba_config:
                 _soma_alvos = sum((v.get('alvo') or 0) for k,v in _cfg_nova.items() if k != "__FIIs__")
                 _soma_alvos += (_cfg_nova.get("__FIIs__", {}) or {}).get('alvo') or 0
                 if abs(_soma_alvos - 100) > 0.01:
-                    st.error(f"soma dos alvos: {_soma_alvos:.1f}% — ajuste para fechar em 100%")
+                    st.error(f"soma dos alvos: {fmt_pct(_soma_alvos)} — ajuste para fechar em 100%")
                 else:
                     if salvar_configuracoes(_cfg_nova):
                         st.session_state["cfg_alvos"] = _cfg_nova
