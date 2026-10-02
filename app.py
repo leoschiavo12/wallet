@@ -1948,13 +1948,11 @@ with aba_detalhe:
         _ultimo_dia_ref = pd.Timestamp(ano_ref_f, mes_ref_f,
                           _cal.monthrange(ano_ref_f, mes_ref_f)[1])
         _total_fii_base = 0.0
-        _preco_fech_ref = {}   # fechamento de cada FII no último dia do mês de referência
         if not _df_pm.empty and not _df_lanc_raw.empty:
             for _, _pm_row_g in _df_pm[_df_pm['ano_mes'] == _mes_base].iterrows():
                 _ativo_pm = _pm_row_g['ativo']
                 if _ativo_pm not in [r['Ativo'] for _, r in df_fii.iterrows()]:
                     continue
-                _preco_fech_ref[_ativo_pm] = float(_pm_row_g['preco_fechamento'])
                 # quantidade no último dia do mês ref pelos lançamentos
                 _ops_ref = _df_lanc_raw[
                     (_df_lanc_raw['ativo'] == _ativo_pm) &
@@ -2128,11 +2126,9 @@ with aba_detalhe:
             _yoc_f_12m_pct = (_proventos_f / _pm_f * 100) if _pm_f and _pm_f > 0 and _proventos_f > 0 else None
             _yoc_f_str     = fmt_pct(_yoc_f_12m_pct, 2) if _yoc_f_12m_pct else "—"
 
-            # yield do mês de referência anualizado (×12, sem capitalização — mesma base do YoC 12m,
-            # que soma 12 meses de proventos): provento por cota ÷ fechamento do último dia do mês
-            _div_cota_f  = div_detalhe.get(_ativo_f, {}).get('por_cota', 0.0)
-            _base_yld_f  = _preco_fech_ref.get(_ativo_f) or _preco_f
-            _yield_f_str = fmt_pct(_div_cota_f * 12 / _base_yld_f * 100, 2) if _div_cota_f > 0 and _base_yld_f else "—"
+            # yield (12m) = proventos por cota dos últimos 12 meses ÷ preço atual
+            # (mesmo numerador do YoC; só muda o denominador: preço de mercado vs. preço médio)
+            _yield_f_str = fmt_pct(_proventos_f / _preco_f * 100, 2) if _proventos_f > 0 and _preco_f else "—"
 
             with st.container(key=f"row_fii_ativo_{_ativo_f}"):
                 r1c1, r1c2, r1c3 = st.columns(3)
@@ -2145,7 +2141,7 @@ with aba_detalhe:
                 card_valorizacao(r2c3, _var_f_rs, _var_f_pct)
 
                 r3c1, r3c2, r3c3 = st.columns(3)
-                r3c2.metric(f"yield a.a. — {_label_mes}", _yield_f_str)
+                r3c2.metric("yield (12m)", _yield_f_str)
                 r3c3.metric("YoC (12m)", _yoc_f_str)
 
             st.markdown("---")
