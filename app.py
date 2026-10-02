@@ -1965,12 +1965,20 @@ with aba_detalhe:
         _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
 
         # ── bloco resumo: grade 3 colunas, mesmo padrão dos cards por ativo ──
-        #    patrimônio/acumulado em cima · mês de referência no meio · YoC 12m embaixo do YoC do mês
+        #    posição em cima · mês de referência no meio · acumulados (div. totais / YoC 12m) embaixo
+        # holding médio ponderado pelo custo de cada FII (mesma lógica da aba ETFs)
+        _holding_fii_classe = 0.0
+        for _, _row_h in df_fii.iterrows():
+            _h_fii = holding_ponderado_meses(_row_h['Ativo'], _df_lanc_raw)
+            if _h_fii and _custo_total_fii > 0:
+                _holding_fii_classe += (_h_fii * _row_h['custo_total'] / _custo_total_fii)
+
         with st.container(key="row_fii_dividendos"):
             r1c1, r1c2, r1c3 = st.columns(3)
             r1c1.metric(f"total FIIs  ·  {total_fii_k}", fmt_pct(_pct_fii_carteira))
             card_valorizacao(r1c2, _var_fii_rs, _var_fii_pct)
-            r1c3.metric("dividendos totais", formatar_brl(_total_divs))
+            r1c3.metric("holding médio",
+                        f"{round(_holding_fii_classe, 1):.1f}".replace('.', ',') + " meses" if _holding_fii_classe > 0 else "—")
 
             r2c1, r2c2, r2c3 = st.columns(3)
             r2c1.metric(_label_mes, formatar_brl(div_total))
@@ -1978,6 +1986,7 @@ with aba_detalhe:
             r2c3.metric(f"YoC — {_label_mes}", _yoc_mes_str)
 
             r3c1, r3c2, r3c3 = st.columns(3)
+            r3c1.metric("dividendos totais", formatar_brl(_total_divs))
             r3c3.metric("YoC (12m)", _yoc_12m_str)
 
         st.markdown("---")
