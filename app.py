@@ -510,7 +510,17 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
                 continue
             if divs.index.tz is not None:
                 divs.index = divs.index.tz_localize(None)
-            resultado[t] = round(float(divs[divs.index >= janela_ini].sum()), 4)
+            _w = divs[divs.index >= janela_ini]
+            _w = _w[_w > 0]
+            _soma = float(_w.sum())
+            # o yfinance às vezes "pula" meses de FIIs da B3 (ex.: GARE11 vinha com 10 dos 12
+            # pagamentos). Se o padrão é mensal (≥6 pagamentos, intervalo mediano ~1 mês) e
+            # faltam meses na janela, anualiza pela média dos pagamentos encontrados.
+            if 6 <= len(_w) < 12:
+                _gap = pd.Series(_w.index).diff().dt.days.median()
+                if 25 <= _gap <= 35:
+                    _soma = float(_w.mean()) * 12
+            resultado[t] = round(_soma, 4)
         except Exception:
             resultado[t] = 0.0
 
