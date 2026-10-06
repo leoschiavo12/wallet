@@ -649,7 +649,11 @@ def _preco_resgate_tesouro_direto(nome_titulo="Renda+ Aposentadoria Extra 2050")
     raise RuntimeError("título não encontrado no CSV")
 
 def _taxa_compra_tesouro_direto():
-    """taxa de COMPRA atual do Renda+ 2050 (IPCA + x%) no CSV 'rendimento-investir' do Tesouro Direto"""
+    """
+    taxa de COMPRA atual do Renda+ 2050 (o x de IPCA + x%) no CSV 'rendimento-investir'
+    do Tesouro Direto. Leitura tolerante ao formato: procura a coluna de rendimento/taxa
+    pelo cabeçalho; se não achar, pega o número que vem depois de 'IPCA' na linha.
+    """
     import re
     url = "https://www.tesourodireto.com.br/documents/d/guest/rendimento-investir-csv?download=true"
     r = requests.get(url, timeout=12, headers={
@@ -660,15 +664,33 @@ def _taxa_compra_tesouro_direto():
     if r.status_code != 200:
         raise RuntimeError(f"HTTP {r.status_code}")
     try:
-        texto = r.content.decode('utf-8')
+        texto = r.content.decode('utf-8-sig')
     except UnicodeDecodeError:
         texto = r.content.decode('latin1')
-    for linha in texto.splitlines():
-        if 'renda' in linha.lower() and '2050' in linha:
-            m = re.search(r"(\d{1,2},\d{1,2})\s*%", linha)
-            if m:
-                return float(m.group(1).replace(',', '.'))
-    raise RuntimeError("taxa não encontrada no CSV")
+    linhas = [l for l in texto.splitlines() if l.strip()]
+    if not linhas:
+        raise RuntimeError("CSV vazio")
+    sep = ';' if linhas[0].count(';') >= linhas[0].count(',') else ','
+    cab = [c.strip().strip('"').lower() for c in linhas[0].split(sep)]
+    i_tx = next((i for i, c in enumerate(cab) if 'rendimento' in c or 'taxa' in c or 'rentabilidade' in c), None)
+    alvo = [l for l in linhas[1:] if re.search(r"renda\s*\+?", l, re.I) and '2050' in l]
+    if not alvo:
+        raise RuntimeError(f"título não encontrado (cabeçalho: {'|'.join(cab)[:80]})")
+    linha = alvo[0]
+    campos = [c.strip().strip('"') for c in linha.split(sep)]
+
+    def _num(s):
+        m = re.search(r"(\d{1,2}[.,]\d{1,4})", s.replace('\xa0', ' '))
+        return float(m.group(1).replace(',', '.')) if m else None
+
+    if i_tx is not None and i_tx < len(campos):
+        v = _num(campos[i_tx])
+        if v is not None and 0 < v < 30:
+            return v
+    m = re.search(r"IPCA\s*\+?\s*(\d{1,2}[.,]\d{1,4})", linha.replace('\xa0', ' '), re.I)
+    if m:
+        return float(m.group(1).replace(',', '.'))
+    raise RuntimeError(f"taxa não reconhecida na linha: {linha[:90]}")
 
 def obter_preco_renda_mais():
     # 1º preço de resgate atual no site do Tesouro Direto (o que o app do Tesouro/corretora mostra)
@@ -676,11 +698,13 @@ def obter_preco_renda_mais():
     try:
         _pu_td = _preco_resgate_tesouro_direto()
         _ref = pd.Timestamp.now(tz="America/Sao_Paulo").strftime('%d/%m/%Y %H:%M')
+        _obs_taxa = ""
         try:
             _taxa_td = _taxa_compra_tesouro_direto()
-        except Exception:
+        except Exception as e:
             _taxa_td = None
-        return _pu_td, f"{_ref} (preço de resgate — Tesouro Direto)", _taxa_td
+            _obs_taxa = f" · taxa indisponível: {str(e)[:110]}"
+        return _pu_td, f"{_ref} (preço de resgate — Tesouro Direto){_obs_taxa}", _taxa_td
     except Exception as e:
         _erro_td = str(e)[:60]
     # 2º fallback: CSV do Tesouro Transparente — PU de venda da MANHÃ do último dia útil
@@ -2550,10 +2574,17 @@ with aba_detalhe:
                 r1c2.metric(f"total  ·  ({_qtd_fmt})", abreviar_rs(total_atual))
                 r1c3.metric("~holding", fmt_holding(_td_holding))
 
-                # taxa de compra atual (só o Renda+ tem fonte automática)
-                _taxa_td_card = st.session_state.get('taxa_renda_auto') if ativo == 'Renda+ 2050' else None
+                # sua taxa média de compra (ponderada pelo valor de cada aporte) — só o Renda+
+                _taxa_td_card = None
+                if ativo == 'Renda+ 2050':
+                    try:
+                        _hist_tx_card, _ = obter_historico_taxa_renda_mais()
+                        _taxa_td_card = calcular_taxa_media_ponderada_renda(
+                            taxas_aportes_renda_mais(_df_lanc_raw, _hist_tx_card, ler_renda_taxas()))
+                    except Exception:
+                        _taxa_td_card = None
                 r2c1, r2c2, r2c3 = st.columns(3)
-                r2c2.metric("taxa (compra)", f"IPCA + {fmt_pct(_taxa_td_card, 2)}" if _taxa_td_card else "—")
+                r2c2.metric("taxa", f"IPCA + {fmt_pct(_taxa_td_card, 2)}" if _taxa_td_card else "—")
                 r2c3.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
 
                 r3c1, r3c2, r3c3 = st.columns(3)
