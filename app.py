@@ -2318,45 +2318,33 @@ with aba_dash:
                               + (f"({formatar_brl(abs(r['ganho']))})" if r['ganho'] < 0 else formatar_brl(r['ganho'])),
                     axis=1)
 
-                # eixo: próxima meta (múltiplo de 10k) em cima; espaço embaixo se houver ganho negativo
-                _topo  = (df_mensal['bolso'] + df_mensal['rendeu'].clip(lower=0)).max()
-                _meta  = (int(_topo // 10000) + 1) * 10000
-                _neg   = float(df_mensal['rendeu'].clip(upper=0).min())
-                _base  = -(int(abs(_neg) // 10000) * 10000)      # só marca (10k) se descer tanto
-                _ticks = list(range(_base, int(_meta) + 1, 10000))
-                _y_min = min(_neg * 1.4, 0)                          # folga só do tamanho necessário
+                # eixo: próxima meta (múltiplo de 10k) acima do maior patrimônio
+                _meta  = (int(df_mensal['total'].max() // 10000) + 1) * 10000
+                _ticks = list(range(0, int(_meta) + 1, 10000))
 
-                fig_mensal = go.Figure()
-                # mesmas cores do gráfico de rosca (as duas mais escuras de Blues_r)
-                for _col, _nome, _cor in [("bolso",  "saiu do bolso", px.colors.sequential.Blues_r[0]),
-                                          ("rendeu", "dividendos + ganho de capital", px.colors.sequential.Blues_r[1])]:
-                    fig_mensal.add_trace(go.Bar(
-                        x=df_mensal['mes'], y=df_mensal[_col], name=_nome,
-                        marker_color=_cor,
-                        hovertemplate="%{customdata}<extra></extra>",
-                        customdata=df_mensal['hover'].tolist(),
-                    ))
+                # barra única = patrimônio; o hover mostra a composição (bolso/dividendos/ganho)
+                fig_mensal = go.Figure(go.Bar(
+                    x=df_mensal['mes'], y=df_mensal['total'],
+                    marker_color="#42A5F5",
+                    hovertemplate="%{customdata}<extra></extra>",
+                    customdata=df_mensal['hover'].tolist(),
+                ))
                 fig_mensal.update_layout(
-                    barmode="relative",                  # ganho negativo desce abaixo do zero
                     dragmode=False,
                     height=400,
                     plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                    showlegend=True,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5,
-                                font=dict(size=11)),
+                    showlegend=False,
                     bargap=0.2,
                     xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45, fixedrange=True),
                     yaxis=dict(
                         showgrid=True, gridcolor="#333",
-                        range=[_y_min, _meta * 1.05],
+                        range=[0, _meta * 1.05],
                         tickmode='array',
                         tickvals=_ticks,
-                        ticktext=[(f"{v//1000:.0f}k" if v > 0 else (f"({abs(v)//1000:.0f}k)" if v < 0 else "0"))
-                                  for v in _ticks],
+                        ticktext=[f"{v//1000:.0f}k" if v > 0 else "0" for v in _ticks],
                         fixedrange=True,
-                        zeroline=True, zerolinecolor="#666",
                     ),
-                    margin=dict(t=30, b=10, l=10, r=10)
+                    margin=dict(t=10, b=10, l=10, r=10)
                 )
                 st.plotly_chart(
                     fig_mensal, width="stretch",
