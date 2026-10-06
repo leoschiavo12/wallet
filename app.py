@@ -2346,7 +2346,7 @@ with aba_dash:
                     height=300,
                     plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                     showlegend=False,
-                    hovermode="x",
+                    hovermode="closest",      # "x" mostrava um rótulo da data no eixo
                     # eixo x exatamente do 1º ao último mês: sem espaço sobrando à direita
                     xaxis=dict(showgrid=False, tickangle=0, fixedrange=True,
                                range=[df_mensal['mes'].min(), df_mensal['mes'].max()],
