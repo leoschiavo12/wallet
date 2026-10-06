@@ -2342,17 +2342,20 @@ with aba_dash:
                     mode="markers",
                     marker=dict(size=11, color="#9FE7C9", line=dict(width=2.5, color="#0E1117")),
                     hoverinfo="skip",
+                    cliponaxis=False,          # ponto da borda aparece inteiro sem precisar de folga no eixo
                 ))
                 for _, _m in _marcos.iterrows():
                     fig_mensal.add_shape(type="line", x0=_m['mes'], x1=_m['mes'], y0=0, y1=_m['total'],
                                          line=dict(color="rgba(255,255,255,0.25)", width=1), layer="below")
                 fig_mensal.update_layout(
                     dragmode=False,
-                    height=400,
+                    height=300,
                     plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                     showlegend=False,
                     hovermode="x",
-                    xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45, fixedrange=True,
+                    # eixo x exatamente do 1º ao último mês: sem espaço sobrando à direita
+                    xaxis=dict(showgrid=False, tickangle=0, fixedrange=True,
+                               range=[df_mensal['mes'].min(), df_mensal['mes'].max()],
                                tickvals=_marcos['mes'].tolist(),
                                ticktext=[_mes_pt(d) for d in _marcos['mes']]),
                     yaxis=dict(
@@ -2363,7 +2366,7 @@ with aba_dash:
                         ticktext=[f"{v//1000:.0f}k" if v > 0 else "0" for v in _ticks],
                         fixedrange=True,
                     ),
-                    margin=dict(t=10, b=10, l=10, r=10)
+                    margin=dict(t=10, b=10, l=10, r=20)
                 )
                 st.plotly_chart(
                     fig_mensal, width="stretch",
