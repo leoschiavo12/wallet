@@ -1159,6 +1159,38 @@ def ler_precos_mensais():
     except:
         return pd.DataFrame(columns=PM_HEADERS)
 
+def migrar_precos_mensais_sem_ajuste(df_pm):
+    """
+    executa uma vez (marca na aba metas): recalcula, com fechamento SEM ajuste, os preços
+    mensais de FIIs/ETFs já gravados (BTC e Tesouro não mudam) e regrava a aba.
+    retorna o df atualizado.
+    """
+    if df_pm is None or df_pm.empty:
+        return df_pm
+    import calendar
+    nao_b3 = {'BTC', 'Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro SELIC 2031', 'Tesouro Prefixado 2032'}
+    alias  = {'GALG11': 'GARE11'}
+    df = df_pm.copy()
+    for i, r in df.iterrows():
+        a = str(r['ativo']).strip()
+        if a in nao_b3:
+            continue
+        try:
+            ano, m = int(str(r['ano_mes'])[:4]), int(str(r['ano_mes'])[5:7])
+            ult = pd.Timestamp(ano, m, calendar.monthrange(ano, m)[1])
+            p = obter_preco_historico_yfinance(f"{alias.get(a, a)}.SA", ult)
+            if p and p >= 1.0:
+                df.at[i, 'preco_fechamento'] = round(p, 4)
+        except Exception:
+            continue
+    svc = get_sheets_service()
+    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A:C").execute()
+    corpo = [PM_HEADERS] + [[str(r['ano_mes']), str(r['ativo']), float(r['preco_fechamento'])]
+                            for _, r in df.iterrows()]
+    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A1",
+                        valueInputOption="RAW", body={"values": corpo}).execute()
+    return df
+
 def salvar_precos_mensais(rows_list):
     """rows_list: lista de [ano_mes, ativo, preco]"""
     try:
@@ -1178,19 +1210,34 @@ def salvar_precos_mensais(rows_list):
     except Exception as e:
         st.warning(f"erro ao salvar preços mensais: {e}")
 
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def _fechamentos_historicos(ticker_sa):
+    """
+    fechamentos diários REAIS (auto_adjust=False) desde 2022 — o preço que de fato foi
+    negociado. Com auto_adjust=True o yfinance desconta do passado todos os proventos
+    pagos depois, e um FII de 2 anos atrás aparecia ~20% mais barato do que era.
+    Um download por ticker (antes era um por mês).
+    """
+    dados = yf.download(ticker_sa, start="2022-01-01", progress=False,
+                        auto_adjust=False, threads=False)
+    if dados is None or dados.empty:
+        return pd.Series(dtype=float)
+    close = dados['Close']
+    if isinstance(close, pd.DataFrame): close = close.iloc[:, 0]
+    close = close.dropna()
+    idx = pd.to_datetime(close.index)
+    close.index = (idx.tz_localize(None) if idx.tz is not None else idx).normalize()
+    return close.astype(float)
+
 def obter_preco_historico_yfinance(ticker_sa, data_fim):
-    """preço de fechamento do último dia útil até data_fim"""
+    """preço de fechamento (sem ajuste) do último pregão até data_fim"""
     try:
-        import datetime
-        data_ini = data_fim - datetime.timedelta(days=10)
-        dados = yf.download(ticker_sa, start=data_ini.strftime('%Y-%m-%d'),
-                            end=(data_fim + datetime.timedelta(days=1)).strftime('%Y-%m-%d'),
-                            progress=False, auto_adjust=True)
-        if dados.empty: return None
-        close = dados['Close']
-        if isinstance(close, pd.DataFrame): close = close.iloc[:, 0]
-        return float(close.ffill().dropna().iloc[-1])
-    except:
+        s = _fechamentos_historicos(ticker_sa)
+        s = s[s.index <= pd.Timestamp(data_fim)]
+        if s.empty or (pd.Timestamp(data_fim) - s.index[-1]).days > 10:
+            return None
+        return float(s.iloc[-1])
+    except Exception:
         return None
 
 # ── Google Sheets helpers ─────────────────────────────────────────────────────
@@ -1904,7 +1951,8 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
         if mes in meses_pm:
             df_ate  = df_lanc[df_lanc['data_dt'].dt.to_period('M').astype(str) <= mes].copy()
             pos_mes = calcular_posicao(df_ate)
-            custo_mes = float(pos_mes['custo_total'].sum()) if not pos_mes.empty else 0.0
+            # custo das cotas que você ainda tinha no mês (qtd × preço médio) — vendas reduzem o custo
+            custo_mes = float((pos_mes['qtd_atual'] * pos_mes['preco_medio']).sum()) if not pos_mes.empty else 0.0
             total_mes = 0.0
             for _, pr in pos_mes.iterrows():
                 pm_row = df_pm[(df_pm['ano_mes'] == mes) & (df_pm['ativo'] == pr['ativo'])]
@@ -2018,6 +2066,13 @@ if "_df_pm" not in st.session_state:
     try:
         with st.spinner("atualizando histórico de preços..."):
             _df_pm_lido = ler_precos_mensais()
+            # migração única para fechamentos sem ajuste de proventos
+            if "_metas" not in st.session_state:
+                st.session_state["_metas"] = ler_metas()
+            if not st.session_state["_metas"].get("precos_mensais_sem_ajuste"):
+                _df_pm_lido = migrar_precos_mensais_sem_ajuste(_df_pm_lido)
+                salvar_meta("precos_mensais_sem_ajuste", 1,
+                            "preços mensais de FIIs/ETFs regravados sem ajuste de proventos")
             _antes = len(_df_pm_lido)
             _df_pm_lido = popular_precos_mensais(_df_lanc_raw, _df_pm_lido)
             st.session_state["_df_pm"] = _df_pm_lido
@@ -2170,7 +2225,9 @@ with aba_dash:
                                          'ganho': g, 'label': _dt_v.strftime('%b/%y'), 'atual': False})
 
                 # mês atual com valores correntes (mesmos números dos cards acima)
-                b, d, g = _decompor(total_geral, _custo_total, _total_divs_geral)
+                _custo_pos_atual = float((_posicao['qtd_atual'] * _posicao['preco_medio']).sum()) \
+                    if not _posicao.empty else _custo_total
+                b, d, g = _decompor(total_geral, _custo_pos_atual, _total_divs_geral)
                 vals_mensais.append({
                     'mes': pd.to_datetime(f"{mes_atual}-01"), 'total': total_geral,
                     'bolso': b, 'divs': d, 'ganho': g,
