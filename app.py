@@ -1158,6 +1158,66 @@ HEADERS    = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario",
 # ── taxas contratadas do Renda+ (extrato analítico Tesouro Direto) ────────────
 SHEET_RENDA_TAB = "renda_mais_taxas"
 
+# metas de longo prazo (chave → valor), editáveis em configurações
+SHEET_METAS_TAB = "metas"
+METAS_HEADERS   = ["chave", "valor", "descricao"]
+METAS_PADRAO    = {"renda_2050_titulos_dez2045": (450.0, "títulos de Renda+ 2050 a acumular até dez/2045")}
+
+def _num_br(s):
+    """'450' · '450,5' · '1.200' · '1.200,50' · 450.0 → float"""
+    import re
+    if isinstance(s, (int, float)):
+        return float(s)
+    s = str(s).strip()
+    if ',' in s:
+        return float(s.replace('.', '').replace(',', '.'))
+    if re.fullmatch(r"\d{1,3}(\.\d{3})+", s):
+        return float(s.replace('.', ''))
+    return float(s)
+
+def ler_metas():
+    """lê a aba metas → dict {chave: float}; cria a aba com os valores padrão se não existir"""
+    metas = {}
+    try:
+        svc  = get_sheets_service()
+        rows = svc.values().get(spreadsheetId=SHEET_ID,
+                                range=f"{SHEET_METAS_TAB}!A:C").execute().get("values", [])
+        for r in rows[1:]:
+            if len(r) >= 2 and r[0].strip():
+                try:
+                    metas[r[0].strip()] = _num_br(r[1])
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    for k, (v, desc) in METAS_PADRAO.items():
+        if k not in metas:
+            try:
+                salvar_meta(k, v, desc)
+            except Exception:
+                pass
+            metas[k] = v
+    return metas
+
+def salvar_meta(chave, valor, descricao=""):
+    """grava/atualiza uma meta na aba metas (cria a aba se precisar)"""
+    svc = get_sheets_service()
+    _garantir_aba_existe(svc, SHEET_METAS_TAB, METAS_HEADERS)
+    rows = svc.values().get(spreadsheetId=SHEET_ID,
+                            range=f"{SHEET_METAS_TAB}!A:C").execute().get("values", [])
+    nova = [chave, float(valor), descricao]
+    for i, r in enumerate(rows[1:], start=2):
+        if r and r[0].strip() == chave:
+            if not descricao and len(r) > 2:
+                nova[2] = r[2]
+            svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_METAS_TAB}!A{i}:C{i}",
+                                valueInputOption="RAW", body={"values": [nova]}).execute()
+            break
+    else:
+        svc.values().append(spreadsheetId=SHEET_ID, range=f"{SHEET_METAS_TAB}!A:C",
+                            valueInputOption="RAW", body={"values": [nova]}).execute()
+    st.session_state.pop("_metas", None)
+
 # classificação dos ativos (tipo/indexador dos FIIs, país dos ETFs) — editável pelo app
 SHEET_ATIVOS_INFO_TAB = "ativos_info"
 ATIVOS_INFO_HEADERS   = ["ativo", "classe", "tipo", "indexador", "pais"]
@@ -1975,7 +2035,7 @@ with aba_dash:
         # limpa caches de dados e tudo que a sessão guardou do Sheets → recarrega do zero
         st.cache_data.clear()
         for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
-                   "_ativos_info", "_precos_momento", "_precos_falha"]:
+                   "_ativos_info", "_precos_momento", "_precos_falha", "_metas"]:
             st.session_state.pop(_k, None)
         st.rerun()
 
@@ -2592,6 +2652,25 @@ with aba_detalhe:
                 r2c3.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
 
                 r3c1, r3c2, r3c3 = st.columns(3)
+                if ativo == 'Renda+ 2050':
+                    # contagem regressiva: meses que faltam até dez/2045 (sem contar o mês atual)
+                    _hoje_c = pd.Timestamp.today()
+                    _meses_ate_2045 = max((2045 - _hoje_c.year) * 12 + (12 - _hoje_c.month), 0)
+                    r3c1.metric("até 2045", f"{_meses_ate_2045} meses")
+
+                    # meta: títulos por mês necessários até dez/2045
+                    if "_metas" not in st.session_state:
+                        st.session_state["_metas"] = ler_metas()
+                    _meta_tit = st.session_state["_metas"].get("renda_2050_titulos_dez2045")
+                    if _meta_tit:
+                        _faltam_tit = max(_meta_tit - qtd, 0)
+                        if _faltam_tit <= 0:
+                            _txt_meta = "atingida"
+                        elif _meses_ate_2045 > 0:
+                            _txt_meta = f"{fmt_num(_faltam_tit / _meses_ate_2045, 2)} por mês"
+                        else:
+                            _txt_meta = f"faltam {fmt_num(_faltam_tit, 2)}"
+                        r3c2.metric(f"meta 2045  ·  ({fmt_num(_meta_tit, 2)})", _txt_meta)
                 if valorizacao is not None and valorizacao_pct is not None:
                     card_valorizacao(r3c3, valorizacao, valorizacao_pct)
                 else:
@@ -3488,3 +3567,24 @@ with aba_config:
                         st.session_state["cfg_alvos"] = _cfg_nova
                         st.success("configurações salvas.")
                         st.rerun(scope="app")
+
+    # ── metas de longo prazo ─────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### metas")
+    if "_metas" not in st.session_state:
+        st.session_state["_metas"] = ler_metas()
+    _mc1, _mc2 = st.columns([3, 1], vertical_alignment="bottom")
+    _meta_str = _mc1.text_input(
+        "Renda+ 2050 — títulos até dez/2045",
+        value=fmt_num(st.session_state["_metas"].get("renda_2050_titulos_dez2045", 450), 2),
+        key="meta_renda_2045_input")
+    if _mc2.button("salvar meta", key="btn_salvar_meta", width="stretch"):
+        try:
+            _v_meta = float(_meta_str.replace('.', '').replace(',', '.'))
+            if _v_meta <= 0:
+                raise ValueError
+            salvar_meta("renda_2050_titulos_dez2045", _v_meta)
+            st.success("meta salva.")
+            st.rerun(scope="app")
+        except ValueError:
+            st.error("valor inválido — use um número, ex.: 450")
