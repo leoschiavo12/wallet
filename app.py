@@ -2235,6 +2235,8 @@ with aba_dash:
                 })
 
                 df_mensal = pd.DataFrame(vals_mensais)
+                # camada clara = tudo que a carteira rendeu: dividendos reinvestidos + ganho de capital
+                df_mensal['rendeu'] = df_mensal['divs'] + df_mensal['ganho']
                 df_mensal['hover'] = df_mensal.apply(
                     lambda r: f"<b>{r['label']}</b>" + (" <i>(atual)</i>" if r['atual'] else "")
                               + f"<br>patrimônio: {formatar_brl(r['total'])}"
@@ -2245,17 +2247,16 @@ with aba_dash:
                     axis=1)
 
                 # eixo: próxima meta (múltiplo de 10k) em cima; espaço embaixo se houver ganho negativo
-                _topo  = (df_mensal['bolso'] + df_mensal['divs'] + df_mensal['ganho'].clip(lower=0)).max()
+                _topo  = (df_mensal['bolso'] + df_mensal['rendeu'].clip(lower=0)).max()
                 _meta  = (int(_topo // 10000) + 1) * 10000
-                _neg   = float(df_mensal['ganho'].clip(upper=0).min())
+                _neg   = float(df_mensal['rendeu'].clip(upper=0).min())
                 _base  = -(int(abs(_neg) // 10000) * 10000)      # só marca (10k) se descer tanto
                 _ticks = list(range(_base, int(_meta) + 1, 10000))
                 _y_min = min(_neg * 1.4, 0)                          # folga só do tamanho necessário
 
                 fig_mensal = go.Figure()
-                for _col, _nome, _cor in [("bolso", "saiu do bolso", "#1565C0"),
-                                          ("divs",  "dividendos reinvestidos", "#42A5F5"),
-                                          ("ganho", "ganho de capital", "#BBDEFB")]:
+                for _col, _nome, _cor in [("bolso",  "saiu do bolso", "#1565C0"),
+                                          ("rendeu", "dividendos + ganho de capital", "#BBDEFB")]:
                     fig_mensal.add_trace(go.Bar(
                         x=df_mensal['mes'], y=df_mensal[_col], name=_nome,
                         marker_color=_cor,
