@@ -2278,6 +2278,9 @@ with aba_dash:
                     _df_lanc_raw.to_dict(orient='records'),
                     _df_pm.to_dict(orient='records')
                 )
+                _MESES_PT = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
+                _mes_pt = lambda d: f"{_MESES_PT[d.month - 1]}/{str(d.year)[-2:]}"
+
                 # dividendos acumulados até cada mês (histórico gravado em dividendos_mensais)
                 _acum_div = {}
                 if _df_div_mensal is not None and not _df_div_mensal.empty:
@@ -2296,14 +2299,14 @@ with aba_dash:
                     _ult_div = float(_acum_div.get(_dt_v.strftime('%Y-%m'), _ult_div) or 0)
                     b, d, g = _decompor(v['total'], v.get('custo', 0.0), _ult_div)
                     vals_mensais.append({'mes': _dt_v, 'total': v['total'], 'bolso': b, 'divs': d,
-                                         'ganho': g, 'label': _dt_v.strftime('%b/%y'), 'atual': False})
+                                         'ganho': g, 'label': _mes_pt(_dt_v), 'atual': False})
 
                 # mês atual com valores correntes (mesmos números dos cards acima)
                 b, d, g = _decompor(total_geral, _invest_liq, _total_divs_geral)
                 vals_mensais.append({
                     'mes': pd.to_datetime(f"{mes_atual}-01"), 'total': total_geral,
                     'bolso': b, 'divs': d, 'ganho': g,
-                    'label': pd.to_datetime(f"{mes_atual}-01").strftime('%b/%y'), 'atual': True,
+                    'label': _mes_pt(pd.to_datetime(f"{mes_atual}-01")), 'atual': True,
                 })
 
                 df_mensal = pd.DataFrame(vals_mensais)
@@ -2318,22 +2321,42 @@ with aba_dash:
                 _meta  = (int(df_mensal['total'].max() // 10000) + 1) * 10000
                 _ticks = list(range(0, int(_meta) + 1, 10000))
 
-                # barra única = patrimônio do mês
-                fig_mensal = go.Figure(go.Bar(
+                # linha suave com preenchimento em degradê; pontos só em janeiro de cada ano
+                # e no mês atual (marcos), com haste vertical até o eixo — hover em todos os meses
+                _marcos = df_mensal[(df_mensal['mes'].dt.month == 1) | (df_mensal['atual'])]
+                _cor_linha = "#42A5F5"
+
+                fig_mensal = go.Figure()
+                fig_mensal.add_trace(go.Scatter(
                     x=df_mensal['mes'], y=df_mensal['total'],
-                    marker_color="#42A5F5",
+                    mode="lines",
+                    line=dict(color=_cor_linha, width=3, shape="spline", smoothing=0.6),
+                    fill="tozeroy",
+                    fillgradient=dict(type="vertical",
+                                      colorscale=[[0, "rgba(66,165,245,0)"], [1, "rgba(66,165,245,0.35)"]]),
                     hovertemplate="%{customdata}<extra></extra>",
                     customdata=df_mensal['hover'].tolist(),
                 ))
+                fig_mensal.add_trace(go.Scatter(
+                    x=_marcos['mes'], y=_marcos['total'],
+                    mode="markers",
+                    marker=dict(size=11, color="#9FE7C9", line=dict(width=2.5, color="#0E1117")),
+                    hoverinfo="skip",
+                ))
+                for _, _m in _marcos.iterrows():
+                    fig_mensal.add_shape(type="line", x0=_m['mes'], x1=_m['mes'], y0=0, y1=_m['total'],
+                                         line=dict(color="rgba(255,255,255,0.25)", width=1), layer="below")
                 fig_mensal.update_layout(
                     dragmode=False,
                     height=400,
                     plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                     showlegend=False,
-                    bargap=0.2,
-                    xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45, fixedrange=True),
+                    hovermode="x",
+                    xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45, fixedrange=True,
+                               tickvals=_marcos['mes'].tolist(),
+                               ticktext=[_mes_pt(d) for d in _marcos['mes']]),
                     yaxis=dict(
-                        showgrid=True, gridcolor="#333",
+                        showgrid=True, gridcolor="#222",
                         range=[0, _meta * 1.05],
                         tickmode='array',
                         tickvals=_ticks,
