@@ -289,8 +289,34 @@ def _yf_session():
     """sessão yfinance reutilizada — evita reconexão a cada chamada"""
     return yf
 
-@st.cache_data(ttl=300, show_spinner=False)  # 5 min
-def _baixar_precos_b3(tickers_tupla):
+# ── agenda de atualização ─────────────────────────────────────────────────────
+# pregão: dias úteis (seg–sex) das 10h às 19h, horário de Brasília. Fora disso os dados
+# de mercado ficam "congelados" na última leitura — nenhuma consulta nova até o próximo
+# pregão. Feriados não são tratados (contam como dia útil). O BTC ignora a agenda e
+# atualiza de hora em hora, sempre.
+def _agora_sp():
+    return pd.Timestamp.now(tz="America/Sao_Paulo")
+
+def janela_mercado(minutos):
+    """
+    chave de cache que muda a cada `minutos` durante o pregão e fica fixa fora dele.
+    Passada como argumento das funções cacheadas: chave nova → nova consulta.
+    """
+    agora = _agora_sp()
+    if agora.weekday() < 5 and 10 <= agora.hour < 19:
+        return "aberto-" + agora.floor(f"{minutos}min").strftime("%Y%m%d%H%M")
+    # fechado: chave = último pregão encerrado (hoje após 19h, ou o dia útil anterior)
+    ref = agora.normalize()
+    if not (agora.weekday() < 5 and agora.hour >= 19):
+        ref = ref - pd.offsets.BDay(1)
+    return "fechado-" + ref.strftime("%Y%m%d")
+
+def janela_horaria():
+    """chave que muda a cada hora cheia, todos os dias (BTC)"""
+    return _agora_sp().floor("h").strftime("%Y%m%d%H")
+
+@st.cache_data(ttl=4 * 86400, max_entries=20, show_spinner=False)
+def _baixar_precos_b3(tickers_tupla, janela):
     """
     cotação atual de cada ativo da B3 → (precos, falhas, momento da consulta).
     1º fast_info.last_price (preço corrente do Yahoo, o mais fresco — o candle diário de
@@ -319,11 +345,18 @@ def _baixar_precos_b3(tickers_tupla):
         precos[t.upper()] = v if v and v > 0 else 0.0
         if precos[t.upper()] <= 0:
             falhas.append(t)
+    if tickers_tupla and len(falhas) == len(tickers_tupla):
+        # nada veio (Yahoo fora do ar): exceção não é cacheada → tenta de novo no próximo acesso
+        raise RuntimeError("nenhuma cotação obtida")
     momento = pd.Timestamp.now(tz="America/Sao_Paulo").strftime("%d/%m %H:%M")
     return precos, falhas, momento
 
 def obter_precos_b3(tickers_lista):
-    precos, falhas, momento = _baixar_precos_b3(tuple(sorted(set(tickers_lista))))
+    _tk = tuple(sorted(set(tickers_lista)))
+    try:
+        precos, falhas, momento = _baixar_precos_b3(_tk, janela_mercado(5))
+    except Exception:
+        precos, falhas, momento = {t.upper(): 0.0 for t in _tk}, list(_tk), "—"
     if falhas:
         st.session_state['_precos_falha'] = falhas
     st.session_state['_precos_momento'] = momento
@@ -421,7 +454,21 @@ def obter_dividendos_mes_anterior(df_lancamentos_json):
         mes_ref, ano_ref = hoje.month - 1, hoje.year
     return calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref)
 
+@st.cache_data(ttl=2 * 3600, max_entries=5, show_spinner=False)
+def _preco_btc_janela(janela):
+    v = _consultar_preco_btc_brl()
+    if not v or v <= 0:
+        raise RuntimeError("sem cotação do BTC")   # exceção não é cacheada → tenta de novo
+    return v
+
 def obter_preco_btc_brl():
+    """preço do BTC em R$: atualiza de hora em hora, todos os dias"""
+    try:
+        return _preco_btc_janela(janela_horaria())
+    except Exception:
+        return 0.0
+
+def _consultar_preco_btc_brl():
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=brl"
         resp = requests.get(url, timeout=7)
@@ -958,9 +1005,13 @@ def render_variacoes(key, variacoes, nota=None):
     if nota:
         st.caption(nota)
 
-@st.cache_data(ttl=3600)  # 1h — o próprio Tesouro já publica com 1 dia de defasagem
-def obter_preco_renda_mais_cached():
+@st.cache_data(ttl=4 * 86400, max_entries=20, show_spinner=False)
+def _preco_renda_mais_janela(janela):
     return obter_preco_renda_mais()
+
+def obter_preco_renda_mais_cached():
+    """preço/taxa do Renda+: a cada 1h no pregão, congelado fora dele"""
+    return _preco_renda_mais_janela(janela_mercado(60))
 
 def calcular_projecao_renda_mais(saldo_atual, taxa_real_aa, aporte_mensal, ano_conversao=2050,
                                   anos_pagamento=20, mes_atual=None, ano_atual=None):
@@ -1841,7 +1892,7 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
         return []
     df_lanc['data_dt'] = pd.to_datetime(df_lanc['data'], format='%d/%m/%Y', errors='coerce')
     vals = []
-    ultimo_total = 0.0
+    ultimo_total, ultimo_custo = 0.0, 0.0
     ano0, m0 = int(meses_pm[0][:4]), int(meses_pm[0][5:7])
     ano1, m1 = int(meses_pm[-1][:4]), int(meses_pm[-1][5:7])
     todos_meses, a, m = [], ano0, m0
@@ -1853,16 +1904,27 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
         if mes in meses_pm:
             df_ate  = df_lanc[df_lanc['data_dt'].dt.to_period('M').astype(str) <= mes].copy()
             pos_mes = calcular_posicao(df_ate)
+            custo_mes = float(pos_mes['custo_total'].sum()) if not pos_mes.empty else 0.0
             total_mes = 0.0
             for _, pr in pos_mes.iterrows():
                 pm_row = df_pm[(df_pm['ano_mes'] == mes) & (df_pm['ativo'] == pr['ativo'])]
                 preco_hist = float(pm_row['preco_fechamento'].iloc[0]) if not pm_row.empty else pr['preco_medio']
                 total_mes += pr['qtd_atual'] * preco_hist
-            ultimo_total = total_mes
+            ultimo_total, ultimo_custo = total_mes, custo_mes
         else:
-            total_mes = ultimo_total
-        vals.append({'mes': f"{mes}-01", 'total': total_mes, 'atual': False})
+            total_mes, custo_mes = ultimo_total, ultimo_custo
+        vals.append({'mes': f"{mes}-01", 'total': total_mes, 'custo': custo_mes, 'atual': False})
     return vals
+
+# ── expiração da sessão: aba aberta há horas/dias não fica com dados velhos ──
+# lançamentos, preços mensais, alvos, classificação e metas são relidos do Sheets
+# quando a janela muda (30 em 30 min no pregão; uma vez por dia fora dele)
+_janela_sessao = janela_mercado(30)
+if st.session_state.get("_janela_sessao") != _janela_sessao:
+    for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
+               "_ativos_info", "_metas", "_precos_falha"]:
+        st.session_state.pop(_k, None)
+    st.session_state["_janela_sessao"] = _janela_sessao
 
 # ── carregar dados principais (session_state cache) ──────────────────────────
 # relê do Sheets só na primeira renderização da sessão
@@ -1886,7 +1948,7 @@ if "cfg_alvos" not in st.session_state:
 _cfg_alvos = st.session_state["cfg_alvos"]
 
 
-# preços atuais — cache de 5 min em _baixar_precos_b3 (botão "atualizar" força nova consulta)
+# preços atuais — a cada 5 min no pregão (seg–sex, 10h–19h), congelados fora dele
 _todos_b3 = [r['ativo'] for _, r in _posicao.iterrows()
              if r['classe'] in ('ETF', 'FII') and r['ativo'] != 'BTC']
 precos = obter_precos_b3(_todos_b3)
@@ -2029,15 +2091,7 @@ with aba_dash:
             label="lucro total"
         )
 
-    _ca, _cb = st.columns([4, 1], vertical_alignment="center")
-    _ca.caption(f"cotações de {st.session_state.get('_precos_momento', '—')}")
-    if _cb.button("atualizar", key="btn_atualizar_tudo", width="stretch"):
-        # limpa caches de dados e tudo que a sessão guardou do Sheets → recarrega do zero
-        st.cache_data.clear()
-        for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
-                   "_ativos_info", "_precos_momento", "_precos_falha", "_metas"]:
-            st.session_state.pop(_k, None)
-        st.rerun()
+    st.caption(f"cotações de {st.session_state.get('_precos_momento', '—')}")
 
     st.markdown('---')
 
@@ -2095,54 +2149,83 @@ with aba_dash:
                     _df_lanc_raw.to_dict(orient='records'),
                     _df_pm.to_dict(orient='records')
                 )
-                vals_mensais = [{'mes': pd.to_datetime(v['mes']), 'total': v['total'],
-                                 'label': pd.to_datetime(v['mes']).strftime('%b/%y'), 'atual': False}
-                                for v in _vals_cache]
+                # dividendos acumulados até cada mês (histórico gravado em dividendos_mensais)
+                _acum_div = {}
+                if _df_div_mensal is not None and not _df_div_mensal.empty:
+                    _acum_div = dict(zip(_df_div_mensal['ano_mes'], _df_div_mensal['acumulado']))
 
-                # adicionar barra do mês atual com valor de mercado corrente
+                def _decompor(total, custo, divs):
+                    """patrimônio = saiu do bolso + dividendos reinvestidos + ganho de capital"""
+                    divs  = min(max(float(divs or 0), 0.0), max(custo, 0.0))
+                    bolso = max(custo - divs, 0.0)
+                    return bolso, divs, total - custo
+
+                vals_mensais = []
+                _ult_div = 0.0
+                for v in _vals_cache:
+                    _dt_v = pd.to_datetime(v['mes'])
+                    _ult_div = float(_acum_div.get(_dt_v.strftime('%Y-%m'), _ult_div) or 0)
+                    b, d, g = _decompor(v['total'], v.get('custo', 0.0), _ult_div)
+                    vals_mensais.append({'mes': _dt_v, 'total': v['total'], 'bolso': b, 'divs': d,
+                                         'ganho': g, 'label': _dt_v.strftime('%b/%y'), 'atual': False})
+
+                # mês atual com valores correntes (mesmos números dos cards acima)
+                b, d, g = _decompor(total_geral, _custo_total, _total_divs_geral)
                 vals_mensais.append({
-                    'mes':   pd.to_datetime(f"{mes_atual}-01"),
-                    'total': total_geral,
-                    'label': pd.to_datetime(f"{mes_atual}-01").strftime('%b/%y') + " ●",
-                    'atual': True,
+                    'mes': pd.to_datetime(f"{mes_atual}-01"), 'total': total_geral,
+                    'bolso': b, 'divs': d, 'ganho': g,
+                    'label': pd.to_datetime(f"{mes_atual}-01").strftime('%b/%y'), 'atual': True,
                 })
 
                 df_mensal = pd.DataFrame(vals_mensais)
-                df_mensal['cor']   = df_mensal['atual'].apply(lambda x: "#64B5F6" if x else "#1E88E5")
                 df_mensal['hover'] = df_mensal.apply(
-                    lambda r: f"<b>{r['label'].replace(' ●','')}</b>"
-                              + (" <i>(atual)</i>" if r['atual'] else "")
-                              + f"<br>{formatar_brl(r['total'])}", axis=1
-                )
+                    lambda r: f"<b>{r['label']}</b>" + (" <i>(atual)</i>" if r['atual'] else "")
+                              + f"<br>patrimônio: {formatar_brl(r['total'])}"
+                              + f"<br>saiu do bolso: {formatar_brl(r['bolso'])}"
+                              + f"<br>dividendos reinvestidos: {formatar_brl(r['divs'])}"
+                              + f"<br>ganho de capital: "
+                              + (f"({formatar_brl(abs(r['ganho']))})" if r['ganho'] < 0 else formatar_brl(r['ganho'])),
+                    axis=1)
 
-                # próxima meta — próximo múltiplo de 10k acima do máximo
-                _max_val = df_mensal['total'].max()
-                _meta    = (int(_max_val // 10000) + 1) * 10000
-                y_max    = _meta * 1.05
-                _ticks   = list(range(0, int(_meta) + 1, 10000))
+                # eixo: próxima meta (múltiplo de 10k) em cima; espaço embaixo se houver ganho negativo
+                _topo  = (df_mensal['bolso'] + df_mensal['divs'] + df_mensal['ganho'].clip(lower=0)).max()
+                _meta  = (int(_topo // 10000) + 1) * 10000
+                _neg   = float(df_mensal['ganho'].clip(upper=0).min())
+                _base  = -(int(abs(_neg) // 10000) * 10000)      # só marca (10k) se descer tanto
+                _ticks = list(range(_base, int(_meta) + 1, 10000))
+                _y_min = min(_neg * 1.4, 0)                          # folga só do tamanho necessário
 
                 fig_mensal = go.Figure()
-                fig_mensal.add_trace(go.Bar(
-                    x=df_mensal['mes'], y=df_mensal['total'],
-                    marker_color=df_mensal['cor'].tolist(),
-                    hovertemplate="%{customdata}<extra></extra>",
-                    customdata=df_mensal['hover'].tolist(),
-                ))
+                for _col, _nome, _cor in [("bolso", "saiu do bolso", "#1565C0"),
+                                          ("divs",  "dividendos reinvestidos", "#42A5F5"),
+                                          ("ganho", "ganho de capital", "#BBDEFB")]:
+                    fig_mensal.add_trace(go.Bar(
+                        x=df_mensal['mes'], y=df_mensal[_col], name=_nome,
+                        marker_color=_cor,
+                        hovertemplate="%{customdata}<extra></extra>",
+                        customdata=df_mensal['hover'].tolist(),
+                    ))
                 fig_mensal.update_layout(
+                    barmode="relative",                  # ganho negativo desce abaixo do zero
                     dragmode=False,
                     height=400,
                     plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                    showlegend=False, bargap=0.2,
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5,
+                                font=dict(size=11)),
+                    bargap=0.2,
                     xaxis=dict(showgrid=False, tickformat="%b/%y", tickangle=-45, fixedrange=True),
                     yaxis=dict(
                         showgrid=True, gridcolor="#333",
-                        range=[0, y_max],
+                        range=[_y_min, _meta * 1.05],
                         tickmode='array',
                         tickvals=_ticks,
-                        ticktext=[f"{v//1000:.0f}k" if v > 0 else "0" for v in _ticks],
+                        ticktext=[(f"{v//1000:.0f}k" if v > 0 else (f"({abs(v)//1000:.0f}k)" if v < 0 else "0"))
+                                  for v in _ticks],
                         fixedrange=True,
+                        zeroline=True, zerolinecolor="#666",
                     ),
-                    margin=dict(t=10, b=10, l=10, r=10)
+                    margin=dict(t=30, b=10, l=10, r=10)
                 )
                 st.plotly_chart(
                     fig_mensal, width="stretch",
