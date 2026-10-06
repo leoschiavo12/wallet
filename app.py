@@ -2227,7 +2227,7 @@ with aba_dash:
     # ── linha 1: donut + gráfico mensal lado a lado (empilha no mobile) ───────
     _ctx_dashboard_chart = st.container(key="row_dashboard_chart")
     with _ctx_dashboard_chart:
-        col_donut, col_mensal = st.columns([1, 2])
+        col_donut, col_mensal = st.columns([1, 2], vertical_alignment="center")
 
         with col_donut:
             total_classe = df_resumo_classe['Total Atual'].sum()
@@ -2247,12 +2247,12 @@ with aba_dash:
                 hovertemplate='%{customdata}<extra></extra>',
                 customdata=hover_donut,
                 marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)]),
-                domain=dict(x=[0.1, 0.9], y=[0.1, 0.9])
+                domain=dict(x=[0.1, 0.9], y=[0.05, 0.95])
             ))
             fig_donut.update_layout(
                 dragmode=False,
-                margin=dict(t=60, b=60, l=60, r=60),
-                height=400, showlegend=False,
+                margin=dict(t=30, b=30, l=60, r=60),
+                height=300, showlegend=False,       # mesma altura do gráfico de linha ao lado
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
             st.plotly_chart(
