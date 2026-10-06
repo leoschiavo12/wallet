@@ -2584,7 +2584,11 @@ with aba_detalhe:
                     except Exception:
                         _taxa_td_card = None
                 r2c1, r2c2, r2c3 = st.columns(3)
-                r2c2.metric("taxa", f"IPCA + {fmt_pct(_taxa_td_card, 2)}" if _taxa_td_card else "—")
+                # mesmo padrão do card de preço: rótulo = sua média (~), valor = taxa de compra atual
+                _taxa_atual_card = st.session_state.get('taxa_renda_auto') if ativo == 'Renda+ 2050' else None
+                _tx_media_lbl = f"~{fmt_pct(_taxa_td_card, 2)}" if _taxa_td_card else "~—"
+                r2c2.metric(f"taxa  ·  ({_tx_media_lbl})",
+                            f"IPCA + {fmt_pct(_taxa_atual_card, 2)}" if _taxa_atual_card else "—")
                 r2c3.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
 
                 r3c1, r3c2, r3c3 = st.columns(3)
