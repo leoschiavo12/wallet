@@ -2324,6 +2324,13 @@ with aba_dash:
                 # linha suave com preenchimento em degradê; eixo rotulado em janeiro de cada ano e
                 # no mês atual (marcos) — hover em todos os meses
                 _marcos = df_mensal[(df_mensal['mes'].dt.month == 1) | (df_mensal['atual'])]
+
+                # rótulos do eixo x: 1º mês (mar/23), cada janeiro como ano cheio (2024…) e o mês atual
+                _primeiro = df_mensal['mes'].min()
+                _ticks_x  = [_primeiro] + [d for d in _marcos['mes'] if d != _primeiro]
+                _textos_x = [str(d.year) if (d.month == 1 and d != _primeiro and
+                                             not df_mensal.loc[df_mensal['mes'] == d, 'atual'].any())
+                             else _mes_pt(d) for d in _ticks_x]
                 _cor_linha = "#42A5F5"
 
                 fig_mensal = go.Figure()
@@ -2350,8 +2357,7 @@ with aba_dash:
                     # eixo x exatamente do 1º ao último mês: sem espaço sobrando à direita
                     xaxis=dict(showgrid=False, tickangle=0, fixedrange=True,
                                range=[df_mensal['mes'].min(), df_mensal['mes'].max()],
-                               tickvals=_marcos['mes'].tolist(),
-                               ticktext=[_mes_pt(d) for d in _marcos['mes']]),
+                               tickvals=_ticks_x, ticktext=_textos_x),
                     yaxis=dict(
                         showgrid=True, gridcolor="#222",
                         range=[0, _meta * 1.05],
