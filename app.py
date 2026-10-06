@@ -1978,6 +1978,19 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
 
     return df_pm_existente
 
+def investimento_liquido(df_lanc):
+    """
+    dinheiro líquido aplicado = Σ compras − Σ vendas (quantidade × preço unitário).
+    O que volta de vendas e é reaplicado não conta como dinheiro novo; lucro realizado
+    numa venda fica do lado do ganho de capital.
+    """
+    if df_lanc is None or df_lanc.empty:
+        return 0.0
+    t = df_lanc['tipo'].astype(str).str.strip().str.lower()
+    v = (pd.to_numeric(df_lanc['quantidade'], errors='coerce').fillna(0) *
+         pd.to_numeric(df_lanc['preco_unitario'], errors='coerce').fillna(0))
+    return float(v[t == 'compra'].sum() - v[t == 'venda'].sum())
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def calcular_valores_mensais(df_lanc_json, df_pm_json):
     """calcula valor da carteira por mês — cacheado por 1h"""
@@ -2006,8 +2019,8 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
         if mes in meses_pm:
             df_ate  = df_lanc[df_lanc['data_dt'].dt.to_period('M').astype(str) <= mes].copy()
             pos_mes = calcular_posicao(df_ate)
-            # custo das cotas que você ainda tinha no mês (qtd × preço médio) — vendas reduzem o custo
-            custo_mes = float((pos_mes['qtd_atual'] * pos_mes['preco_medio']).sum()) if not pos_mes.empty else 0.0
+            # dinheiro líquido aplicado até o mês (compras − vendas)
+            custo_mes = investimento_liquido(df_ate)
             total_mes = 0.0
             for _, pr in pos_mes.iterrows():
                 pm_row = df_pm[(df_pm['ano_mes'] == mes) & (df_pm['ativo'] == pr['ativo'])]
@@ -2164,10 +2177,10 @@ aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard",
 
 with aba_dash:
 
-    # total investido = custo de todas as compras − total de vendas
-    _custo_total = df['custo_total'].sum()
-    _var_val     = total_geral - _custo_total
-    _var_pct     = (_var_val / _custo_total * 100) if _custo_total > 0 else 0
+    # base por fluxo de caixa: compras − vendas. variação = ganho de capital (realizado + não realizado)
+    _invest_liq  = investimento_liquido(_df_lanc_raw)
+    _var_val     = total_geral - _invest_liq
+    _var_pct     = (_var_val / _invest_liq * 100) if _invest_liq > 0 else 0
 
     # dividendos do mês de referência — lidos do histórico mensal persistido (calculado e
     # gravado uma vez por mês fechado; não recalcula via yfinance a cada carregamento)
@@ -2189,7 +2202,7 @@ with aba_dash:
     # "saiu do bolso": dividendos reinvestidos viram novas compras nos lançamentos,
     # então já estão dentro de custo_total como se fossem dinheiro novo — subtrai pra isolar
     # só o que realmente saiu do bolso (não o que já era lucro reaplicado)
-    _valor_investido_proprio = max(_custo_total - _total_divs_geral, 0)
+    _valor_investido_proprio = max(_invest_liq - _total_divs_geral, 0)
 
     with st.container(key="row_dash_resumo"):
         c1, c2, c3 = st.columns([1, 1, 1])
@@ -2286,9 +2299,7 @@ with aba_dash:
                                          'ganho': g, 'label': _dt_v.strftime('%b/%y'), 'atual': False})
 
                 # mês atual com valores correntes (mesmos números dos cards acima)
-                _custo_pos_atual = float((_posicao['qtd_atual'] * _posicao['preco_medio']).sum()) \
-                    if not _posicao.empty else _custo_total
-                b, d, g = _decompor(total_geral, _custo_pos_atual, _total_divs_geral)
+                b, d, g = _decompor(total_geral, _invest_liq, _total_divs_geral)
                 vals_mensais.append({
                     'mes': pd.to_datetime(f"{mes_atual}-01"), 'total': total_geral,
                     'bolso': b, 'divs': d, 'ganho': g,
