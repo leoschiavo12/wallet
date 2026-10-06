@@ -289,30 +289,45 @@ def _yf_session():
     """sessão yfinance reutilizada — evita reconexão a cada chamada"""
     return yf
 
-def obter_precos_b3(tickers_lista):
-    tk_formatados = [f"{t.upper()}.SA" for t in tickers_lista]
-    try:
-        dados = _yf_session().download(tk_formatados, period="5d", progress=False, auto_adjust=True, timeout=7)
-        precos = {}
-        falhas = []
-        for t in tickers_lista:
+@st.cache_data(ttl=300, show_spinner=False)  # 5 min
+def _baixar_precos_b3(tickers_tupla):
+    """
+    cotação atual de cada ativo da B3 → (precos, falhas, momento da consulta).
+    1º fast_info.last_price (preço corrente do Yahoo, o mais fresco — o candle diário de
+       ETFs da B3 às vezes chega com 1–2 dias de atraso no Yahoo);
+    2º fallback: último fechamento do download diário de 5 dias.
+    Um ticker por vez (sem threads), mesmo cuidado de obter_variacao_90d.
+    """
+    precos, falhas = {}, []
+    diario = None
+    for t in tickers_tupla:
+        tk = f"{t.upper()}.SA"
+        v = 0.0
+        try:
+            v = float(yf.Ticker(tk).fast_info.last_price or 0)
+        except Exception:
+            v = 0.0
+        if not v or v <= 0 or pd.isna(v):
             try:
-                tk = f"{t.upper()}.SA"
-                if isinstance(dados.columns, pd.MultiIndex):
-                    serie = dados['Close'][tk].ffill()
-                else:
-                    serie = dados['Close'].ffill()
+                if diario is None:
+                    diario = yf.download([f"{x.upper()}.SA" for x in tickers_tupla], period="5d",
+                                         progress=False, auto_adjust=True, threads=False, timeout=10)
+                serie = diario['Close'][tk] if isinstance(diario.columns, pd.MultiIndex) else diario['Close']
                 v = float(serie.dropna().iloc[-1])
-                precos[t.upper()] = v if v > 0 else 0.0
-                if v <= 0: falhas.append(t)
-            except:
-                precos[t.upper()] = 0.0
-                falhas.append(t)
-        if falhas:
-            st.session_state['_precos_falha'] = falhas
-        return precos
-    except:
-        return {t.upper(): 0.0 for t in tickers_lista}
+            except Exception:
+                v = 0.0
+        precos[t.upper()] = v if v and v > 0 else 0.0
+        if precos[t.upper()] <= 0:
+            falhas.append(t)
+    momento = pd.Timestamp.now(tz="America/Sao_Paulo").strftime("%d/%m %H:%M")
+    return precos, falhas, momento
+
+def obter_precos_b3(tickers_lista):
+    precos, falhas, momento = _baixar_precos_b3(tuple(sorted(set(tickers_lista))))
+    if falhas:
+        st.session_state['_precos_falha'] = falhas
+    st.session_state['_precos_momento'] = momento
+    return dict(precos)
 
 # FIIs que mudaram de ticker na B3 — lançamentos antigos guardam o nome antigo,
 # mas o yfinance só reconhece o ticker atual. Usado por toda função que busca
@@ -852,7 +867,7 @@ def render_variacoes(key, variacoes, nota=None):
     if nota:
         st.caption(nota)
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=3600)  # 1h — o próprio Tesouro já publica com 1 dia de defasagem
 def obter_preco_renda_mais_cached():
     return obter_preco_renda_mais()
 
@@ -1704,7 +1719,7 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
 _versao_atual = st.session_state.get("_lanc_versao", 0)
 _cache_versao = st.session_state.get("_cache_versao", -1)
 
-if _versao_atual != _cache_versao or "_df_lanc_raw" not in st.session_state:
+if _versao_atual != _cache_versao or "_df_lanc_raw_cached" not in st.session_state:
     with st.spinner("carregando lançamentos..."):
         st.session_state["_df_lanc_raw_cached"] = ler_lancamentos()
         st.session_state["_cache_versao"] = _versao_atual
@@ -1720,7 +1735,7 @@ if "cfg_alvos" not in st.session_state:
 _cfg_alvos = st.session_state["cfg_alvos"]
 
 
-# preços atuais — cacheados por 1h via @st.cache_data em obter_precos_b3
+# preços atuais — cache de 5 min em _baixar_precos_b3 (botão "atualizar" força nova consulta)
 _todos_b3 = [r['ativo'] for _, r in _posicao.iterrows()
              if r['classe'] in ('ETF', 'FII') and r['ativo'] != 'BTC']
 precos = obter_precos_b3(_todos_b3)
@@ -1860,6 +1875,16 @@ with aba_dash:
             (_lucro_total / _valor_investido_proprio * 100) if _valor_investido_proprio > 0 else 0,
             label="lucro total"
         )
+
+    _ca, _cb = st.columns([4, 1], vertical_alignment="center")
+    _ca.caption(f"cotações de {st.session_state.get('_precos_momento', '—')}")
+    if _cb.button("atualizar", key="btn_atualizar_tudo", width="stretch"):
+        # limpa caches de dados e tudo que a sessão guardou do Sheets → recarrega do zero
+        st.cache_data.clear()
+        for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
+                   "_ativos_info", "_precos_momento", "_precos_falha"]:
+            st.session_state.pop(_k, None)
+        st.rerun()
 
     st.markdown('---')
 
