@@ -826,14 +826,14 @@ def _baixar_fatia_taxa_renda_mais(fatia_bytes):
             resp = requests.get(url, timeout=90)
 
         if resp.status_code not in (200, 206):
-            return pd.DataFrame(columns=['data_dt', 'taxa']), f'status {resp.status_code}'
+            return pd.DataFrame(columns=['data_dt', 'taxa', 'pu']), f'status {resp.status_code}'
 
         texto = resp.content.decode('latin1')
         linhas = texto.split('\n')
         cabecalho = 'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha'
         renda = [l for l in linhas if 'Renda' in l and '2069' in l and len(l) > 10]
         if not renda:
-            return pd.DataFrame(columns=['data_dt', 'taxa']), f'nao encontrado — {len(linhas)} linhas no trecho'
+            return pd.DataFrame(columns=['data_dt', 'taxa', 'pu']), f'nao encontrado — {len(linhas)} linhas no trecho'
 
         csv_str = cabecalho + '\n' + '\n'.join(renda)
         df = pd.read_csv(StringIO(csv_str), sep=';', decimal=',', thousands='.')
@@ -844,8 +844,9 @@ def _baixar_fatia_taxa_renda_mais(fatia_bytes):
             df['Data Vencimento'].str.contains('2069', na=False)
         )
         df_f = df[mask].dropna(subset=['Data Base', 'Taxa Compra Manha'])
-        df_f = df_f.rename(columns={'Data Base': 'data_dt', 'Taxa Compra Manha': 'taxa'})
-        return df_f[['data_dt', 'taxa']].reset_index(drop=True), None
+        df_f = df_f.rename(columns={'Data Base': 'data_dt', 'Taxa Compra Manha': 'taxa',
+                                    'PU Venda Manha': 'pu'})
+        return df_f[['data_dt', 'taxa', 'pu']].reset_index(drop=True), None
     except Exception as e:
         return pd.DataFrame(columns=['data_dt', 'taxa']), str(e)
 
@@ -1159,6 +1160,38 @@ def ler_precos_mensais():
     except:
         return pd.DataFrame(columns=PM_HEADERS)
 
+def pu_renda_fim_mes(df_hist, ultimo_dia):
+    """PU de venda (manhã) do Renda+ 2050 no último dia útil até ultimo_dia, ou None"""
+    if df_hist is None or df_hist.empty or 'pu' not in df_hist.columns:
+        return None
+    h = df_hist.dropna(subset=['pu'])
+    h = h[h['data_dt'] <= pd.Timestamp(ultimo_dia)]
+    if h.empty or (pd.Timestamp(ultimo_dia) - h['data_dt'].iloc[-1]).days > 10:
+        return None
+    return float(h['pu'].iloc[-1])
+
+def migrar_precos_renda_mtm(df_pm, df_hist):
+    """uma vez: troca o preço médio de compra do Renda+ nos meses gravados pelo PU de mercado"""
+    if df_pm is None or df_pm.empty or df_hist is None or df_hist.empty:
+        return df_pm, False
+    import calendar
+    df = df_pm.copy()
+    mudou = False
+    for i, r in df[df['ativo'] == 'Renda+ 2050'].iterrows():
+        ano, m = int(str(r['ano_mes'])[:4]), int(str(r['ano_mes'])[5:7])
+        pu = pu_renda_fim_mes(df_hist, pd.Timestamp(ano, m, calendar.monthrange(ano, m)[1]))
+        if pu and pu > 1:
+            df.at[i, 'preco_fechamento'] = round(pu, 4)
+            mudou = True
+    if mudou:
+        svc = get_sheets_service()
+        svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A:C").execute()
+        corpo = [PM_HEADERS] + [[str(x['ano_mes']), str(x['ativo']), float(x['preco_fechamento'])]
+                                for _, x in df.iterrows()]
+        svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A1",
+                            valueInputOption="RAW", body={"values": corpo}).execute()
+    return df, mudou
+
 def migrar_precos_mensais_sem_ajuste(df_pm):
     """
     executa uma vez (marca na aba metas): recalcula, com fechamento SEM ajuste, os preços
@@ -1442,31 +1475,34 @@ def salvar_renda_taxas(df_novo):
 
 # ── histórico de taxa de mercado do Renda+ 2050 (persistido, atualizado incrementalmente) ──
 SHEET_RENDA_MERCADO_TAB = "renda_mais_taxa_mercado"
-RENDA_MERCADO_HEADERS   = ["data", "taxa_compra_manha"]
+RENDA_MERCADO_HEADERS   = ["data", "taxa_compra_manha", "pu_venda_manha"]
 
 def ler_historico_taxa_mercado():
     """lê o histórico de taxa de mercado já salvo no Sheets — rápido, não bate no Tesouro Transparente"""
     try:
         svc = get_sheets_service()
-        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_MERCADO_TAB}!A:B").execute()
+        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_MERCADO_TAB}!A:C").execute()
         rows = res.get("values", [])
         if len(rows) <= 1:
-            return pd.DataFrame(columns=['data_dt', 'taxa'])
-        df = pd.DataFrame(rows[1:], columns=RENDA_MERCADO_HEADERS)
+            return pd.DataFrame(columns=['data_dt', 'taxa', 'pu'])
+        n = len(RENDA_MERCADO_HEADERS)
+        df = pd.DataFrame([(r + [''] * n)[:n] for r in rows[1:]], columns=RENDA_MERCADO_HEADERS)
         df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
         df['taxa']    = df['taxa_compra_manha'].apply(normalizar_numero)
-        return df.dropna(subset=['data_dt', 'taxa'])[['data_dt', 'taxa']].sort_values('data_dt').reset_index(drop=True)
+        df['pu']      = df['pu_venda_manha'].apply(lambda x: normalizar_numero(x) if str(x).strip() else None)
+        return df.dropna(subset=['data_dt', 'taxa'])[['data_dt', 'taxa', 'pu']].sort_values('data_dt').reset_index(drop=True)
     except Exception:
-        return pd.DataFrame(columns=['data_dt', 'taxa'])
+        return pd.DataFrame(columns=['data_dt', 'taxa', 'pu'])
 
 def salvar_historico_taxa_mercado(df_completo):
     """sobrescreve a aba inteira com a série completa e atualizada (cria a aba se não existir)"""
     try:
         svc = get_sheets_service()
         _garantir_aba_existe(svc, SHEET_RENDA_MERCADO_TAB, RENDA_MERCADO_HEADERS)
-        svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_MERCADO_TAB}!A:B").execute()
+        svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_MERCADO_TAB}!A:C").execute()
         linhas = [RENDA_MERCADO_HEADERS] + [
-            [r['data_dt'].strftime('%d/%m/%Y'), str(r['taxa']).replace('.', ',')]
+            [r['data_dt'].strftime('%d/%m/%Y'), str(r['taxa']).replace('.', ','),
+             (str(r['pu']).replace('.', ',') if pd.notna(r.get('pu')) else '')]
             for _, r in df_completo.iterrows()
         ]
         svc.values().update(
@@ -1560,7 +1596,15 @@ def atualizar_dividendos_mensais(df_lanc_json):
     ], ignore_index=True).sort_values('ano_mes').reset_index(drop=True)
 
 @st.cache_data(ttl=43200)  # 12h — evita rebater no Sheets/Tesouro Transparente a cada rerun
+@st.cache_data(ttl=4 * 86400, max_entries=10, show_spinner=False)
+def _historico_renda_janela(janela):
+    return _obter_historico_taxa_renda_mais()
+
 def obter_historico_taxa_renda_mais():
+    """histórico de taxa e PU do Renda+ — relido a cada 1h no pregão, congelado fora dele"""
+    return _historico_renda_janela(janela_mercado(60))
+
+def _obter_historico_taxa_renda_mais():
     """
     série histórica completa da taxa de mercado do Renda+ 2050, mantida permanentemente
     na aba renda_mais_taxa_mercado: na primeira vez (aba vazia) faz um backfill completo
@@ -1570,15 +1614,20 @@ def obter_historico_taxa_renda_mais():
     """
     df_armazenado = ler_historico_taxa_mercado()
 
-    # backfill completo só quando ainda não tem nada salvo; senão, incremento pequeno
-    fatia = 200_000_000 if df_armazenado.empty else 8_000_000
+    # backfill completo quando não tem nada salvo OU quando falta o PU (aba antiga, só com taxa);
+    # senão, incremento pequeno
+    _falta_pu = (not df_armazenado.empty) and ('pu' not in df_armazenado.columns
+                                               or df_armazenado['pu'].isna().any())
+    fatia = 200_000_000 if (df_armazenado.empty or _falta_pu) else 8_000_000
     df_novo, erro = _baixar_fatia_taxa_renda_mais(fatia)
 
     if df_novo.empty:
         return df_armazenado, erro
 
-    if df_armazenado.empty:
-        df_completo = df_novo
+    if df_armazenado.empty or _falta_pu:
+        _extra = df_armazenado[~df_armazenado['data_dt'].dt.date.isin(set(df_novo['data_dt'].dt.date))] \
+            if not df_armazenado.empty else df_armazenado
+        df_completo = pd.concat([df_novo, _extra], ignore_index=True) if not _extra.empty else df_novo
     else:
         datas_existentes = set(df_armazenado['data_dt'].dt.date)
         df_novo_filtrado = df_novo[~df_novo['data_dt'].dt.date.isin(datas_existentes)]
@@ -1843,6 +1892,10 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
 
     ALIAS_B3 = {'GALG11': 'GARE11'}
     TESOURO  = ['Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro SELIC 2031', 'Tesouro Prefixado 2032']
+    try:
+        _hist_renda_pm, _ = obter_historico_taxa_renda_mais()
+    except Exception:
+        _hist_renda_pm = None
     novos = []
 
     for mes in meses:
@@ -1898,6 +1951,8 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
                             v = float(btc_brl.iloc[-1])
                             if v > 1000: preco = v
                     except: pass
+            elif ativo == 'Renda+ 2050' and pu_renda_fim_mes(_hist_renda_pm, ultimo_dia):
+                preco = pu_renda_fim_mes(_hist_renda_pm, ultimo_dia)
             elif ativo in TESOURO:
                 comp = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'] == 'compra')]
                 comp_ate = comp[comp['data_dt'].dt.to_period('M').astype(str) <= mes]
@@ -2073,6 +2128,12 @@ if "_df_pm" not in st.session_state:
                 _df_pm_lido = migrar_precos_mensais_sem_ajuste(_df_pm_lido)
                 salvar_meta("precos_mensais_sem_ajuste", 1,
                             "preços mensais de FIIs/ETFs regravados sem ajuste de proventos")
+            if not st.session_state.get("_metas", {}).get("precos_mensais_renda_mtm"):
+                _hist_mig, _ = obter_historico_taxa_renda_mais()
+                _df_pm_lido, _ok_mig = migrar_precos_renda_mtm(_df_pm_lido, _hist_mig)
+                if _ok_mig:
+                    salvar_meta("precos_mensais_renda_mtm", 1,
+                                "Renda+ 2050 nos preços mensais pelo PU de mercado (não pelo custo)")
             _antes = len(_df_pm_lido)
             _df_pm_lido = popular_precos_mensais(_df_lanc_raw, _df_pm_lido)
             st.session_state["_df_pm"] = _df_pm_lido
