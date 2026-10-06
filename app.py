@@ -617,7 +617,47 @@ def obter_historico_btc_brl():
         hist, fonte = _buscar_historico_btc_brl()
     return hist, fonte
 
+def _preco_resgate_tesouro_direto(nome_titulo="Renda+ Aposentadoria Extra 2050"):
+    """
+    PU de RESGATE atual no site do Tesouro Direto (CSV 'rendimento-resgatar'), o mesmo
+    valor que aparece no app do Tesouro e na corretora. Atualiza ao longo do dia.
+    retorna o PU ou levanta exceção (o site às vezes bloqueia acesso automatizado).
+    """
+    import re
+    url = "https://www.tesourodireto.com.br/documents/d/guest/rendimento-resgatar-csv?download=true"
+    r = requests.get(url, timeout=12, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Accept": "text/csv,application/octet-stream,*/*",
+        "Referer": "https://www.tesourodireto.com.br/titulos/precos-e-taxas.htm"})
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}")
+    try:
+        texto = r.content.decode('utf-8')
+    except UnicodeDecodeError:
+        texto = r.content.decode('latin1')
+    for linha in texto.splitlines():
+        if 'renda' in linha.lower() and '2050' in linha:
+            for campo in linha.split(';'):
+                c = campo.replace('R$', '').strip()
+                if '%' in c:
+                    continue
+                if re.fullmatch(r"\d{1,3}(\.\d{3})*,\d{2}", c):
+                    pu = float(c.replace('.', '').replace(',', '.'))
+                    if pu > 1:
+                        return pu
+    raise RuntimeError("título não encontrado no CSV")
+
 def obter_preco_renda_mais():
+    # 1º preço de resgate atual no site do Tesouro Direto (o que o app do Tesouro/corretora mostra)
+    _erro_td = None
+    try:
+        _pu_td = _preco_resgate_tesouro_direto()
+        _ref = pd.Timestamp.now(tz="America/Sao_Paulo").strftime('%d/%m/%Y %H:%M')
+        return _pu_td, f"{_ref} (preço de resgate — Tesouro Direto)", None
+    except Exception as e:
+        _erro_td = str(e)[:60]
+    # 2º fallback: CSV do Tesouro Transparente — PU de venda da MANHÃ do último dia útil
     try:
         from io import StringIO
         url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
@@ -646,7 +686,7 @@ def obter_preco_renda_mais():
 
         # parsear com pandas para filtrar corretamente
         csv_str = cabecalho + '\n' + '\n'.join(renda)
-        df = pd.read_csv(StringIO(csv_str), sep=';', decimal=',')
+        df = pd.read_csv(StringIO(csv_str), sep=';', decimal=',', thousands='.')
         df['Data Base'] = pd.to_datetime(df['Data Base'], format='%d/%m/%Y', errors='coerce')
 
         # filtrar: titulo contem Renda, vencimento contem 2069
@@ -661,7 +701,8 @@ def obter_preco_renda_mais():
 
         pu    = float(df_f.iloc[0]['PU Venda Manha'])
         taxa  = float(df_f.iloc[0]['Taxa Compra Manha'])
-        dt    = df_f.iloc[0]['Data Base'].strftime('%d/%m/%Y')
+        dt    = (df_f.iloc[0]['Data Base'].strftime('%d/%m/%Y') +
+                 f" manhã (Tesouro Transparente; site do TD indisponível: {_erro_td})")
         return pu, dt, taxa
     except Exception as e:
         return None, str(e), None
@@ -698,7 +739,7 @@ def _baixar_fatia_taxa_renda_mais(fatia_bytes):
             return pd.DataFrame(columns=['data_dt', 'taxa']), f'nao encontrado — {len(linhas)} linhas no trecho'
 
         csv_str = cabecalho + '\n' + '\n'.join(renda)
-        df = pd.read_csv(StringIO(csv_str), sep=';', decimal=',')
+        df = pd.read_csv(StringIO(csv_str), sep=';', decimal=',', thousands='.')
         df['Data Base'] = pd.to_datetime(df['Data Base'], format='%d/%m/%Y', errors='coerce')
 
         mask = (
