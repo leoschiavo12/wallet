@@ -2321,8 +2321,8 @@ with aba_dash:
                 _meta  = (int(df_mensal['total'].max() // 10000) + 1) * 10000
                 _ticks = list(range(0, int(_meta) + 1, 10000))
 
-                # linha suave com preenchimento em degradê; pontos só em janeiro de cada ano
-                # e no mês atual (marcos), com haste vertical até o eixo — hover em todos os meses
+                # linha suave com preenchimento em degradê; eixo rotulado em janeiro de cada ano e
+                # no mês atual (marcos) — hover em todos os meses
                 _marcos = df_mensal[(df_mensal['mes'].dt.month == 1) | (df_mensal['atual'])]
                 _cor_linha = "#42A5F5"
 
@@ -2337,14 +2337,8 @@ with aba_dash:
                     hovertemplate="%{customdata}<extra></extra>",
                     customdata=df_mensal['hover'].tolist(),
                 ))
-                fig_mensal.add_trace(go.Scatter(
-                    x=_marcos['mes'], y=_marcos['total'],
-                    mode="markers",
-                    marker=dict(size=11, color="#9FE7C9", line=dict(width=2.5, color="#0E1117")),
-                    hoverinfo="skip",
-                    cliponaxis=False,          # ponto da borda aparece inteiro sem precisar de folga no eixo
-                ))
-                for _, _m in _marcos.iterrows():
+                # hastes verticais só em janeiro de cada ano (sem pontos na linha)
+                for _, _m in _marcos[_marcos['mes'].dt.month == 1].iterrows():
                     fig_mensal.add_shape(type="line", x0=_m['mes'], x1=_m['mes'], y0=0, y1=_m['total'],
                                          line=dict(color="rgba(255,255,255,0.25)", width=1), layer="below")
                 fig_mensal.update_layout(
