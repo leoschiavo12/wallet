@@ -648,13 +648,39 @@ def _preco_resgate_tesouro_direto(nome_titulo="Renda+ Aposentadoria Extra 2050")
                         return pu
     raise RuntimeError("título não encontrado no CSV")
 
+def _taxa_compra_tesouro_direto():
+    """taxa de COMPRA atual do Renda+ 2050 (IPCA + x%) no CSV 'rendimento-investir' do Tesouro Direto"""
+    import re
+    url = "https://www.tesourodireto.com.br/documents/d/guest/rendimento-investir-csv?download=true"
+    r = requests.get(url, timeout=12, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Accept": "text/csv,application/octet-stream,*/*",
+        "Referer": "https://www.tesourodireto.com.br/titulos/precos-e-taxas.htm"})
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}")
+    try:
+        texto = r.content.decode('utf-8')
+    except UnicodeDecodeError:
+        texto = r.content.decode('latin1')
+    for linha in texto.splitlines():
+        if 'renda' in linha.lower() and '2050' in linha:
+            m = re.search(r"(\d{1,2},\d{1,2})\s*%", linha)
+            if m:
+                return float(m.group(1).replace(',', '.'))
+    raise RuntimeError("taxa não encontrada no CSV")
+
 def obter_preco_renda_mais():
     # 1º preço de resgate atual no site do Tesouro Direto (o que o app do Tesouro/corretora mostra)
     _erro_td = None
     try:
         _pu_td = _preco_resgate_tesouro_direto()
         _ref = pd.Timestamp.now(tz="America/Sao_Paulo").strftime('%d/%m/%Y %H:%M')
-        return _pu_td, f"{_ref} (preço de resgate — Tesouro Direto)", None
+        try:
+            _taxa_td = _taxa_compra_tesouro_direto()
+        except Exception:
+            _taxa_td = None
+        return _pu_td, f"{_ref} (preço de resgate — Tesouro Direto)", _taxa_td
     except Exception as e:
         _erro_td = str(e)[:60]
     # 2º fallback: CSV do Tesouro Transparente — PU de venda da MANHÃ do último dia útil
@@ -1790,6 +1816,8 @@ if _resultado_renda and _resultado_renda[0]:
     st.session_state['data_renda_auto']  = _resultado_renda[1]
     if len(_resultado_renda) > 2 and _resultado_renda[2]:
         st.session_state['taxa_renda_auto'] = _resultado_renda[2]
+    else:
+        st.session_state.pop('taxa_renda_auto', None)   # não mostrar taxa de outra fonte/dia
 else:
     precos['Renda+ 2050'] = preco_td_de_secrets('Renda+ 2050', 490.02)
     if _resultado_renda:
@@ -2522,22 +2550,38 @@ with aba_detalhe:
                 r1c2.metric(f"total  ·  ({_qtd_fmt})", abreviar_rs(total_atual))
                 r1c3.metric("~holding", fmt_holding(_td_holding))
 
+                # taxa de compra atual (só o Renda+ tem fonte automática)
+                _taxa_td_card = st.session_state.get('taxa_renda_auto') if ativo == 'Renda+ 2050' else None
                 r2c1, r2c2, r2c3 = st.columns(3)
-                r2c2.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
-                if valorizacao is not None and valorizacao_pct is not None:
-                    card_valorizacao(r2c3, valorizacao, valorizacao_pct)
-                else:
-                    r2c3.metric("variação", "—")
+                r2c2.metric("taxa (compra)", f"IPCA + {fmt_pct(_taxa_td_card, 2)}" if _taxa_td_card else "—")
+                r2c3.metric(f"preço  ·  (~{_pm_fmt})", formatar_brl(preco_atual))
 
-            if 'preco_renda_auto' in st.session_state:
-                st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
-            elif 'preco_renda_erro' in st.session_state:
-                st.caption(f"preço manual (secrets) — API: {st.session_state.get('preco_renda_erro','')}")
+                r3c1, r3c2, r3c3 = st.columns(3)
+                if valorizacao is not None and valorizacao_pct is not None:
+                    card_valorizacao(r3c3, valorizacao, valorizacao_pct)
+                else:
+                    r3c3.metric("variação", "—")
+
+            if ativo == 'Renda+ 2050':
+                if 'preco_renda_auto' in st.session_state:
+                    st.caption(f"preço obtido automaticamente — referência: {st.session_state.get('data_renda_auto','')}")
+                elif 'preco_renda_erro' in st.session_state:
+                    st.caption(f"preço manual (secrets) — API: {st.session_state.get('preco_renda_erro','')}")
 
             if ativo == 'Renda+ 2050':
                 # taxa de cada aporte = taxa de mercado no dia da compra (lançamentos),
                 # sem upload manual; datas que já estavam no extrato antigo usam a taxa exata dele
                 _df_hist_taxa, _erro_hist_taxa = obter_historico_taxa_renda_mais()
+                _taxa_hoje = st.session_state.get('taxa_renda_auto')
+                if (_taxa_hoje and 'Tesouro Direto' in str(st.session_state.get('data_renda_auto', ''))
+                        and not _df_hist_taxa.empty):
+                    _hoje_tx = pd.Timestamp.today().normalize()
+                    _df_hist_taxa = _df_hist_taxa.copy()
+                    _df_hist_taxa['data_dt'] = pd.to_datetime(_df_hist_taxa['data_dt'])
+                    _df_hist_taxa = pd.concat([
+                        _df_hist_taxa[_df_hist_taxa['data_dt'] < _hoje_tx],
+                        pd.DataFrame({'data_dt': [_hoje_tx], 'taxa': [float(_taxa_hoje)]})
+                    ], ignore_index=True)
                 _df_rt = taxas_aportes_renda_mais(_df_lanc_raw, _df_hist_taxa, ler_renda_taxas())
                 _taxa_media_chart = calcular_taxa_media_ponderada_renda(_df_rt)
 
