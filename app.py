@@ -2256,7 +2256,7 @@ with aba_dash:
 
                 fig_mensal = go.Figure()
                 for _col, _nome, _cor in [("bolso",  "saiu do bolso", "#1565C0"),
-                                          ("rendeu", "dividendos + ganho de capital", "#BBDEFB")]:
+                                          ("rendeu", "dividendos + ganho de capital", "#42A5F5")]:
                     fig_mensal.add_trace(go.Bar(
                         x=df_mensal['mes'], y=df_mensal[_col], name=_nome,
                         marker_color=_cor,
