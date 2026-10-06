@@ -2311,18 +2311,14 @@ with aba_dash:
                 df_mensal['rendeu'] = df_mensal['divs'] + df_mensal['ganho']
                 df_mensal['hover'] = df_mensal.apply(
                     lambda r: f"<b>{r['label']}</b>" + (" <i>(atual)</i>" if r['atual'] else "")
-                              + f"<br>patrimônio: {formatar_brl(r['total'])}"
-                              + f"<br>saiu do bolso: {formatar_brl(r['bolso'])}"
-                              + f"<br>dividendos reinvestidos: {formatar_brl(r['divs'])}"
-                              + f"<br>ganho de capital: "
-                              + (f"({formatar_brl(abs(r['ganho']))})" if r['ganho'] < 0 else formatar_brl(r['ganho'])),
+                              + f"<br>{formatar_brl(r['total'])}",
                     axis=1)
 
                 # eixo: próxima meta (múltiplo de 10k) acima do maior patrimônio
                 _meta  = (int(df_mensal['total'].max() // 10000) + 1) * 10000
                 _ticks = list(range(0, int(_meta) + 1, 10000))
 
-                # barra única = patrimônio; o hover mostra a composição (bolso/dividendos/ganho)
+                # barra única = patrimônio do mês
                 fig_mensal = go.Figure(go.Bar(
                     x=df_mensal['mes'], y=df_mensal['total'],
                     marker_color="#42A5F5",
