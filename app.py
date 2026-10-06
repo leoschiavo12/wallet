@@ -2327,8 +2327,9 @@ with aba_dash:
                 _y_min = min(_neg * 1.4, 0)                          # folga só do tamanho necessário
 
                 fig_mensal = go.Figure()
-                for _col, _nome, _cor in [("bolso",  "saiu do bolso", "#1565C0"),
-                                          ("rendeu", "dividendos + ganho de capital", "#42A5F5")]:
+                # mesmas cores do gráfico de rosca (as duas mais escuras de Blues_r)
+                for _col, _nome, _cor in [("bolso",  "saiu do bolso", px.colors.sequential.Blues_r[0]),
+                                          ("rendeu", "dividendos + ganho de capital", px.colors.sequential.Blues_r[1])]:
                     fig_mensal.add_trace(go.Bar(
                         x=df_mensal['mes'], y=df_mensal[_col], name=_nome,
                         marker_color=_cor,
