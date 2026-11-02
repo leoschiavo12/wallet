@@ -382,7 +382,7 @@ def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
     # normalizar nomes de colunas
     df_lanc.columns = [c.title() for c in df_lanc.columns]
     df_lanc['data_dt'] = pd.to_datetime(df_lanc['Data'], format='%d/%m/%Y', errors='coerce')
-    df_lanc['sinal']   = df_lanc['Tipo'].str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
+    df_lanc['sinal']   = df_lanc['Tipo'].str.lower().map({'compra': 1, 'venda': -1}).fillna(0).astype(float)
 
     total    = 0.0
     detalhes = {}
@@ -499,7 +499,7 @@ def calcular_dividendos_historicos(df_lanc_json):
     if df.empty: return {}, 0.0
 
     df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
-    df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
+    df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0).astype(float)
 
     resultado = {}
     total_geral_divs = 0.0
@@ -594,7 +594,7 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
         df = pd.DataFrame(df_lanc_json)
         if not df.empty:
             df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
-            df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0)
+            df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0).astype(float)
             _manuais = df[(df['tipo'].str.strip().str.lower() == 'dividendo') & (df['data_dt'] >= janela_ini)]
             for ativo in _manuais['ativo'].unique():
                 _soma_por_cota = 0.0
@@ -1121,7 +1121,7 @@ def calcular_posicao(df_lanc):
 
     df = df_lanc.copy()
     df['tipo'] = df['tipo'].str.strip().str.lower()
-    df['sinal'] = df['tipo'].map({'compra': 1, 'venda': -1}).fillna(0)
+    df['sinal'] = df['tipo'].map({'compra': 1, 'venda': -1}).fillna(0).astype(float)
 
     ativos = df['ativo'].unique()
     rows = []
@@ -1800,7 +1800,8 @@ def ler_lancamentos(_versao=0):
         padded = [(r + [''] * n)[:n] for r in rows[1:]]
         df_l = pd.DataFrame(padded, columns=HEADERS)
         for col in ["quantidade", "preco_unitario", "total"]:
-            df_l[col] = df_l[col].apply(normalizar_numero)
+            # astype(float): em série vazia o apply mantém o dtype texto (pandas 3)
+            df_l[col] = pd.to_numeric(df_l[col].apply(normalizar_numero), errors="coerce").astype(float)
             df_l[col] = pd.to_numeric(df_l[col], errors="coerce")
         return df_l
     except Exception as e:
@@ -2441,7 +2442,7 @@ with aba_detalhe:
                     (pd.to_datetime(_df_lanc_raw['data'], format='%d/%m/%Y', errors='coerce')
                      .dt.normalize() <= _ultimo_dia_ref)
                 ]
-                _sinal_ref = _ops_ref['tipo'].map({'compra': 1, 'venda': -1}).fillna(0)
+                _sinal_ref = _ops_ref['tipo'].map({'compra': 1, 'venda': -1}).fillna(0).astype(float)
                 _qtd_ref = (_ops_ref['quantidade'] * _sinal_ref).sum()
                 if _qtd_ref > 0:
                     _total_fii_base += _qtd_ref * float(_pm_row_g['preco_fechamento'])
@@ -3131,7 +3132,7 @@ with aba_lanc:
         df_lanc = ler_lancamentos(_versao=_versao)
         if not df_lanc.empty:
             df_lanc["data_dt"] = pd.to_datetime(df_lanc["data"], format="%d/%m/%Y", errors="coerce")
-            df_lanc["sinal"]   = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+            df_lanc["sinal"]   = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0).astype(float)
             df_lanc["valor"]   = df_lanc["total"] * df_lanc["sinal"]
 
         meses_pt = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
@@ -3146,7 +3147,7 @@ with aba_lanc:
                 (df_lanc["data_dt"].dt.month == mes_atual) &
                 (df_lanc["data_dt"].dt.year  == ano_atual)
             ].copy()
-            df_mes["sinal_m"] = df_mes["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+            df_mes["sinal_m"] = df_mes["tipo"].map({"compra": 1, "venda": -1}).fillna(0).astype(float)
             aporte_mes = (df_mes["total"] * df_mes["sinal_m"]).sum()
 
             _meses = []
@@ -3156,7 +3157,7 @@ with aba_lanc:
                     (df_lanc["data_dt"].dt.month == ref.month) &
                     (df_lanc["data_dt"].dt.year  == ref.year)
                 ].copy()
-                df_ref["sinal_r"] = df_ref["tipo"].map({"compra": 1, "venda": -1}).fillna(0)
+                df_ref["sinal_r"] = df_ref["tipo"].map({"compra": 1, "venda": -1}).fillna(0).astype(float)
                 _meses.append((df_ref["total"] * df_ref["sinal_r"]).sum())
             media_6m = sum(_meses) / 6
         else:
