@@ -22,7 +22,19 @@ st.markdown("""
         [data-testid="stMetricDelta"] { display: none !important; }
 
         /* ── aba configurações: campos e botões compactos, linhas em grade ───── */
-        .st-key-cfg_area { max-width: 560px; }
+        /* layout alvos | metas: lado a lado no computador, empilhado no celular */
+        @media (max-width: 768px) {
+            .st-key-cfg_layout div[data-testid="stColumn"],
+            .st-key-cfg_layout div[data-testid="column"] {
+                width: 100% !important; min-width: 100% !important; flex: 1 1 100% !important;
+            }
+            .st-key-cfg_layout > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) {
+                margin-top: 1.2rem !important;
+            }
+        }
+        .st-key-cfg_metas_box {
+            padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
+        }
         .st-key-cfg_area [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
         .st-key-cfg_area [data-testid="stMarkdownContainer"]:has(> p[class^="cfg-"]) { margin-bottom: 0 !important; }
         .st-key-cfg_area [data-baseweb="input"],
@@ -3747,7 +3759,11 @@ with aba_config:
                       "pos" if abs(_soma_total_r - 100) < 0.01 else "neg")
         st.markdown("---")
 
+    _cfg_lay = st.container(key="cfg_layout")
+    col_alvos, col_metas = _cfg_lay.columns([3, 2], gap="large")
+
     # ── alvos de alocação ────────────────────────────────────────────────────
+  with col_alvos:
     _md(st, "cfg-sec", "alvos de alocação")
     _md(st, "cfg-nota", "% da carteira · a soma dos alvos precisa fechar em 100%")
 
@@ -3779,7 +3795,7 @@ with aba_config:
                 _inp_cri[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
 
         st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
-        _salvar = st.form_submit_button("salvar alvos", type="primary")
+        _salvar = st.form_submit_button("salvar", type="primary")
         if _salvar:
             _cfg_nova = {}
             _ok = True
@@ -3817,18 +3833,19 @@ with aba_config:
                         st.rerun(scope="app")
 
     # ── metas de longo prazo ─────────────────────────────────────────────────
-    st.markdown("---")
+  with col_metas:
     _md(st, "cfg-sec", "metas")
+    _md(st, "cfg-nota", "acompanhadas nos cards da aba detalhe")
     if "_metas" not in st.session_state:
         st.session_state["_metas"] = ler_metas()
-    with st.container(key="cfgrow_meta"):
+    with st.container(key="cfg_metas_box", border=True), st.container(key="cfgrow_meta"):
         m0, m1, m2 = st.columns(3, vertical_alignment="center")
         _md(m0, "cfg-ativo-quebra", "títulos de Renda+ 2050 até dez/45")
         _meta_str = m1.text_input(
             "meta Renda+", label_visibility="collapsed",
             value=fmt_num(st.session_state["_metas"].get("renda_2050_titulos_dez2045", 450), 2),
             key="meta_renda_2045_input")
-        _salvar_meta = m2.button("salvar", key="btn_salvar_meta")
+        _salvar_meta = m2.button("salvar", key="btn_salvar_meta", type="primary")
     if _salvar_meta:
         try:
             _v_meta = float(_meta_str.replace('.', '').replace(',', '.'))
