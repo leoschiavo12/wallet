@@ -4008,15 +4008,11 @@ with aba_pj:
     _mes_atual_pj = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
     _rd_ts = _mes_ano(_par.get("cartao_real_desde"))
     _real_desde = _rd_ts.strftime("%Y-%m") if _rd_ts is not None else "0000-00"
-    if _rd_ts is None:
-        st.warning("cartão não configurado: preencha **cartão · controle real desde** e "
-                   "**cartão · média antes do controle** em configurações › parâmetros PJ/PF e salve. "
-                   "Sem isso a tabela *fatura do cartão* não aparece e os meses sem lançamento no "
-                   "Controle de Fatura entram como R$ 0.")
     def _cartao(a):
+        # valor informado em 'fatura do cartão' sempre prevalece nos meses já fechados
+        if a in _cart_manual and a < _mes_atual_pj:
+            return float(_cart_manual[a]), "informado"
         if a < _real_desde:
-            if a in _cart_manual:
-                return float(_cart_manual[a]), "informado"
             return float(_par.get("cartao_estimado") or 0.0), "estimado"
         if a < _mes_atual_pj:
             return float(_cart_real.get(a, 0.0)), "real"
@@ -4063,11 +4059,9 @@ with aba_pj:
     if _cart_erro:
         _cap_pj(f"cartão: não foi possível ler o Controle de Fatura ({_cart_erro}) — considerado R$0.")
     else:
-        _rd = _par.get("cartao_real_desde", "")
-        _cap_pj(f"cartão: valor informado em 'fatura do cartão' (ou estimativa de "
-                f"{formatar_brl(_par.get('cartao_estimado') or 0)}) até antes de "
-                   f"{_rd}; real (Controle de Fatura) a partir daí, com o mês atual parcial; meses futuros "
-                   f"previstos pelo limite mensal de lá ({formatar_brl(_cart_lim or 0)}).")
+        _cap_pj("cartão: meses já fechados usam o valor da aba pf_cartao da planilha; sem valor lá, "
+                "o total do Controle de Fatura (ou a estimativa, antes do controle). mês atual "
+                f"parcial; meses futuros previstos pelo limite mensal ({formatar_brl(_cart_lim or 0)}).")
 
     st.markdown("---")
 
@@ -4128,35 +4122,6 @@ with aba_pj:
                 st.success("faturamento salvo.")
                 st.rerun(scope="app")
 
-        # ── fatura do cartão (meses antes do controle real) ─────────────────
-        _meses_cart = [k for k in _meses_ativ if k < _real_desde]
-        if _meses_cart:
-            st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
-            st.markdown("<p class='cfg-sec'>fatura do cartão</p>", unsafe_allow_html=True)
-            st.markdown(f"<p class='cfg-nota'>por mês dos gastos — só até antes de "
-                        f"{_rot(_real_desde)}; depois disso vem do Controle de Fatura. "
-                        f"meses não informados usam a estimativa ({formatar_brl(_par.get('cartao_estimado') or 0)})</p>",
-                        unsafe_allow_html=True)
-            with st.form(f"form_pf_cartao_{_ano}", border=True):
-                _df_c = pd.DataFrame({"mês": [_rot(k) for k in _meses_cart],
-                                      "fatura": [float(_cart_manual.get(k, _par.get("cartao_estimado") or 0.0))
-                                                 for k in _meses_cart]})
-                _df_c_ret = st.data_editor(
-                    _df_c, hide_index=True, width="stretch", num_rows="fixed", height="content",
-                    key=f"pf_cartao_editor_{_ano}",
-                    column_config={
-                        "mês": st.column_config.TextColumn("mês", disabled=True),
-                        "fatura": st.column_config.NumberColumn("fatura", min_value=0.0, step=0.01,
-                                                                format="localized"),
-                    })
-                if st.form_submit_button("salvar", type="primary"):
-                    # igual à estimativa (ou vazio) = não informado: o mês segue a estimativa
-                    _est_c = float(_par.get("cartao_estimado") or 0.0)
-                    _novos_c = {k: (None if pd.isna(v) or abs(float(v) - _est_c) < 0.005 else float(v))
-                                for k, v in zip(_meses_cart, _df_c_ret["fatura"])}
-                    salvar_pf_cartao(_novos_c)
-                    st.success("fatura salva.")
-                    st.rerun(scope="app")
 
     # ── composição de um mês ─────────────────────────────────────────────────
     with col_comp:
