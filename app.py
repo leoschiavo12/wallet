@@ -3917,15 +3917,17 @@ with aba_pj:
 
     _meses = [f"{_ano}-{m:02d}" for m in range(1, 13)]
     _fat_mes = {k: float(_fat_salvo.get(k, _par["faturamento_minimo"])) for k in _meses}
-    # cartão: meses passados = real (Controle de Fatura); mês atual e futuros = previsão pelo
-    # limite mensal de lá (ou o real, se já tiver passado do limite)
+    # cartão: meses passados = real; mês atual = o que já foi lançado até agora (parcial);
+    # meses futuros = previsão pelo limite mensal do Controle de Fatura
     _cart_real, _cart_lim, _cart_erro = ler_cartao_mensal()
     _mes_atual_pj = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
     def _cartao(k):
         real = float(_cart_real.get(k, 0.0))
         if k < _mes_atual_pj:
             return real, "real"
-        return max(real, float(_cart_lim or 0.0)), ("previsto" if _cart_lim else "parcial")
+        if k == _mes_atual_pj:
+            return real, "parcial"
+        return float(_cart_lim or 0.0), "previsto"
     _cart = {k: _cartao(k) for k in _meses}
     _calc = {k: calcular_pj_mes(_fat_mes[k], _par, k, _cart[k][0]) for k in _meses}
     _soma = lambda campo: sum(c[campo] for c in _calc.values())
@@ -3961,8 +3963,8 @@ with aba_pj:
     if _cart_erro:
         st.caption(f"cartão: não foi possível ler o Controle de Fatura ({_cart_erro}) — considerado R$0.")
     elif _cart_lim:
-        st.caption(f"cartão: real até o mês passado (Controle de Fatura); mês atual e futuros previstos pelo "
-                   f"limite mensal de lá ({formatar_brl(_cart_lim)}).")
+        st.caption(f"cartão: real até o mês atual (parcial, conforme o Controle de Fatura); meses futuros "
+                   f"previstos pelo limite mensal de lá ({formatar_brl(_cart_lim)}).")
 
     st.markdown("---")
 
