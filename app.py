@@ -24,33 +24,33 @@ st.markdown("""
         /* ── aba configurações: campos e botões compactos, linhas em grade ───── */
         /* layout alvos | metas: lado a lado no computador, empilhado no celular */
         @media (max-width: 768px) {
-            :is(.st-key-cfg_layout, .st-key-pj_layout) div[data-testid="stColumn"],
-            :is(.st-key-cfg_layout, .st-key-pj_layout) div[data-testid="column"] {
+            :is(.st-key-cfg_layout, .st-key-pj_layout, .st-key-cfg_pj_layout) div[data-testid="stColumn"],
+            :is(.st-key-cfg_layout, .st-key-pj_layout, .st-key-cfg_pj_layout) div[data-testid="column"] {
                 width: 100% !important; min-width: 100% !important; flex: 1 1 100% !important;
             }
-            :is(.st-key-cfg_layout, .st-key-pj_layout) > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) {
+            :is(.st-key-cfg_layout, .st-key-pj_layout, .st-key-cfg_pj_layout) > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) {
                 margin-top: 1.2rem !important;
             }
         }
         :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box) {
             padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
         }
-        :is(.st-key-cfg_area, .st-key-pj_area) [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
-        :is(.st-key-cfg_area, .st-key-pj_area) [data-testid="stMarkdownContainer"]:has(> p[class^="cfg-"]) { margin-bottom: 0 !important; }
-        :is(.st-key-cfg_area, .st-key-pj_area) [data-baseweb="input"],
-        :is(.st-key-cfg_area, .st-key-pj_area) [data-baseweb="base-input"] {
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-testid="stMarkdownContainer"]:has(> p[class^="cfg-"]) { margin-bottom: 0 !important; }
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-baseweb="input"],
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-baseweb="base-input"] {
             min-height: 2rem !important; height: 2rem !important;
         }
-        :is(.st-key-cfg_area, .st-key-pj_area) [data-testid="stTextInput"] input {
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-testid="stTextInput"] input {
             padding: 0.15rem 0.4rem !important;
             font-size: 0.85rem !important;
             text-align: center;
         }
-        :is(.st-key-cfg_area, .st-key-pj_area) button {
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) button {
             min-height: 2rem !important; padding: 0.15rem 1rem !important;
         }
-        :is(.st-key-cfg_area, .st-key-pj_area) button p { font-size: 0.85rem !important; }
-        :is(.st-key-cfg_area, .st-key-pj_area) [data-testid="stForm"] {
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) button p { font-size: 0.85rem !important; }
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-testid="stForm"] {
             padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
         }
         .cfg-sec   { font-size: 0.95rem; font-weight: 600; margin: 0.4rem 0 0 0; }
@@ -70,15 +70,15 @@ st.markdown("""
         .pj-tab tr.pj-esp td { border-bottom: none !important; height: 0.6rem; padding: 0; }
         .cfg-nota  { font-size: 0.75rem; color: rgba(250,250,250,0.5); margin: 0; }
         /* linhas da grade (rótulo + 3 campos, ou rótulo + campo + botão): nunca quebram */
-        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] [data-testid="stHorizontalBlock"] {
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [class*="st-key-cfgrow_"] [data-testid="stHorizontalBlock"] {
             flex-wrap: nowrap !important; gap: 0.4rem !important; align-items: center !important;
         }
-        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] div[data-testid="stColumn"],
-        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] div[data-testid="column"] {
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [class*="st-key-cfgrow_"] div[data-testid="stColumn"],
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [class*="st-key-cfgrow_"] div[data-testid="column"] {
             min-width: 0 !important; width: auto !important; flex: 1 1 0 !important;
         }
-        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] div[data-testid="stColumn"]:first-child,
-        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] div[data-testid="column"]:first-child {
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [class*="st-key-cfgrow_"] div[data-testid="stColumn"]:first-child,
+        :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [class*="st-key-cfgrow_"] div[data-testid="column"]:first-child {
             flex: 1.5 1 0 !important;
         }
         /* resumo por classe: 5 cards numa linha */
@@ -1422,6 +1422,8 @@ PJ_PARAMS = [
 ]
 
 PJ_PARAMS_TEXTO = {k for k, _, _, cs in PJ_PARAMS if cs is None}
+# fixos: ficam só na planilha (aba pj_parametros), fora da tela de configurações
+PJ_PARAMS_OCULTOS = {"fies", "fies_total", "fies_fim", "fies_dia"}
 
 # parâmetros que mudam com o tempo e precisam guardar os valores antigos (aba pj_parametros_hist:
 # chave | desde (aaaa-mm) | valor). cada mês usa o último valor com desde <= mês.
@@ -4092,6 +4094,70 @@ with aba_pj:
     _soma = lambda campo: sum(c[campo] for c in _calc.values())   # soma pelos meses de recebimento
     _neg  = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
 
+    _lay_pj = st.container(key="pj_layout")
+    col_comp, col_fies = _lay_pj.columns([1, 1], gap="large")
+
+    # ── composição de um mês ─────────────────────────────────────────────────
+    with col_comp:
+        st.markdown("<p class='cfg-sec'>composição do mês</p>", unsafe_allow_html=True)
+        st.markdown("<p class='cfg-nota'>mês de recebimento</p>", unsafe_allow_html=True)
+        _idx_padrao = (_hoje_pj.month - 1) if _ano == _hoje_pj.year else 0
+        _mes_sel = st.selectbox("mês", _meses, index=_idx_padrao, label_visibility="collapsed",
+                                format_func=_rot, key="pj_mes_sel")
+        c = _calc[_mes_sel]
+        _linhas = [
+            ("", f"faturamento de {_rot(_comp[_mes_sel])}", formatar_brl(_fat_de(_comp[_mes_sel]))),
+        ] + ([("", f"(+) extra de {_rot(_mes_sel)} (recebido no mês)", formatar_brl(_extra_de(_mes_sel)))]
+             if _extra_de(_mes_sel) else []) + [
+            ("", "(−) previdência", formatar_brl(c["prev"])),
+            ("", (f"(−) DAS (notas de {_rot(_comp[_mes_sel])})" if _das_seg else "(−) DAS (retido no recebimento)"),
+             formatar_brl(c["das"])),
+            ("", "(−) contador + taxas", formatar_brl(c["contador"])),
+        ]
+        if c["taxa"] > 0:
+            _linhas.append(("", "(−) taxa prefeitura", formatar_brl(c["taxa"])))
+        _linhas += [
+            ("", "(−) pró-labore bruto", formatar_brl(c["pro_labore"])),
+            ("pj-tot", "lucros distribuídos", _neg(c["lucros"])),
+            ("pj-esp", "", ""),
+            ("", "pró-labore líquido", formatar_brl(c["pl_liq"])),
+            ("pj-sub", f"INSS retido (DARF): {formatar_brl(c['inss'])}", ""),
+            ("", "(+) lucros distribuídos", _neg(c["lucros"])),
+            ("pj-tot", "receita PF", _neg(c["receita_pf"])),
+            ("pj-esp", "", ""),
+            ("", "(−) FIES (débito BB)", formatar_brl(c["fies"])),
+            ("pj-sub", f"no nubank: {_neg(c['nubank'])}", ""),
+            ("", f"(−) fatura de {_rot(_comp[_mes_sel])} ({_cart[_mes_sel][1]})", formatar_brl(c["cartao"])),
+            ("pj-tot", "sobra para investir", _neg(c["sobra"])),
+        ]
+        _html = "<table class='pj-tab'>" + "".join(
+            f"<tr class='{cl}'><td>{a}</td><td>{b}</td></tr>" for cl, a, b in _linhas) + "</table>"
+        with st.container(key="pj_comp_box", border=True):
+            st.markdown(_html, unsafe_allow_html=True)
+        if c["lucros"] < 0:
+            st.warning("faturamento abaixo dos custos fixos — não sobra lucro para distribuir neste mês.")
+
+    with col_fies:
+        # ── dívida: FIES ─────────────────────────────────────────────────────
+        _fs = fies_status(_par)
+        if _fs and _fs["total"]:
+            st.markdown("<p class='cfg-sec'>FIES</p>", unsafe_allow_html=True)
+            with st.container(key="pj_fies_box", border=True):
+                st.progress(_fs["pagas"] / _fs["total"],
+                            text=f"{_fs['pagas']} de {_fs['total']} parcelas pagas · faltam {_fs['restantes']}")
+                _fl = [
+                    ("", "saldo devedor (nominal)", formatar_brl(_fs["saldo"])),
+                    ("", "parcela", formatar_brl(_par["fies"])),
+                    ("", "próximo débito",
+                     _fs["prox"].strftime("%d/%m/%Y") if _fs["prox"] is not None else "—"),
+                    ("", "última parcela", f"{_MES3[_fs['fim'].month - 1]}/{_fs['fim'].year}"),
+                ]
+                st.markdown("<table class='pj-tab'>" + "".join(
+                    f"<tr><td>{a}</td><td>{b}</td></tr>" for _, a, b in _fl) + "</table>",
+                    unsafe_allow_html=True)
+
+    st.markdown("---")
+
     # ── resumo do ano ────────────────────────────────────────────────────────
     with st.container(key="row_all_pj_resumo"):
         a1, a2, a3 = st.columns(3)
@@ -4158,16 +4224,174 @@ with aba_pj:
     _cap_pj("receita PF por mês de recebimento · barras mais escuras: previsão "
                "(mês futuro ou faturamento ainda não informado)")
 
-    st.markdown("---")
 
-    _lay_pj = st.container(key="pj_layout")
-    col_fat, col_comp = _lay_pj.columns([1, 1], gap="large")
+# ── Aba configurações ─────────────────────────────────────────────────────────
+with aba_config:
+  _sub_cart, _sub_pj = st.tabs(["carteira", "PJ/PF"])
+  with _sub_cart:
+    with st.container(key="cfg_area"):
+      _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
+      _fiis_cfg   = [a for a in _ativos_cfg if _classe_de.get(a) == 'FII']
+      _etfs_cfg   = [a for a in _ativos_cfg if _classe_de.get(a) == 'ETF']
+      _td_cfg     = [a for a in _ativos_cfg if a in ['Renda+ 2050']]
+      _cripto_cfg = [a for a in _ativos_cfg if a in ['BTC']]
+      _alvos_edit = dict(st.session_state.get("cfg_alvos", {}))
+      _n_fiis_cfg = len(_fiis_cfg)
 
+      def _parse_alvo(s):
+          try: return float(str(s).replace(',', '.').strip())
+          except: return None
+
+      def _fmt_v(cfg_ativo, campo):
+          banda = _get_banda({"_": cfg_ativo}, "_") if not isinstance(cfg_ativo, dict) else cfg_ativo
+          v = banda.get(campo)
+          return fmt_num(v, 1) if v is not None else ""
+
+      def _md(col, cls, txt):
+          col.markdown(f"<p class='{cls}'>{txt}</p>", unsafe_allow_html=True)
+
+      _n_linha = [0]
+      def _linha_banda(rotulo, banda, key_sfx):
+          """uma linha da grade: rótulo | mín | alvo | máx"""
+          _n_linha[0] += 1
+          with st.container(key=f"cfgrow_{_n_linha[0]}"):
+              c0, c1, c2, c3 = st.columns(4, vertical_alignment="center")
+              _md(c0, "cfg-ativo", rotulo)
+              _mn = c1.text_input("mín",  value=_fmt_v(banda, 'min'),  label_visibility="collapsed", key=f"min_{key_sfx}")
+              _al = c2.text_input("alvo", value=_fmt_v(banda, 'alvo'), label_visibility="collapsed", key=f"alvo_{key_sfx}")
+              _mx = c3.text_input("máx",  value=_fmt_v(banda, 'max'),  label_visibility="collapsed", key=f"max_{key_sfx}")
+          return _mn, _al, _mx
+
+      # ── resumo por classe (alvos salvos) ─────────────────────────────────────
+      if _alvos_edit:
+          def _alvo_c(ativo): return _get_banda(_alvos_edit, ativo).get('alvo') or 0
+          _alvo_fii_cl = _get_banda(_alvos_edit, '__FIIs__').get('alvo') or 0
+          _soma_etfs_r = sum(_alvo_c(a) for a in _etfs_cfg)
+          _soma_td_r   = sum(_alvo_c(a) for a in _td_cfg)
+          _soma_cri_r  = sum(_alvo_c(a) for a in _cripto_cfg)
+          _soma_total_r = _soma_etfs_r + _alvo_fii_cl + _soma_td_r + _soma_cri_r
+          with st.container(key="cfg_resumo"):
+              r = st.columns(5)
+              card_html(r[0], "ETFs", fmt_pct(_soma_etfs_r))
+              card_html(r[1], "FIIs", fmt_pct(_alvo_fii_cl))
+              card_html(r[2], "tesouro", fmt_pct(_soma_td_r))
+              card_html(r[3], "cripto", fmt_pct(_soma_cri_r))
+              card_html(r[4], "total", fmt_pct(_soma_total_r),
+                        "pos" if abs(_soma_total_r - 100) < 0.01 else "neg")
+          st.markdown("---")
+
+      _cfg_lay = st.container(key="cfg_layout")
+      col_alvos, col_metas = _cfg_lay.columns([3, 2], gap="large")
+
+      # ── alvos de alocação ────────────────────────────────────────────────────
+    with col_alvos:
+      _md(st, "cfg-sec", "alvos de alocação")
+      _md(st, "cfg-nota", "% da carteira · a soma dos alvos precisa fechar em 100%")
+
+      with st.form("form_cfg", border=True):
+          with st.container(key="cfgrow_cab"):
+              h0, h1, h2, h3 = st.columns(4)
+              _md(h0, "cfg-col", "")
+              _md(h1, "cfg-col", "mín")
+              _md(h2, "cfg-col", "alvo")
+              _md(h3, "cfg-col", "máx")
+
+          _inp_etf, _inp_td, _inp_cri = {}, {}, {}
+          if _etfs_cfg:
+              _md(st, "cfg-grupo", "ETFs")
+              for a in _etfs_cfg:
+                  _inp_etf[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
+
+          _md(st, "cfg-grupo", "FIIs · alvo da classe, dividido igualmente")
+          _fii_min, _fii_alvo, _fii_max = _linha_banda(f"{_n_fiis_cfg} FIIs", _alvos_edit.get("__FIIs__", {}) or {}, "__FIIs__")
+
+          if _td_cfg:
+              _md(st, "cfg-grupo", "tesouro")
+              for a in _td_cfg:
+                  _inp_td[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
+
+          if _cripto_cfg:
+              _md(st, "cfg-grupo", "cripto")
+              for a in _cripto_cfg:
+                  _inp_cri[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
+
+          st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
+          _salvar = st.form_submit_button("salvar", type="primary")
+          if _salvar:
+              _cfg_nova = {}
+              _ok = True
+              def _parse_banda(mn, al, mx, nome):
+                  vmin  = _parse_alvo(mn)
+                  valvo = _parse_alvo(al)
+                  vmax  = _parse_alvo(mx)
+                  if al.strip() and valvo is None:
+                      st.error(f"valor inválido para {nome}"); return None, False
+                  if mn.strip() and vmin is None:
+                      st.error(f"mín inválido para {nome}"); return None, False
+                  if mx.strip() and vmax is None:
+                      st.error(f"máx inválido para {nome}"); return None, False
+                  return {'min': vmin, 'alvo': valvo, 'max': vmax}, True
+
+              for grp in [_inp_etf, _inp_td, _inp_cri]:
+                  for a, (mn, al, mx) in grp.items():
+                      banda, ok = _parse_banda(mn, al, mx, a)
+                      if not ok: _ok = False
+                      else: _cfg_nova[a] = banda
+
+              banda_fii, ok_fii = _parse_banda(_fii_min, _fii_alvo, _fii_max, "FIIs")
+              if not ok_fii: _ok = False
+              else: _cfg_nova["__FIIs__"] = banda_fii
+
+              if _ok:
+                  _soma_alvos = sum((v.get('alvo') or 0) for k,v in _cfg_nova.items() if k != "__FIIs__")
+                  _soma_alvos += (_cfg_nova.get("__FIIs__", {}) or {}).get('alvo') or 0
+                  if abs(_soma_alvos - 100) > 0.01:
+                      st.error(f"soma dos alvos: {fmt_pct(_soma_alvos)} — ajuste para fechar em 100%")
+                  else:
+                      if salvar_configuracoes(_cfg_nova):
+                          st.session_state["cfg_alvos"] = _cfg_nova
+                          st.success("alvos salvos.")
+                          st.rerun(scope="app")
+
+      # ── metas de longo prazo ─────────────────────────────────────────────────
+    with col_metas:
+      _md(st, "cfg-sec", "metas")
+      _md(st, "cfg-nota", "acompanhadas nos cards da aba detalhe")
+      if "_metas" not in st.session_state:
+          st.session_state["_metas"] = ler_metas()
+      with st.container(key="cfg_metas_box", border=True), st.container(key="cfgrow_meta"):
+          m0, m1, m2 = st.columns(3, vertical_alignment="center")
+          _md(m0, "cfg-ativo-quebra", "títulos de Renda+ 2050 até dez/45")
+          _meta_str = m1.text_input(
+              "meta Renda+", label_visibility="collapsed",
+              value=fmt_num(st.session_state["_metas"].get("renda_2050_titulos_dez2045", 450), 2),
+              key="meta_renda_2045_input")
+          _salvar_meta = m2.button("salvar", key="btn_salvar_meta", type="primary")
+      if _salvar_meta:
+          try:
+              _v_meta = float(_meta_str.replace('.', '').replace(',', '.'))
+              if _v_meta <= 0:
+                  raise ValueError
+              salvar_meta("renda_2050_titulos_dez2045", _v_meta)
+              st.success("meta salva.")
+              st.rerun(scope="app")
+          except ValueError:
+              st.error("valor inválido — use um número, ex.: 450")
+
+
+  with _sub_pj, st.container(key="cfg_pj_area"):
+    _cpj_fat, _cpj_par = st.container(key="cfg_pj_layout").columns([1, 1], gap="large")
     # ── faturamento por mês (editável) ───────────────────────────────────────
-    with col_fat:
+    with _cpj_fat:
         st.markdown("<p class='cfg-sec'>faturamento por mês</p>", unsafe_allow_html=True)
         st.markdown("<p class='cfg-nota'>por mês de atividade — recebido no mês seguinte</p>",
                     unsafe_allow_html=True)
+        _anos_c = sorted(set([_hoje_pj.year - 1, _hoje_pj.year, _hoje_pj.year + 1] +
+                             [int(k[:4]) for k in _fat_salvo]))
+        _ano_c = st.segmented_control("ano do faturamento", _anos_c, default=_hoje_pj.year,
+                                      label_visibility="collapsed", key="cfg_pj_ano") or _hoje_pj.year
+        _ano = _ano_c
+        _meses_ativ = [f"{_ano}-{m:02d}" for m in range(1, 13)]
         with st.form(f"form_pj_fat_{_ano}", border=True):
             _df_ed = pd.DataFrame({"mês": [_rot(k) for k in _meses_ativ],
                                    "faturamento": [_fat_de(k) for k in _meses_ativ],
@@ -4192,318 +4416,111 @@ with aba_pj:
                 st.rerun(scope="app")
 
 
-    # ── composição de um mês ─────────────────────────────────────────────────
-    with col_comp:
-        st.markdown("<p class='cfg-sec'>composição do mês</p>", unsafe_allow_html=True)
-        st.markdown("<p class='cfg-nota'>mês de recebimento</p>", unsafe_allow_html=True)
-        _idx_padrao = (_hoje_pj.month - 1) if _ano == _hoje_pj.year else 0
-        _mes_sel = st.selectbox("mês", _meses, index=_idx_padrao, label_visibility="collapsed",
-                                format_func=_rot, key="pj_mes_sel")
-        c = _calc[_mes_sel]
-        _linhas = [
-            ("", f"faturamento de {_rot(_comp[_mes_sel])}", formatar_brl(_fat_de(_comp[_mes_sel]))),
-        ] + ([("", f"(+) extra de {_rot(_mes_sel)} (recebido no mês)", formatar_brl(_extra_de(_mes_sel)))]
-             if _extra_de(_mes_sel) else []) + [
-            ("", "(−) previdência", formatar_brl(c["prev"])),
-            ("", (f"(−) DAS (notas de {_rot(_comp[_mes_sel])})" if _das_seg else "(−) DAS (retido no recebimento)"),
-             formatar_brl(c["das"])),
-            ("", "(−) contador + taxas", formatar_brl(c["contador"])),
-        ]
-        if c["taxa"] > 0:
-            _linhas.append(("", "(−) taxa prefeitura", formatar_brl(c["taxa"])))
-        _linhas += [
-            ("", "(−) pró-labore bruto", formatar_brl(c["pro_labore"])),
-            ("pj-tot", "lucros distribuídos", _neg(c["lucros"])),
-            ("pj-esp", "", ""),
-            ("", "pró-labore líquido", formatar_brl(c["pl_liq"])),
-            ("pj-sub", f"INSS retido (DARF): {formatar_brl(c['inss'])}", ""),
-            ("", "(+) lucros distribuídos", _neg(c["lucros"])),
-            ("pj-tot", "receita PF", _neg(c["receita_pf"])),
-            ("pj-esp", "", ""),
-            ("", "(−) FIES (débito BB)", formatar_brl(c["fies"])),
-            ("pj-sub", f"no nubank: {_neg(c['nubank'])}", ""),
-            ("", f"(−) fatura de {_rot(_comp[_mes_sel])} ({_cart[_mes_sel][1]})", formatar_brl(c["cartao"])),
-            ("pj-tot", "sobra para investir", _neg(c["sobra"])),
-        ]
-        _html = "<table class='pj-tab'>" + "".join(
-            f"<tr class='{cl}'><td>{a}</td><td>{b}</td></tr>" for cl, a, b in _linhas) + "</table>"
-        with st.container(key="pj_comp_box", border=True):
-            st.markdown(_html, unsafe_allow_html=True)
-        if c["lucros"] < 0:
-            st.warning("faturamento abaixo dos custos fixos — não sobra lucro para distribuir neste mês.")
 
-        # ── dívida: FIES ─────────────────────────────────────────────────────
-        _fs = fies_status(_par)
-        if _fs and _fs["total"]:
-            st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
-            st.markdown("<p class='cfg-sec'>FIES</p>", unsafe_allow_html=True)
-            with st.container(key="pj_fies_box", border=True):
-                st.progress(_fs["pagas"] / _fs["total"],
-                            text=f"{_fs['pagas']} de {_fs['total']} parcelas pagas · faltam {_fs['restantes']}")
-                _fl = [
-                    ("", "saldo devedor (nominal)", formatar_brl(_fs["saldo"])),
-                    ("", "parcela", formatar_brl(_par["fies"])),
-                    ("", "próximo débito",
-                     _fs["prox"].strftime("%d/%m/%Y") if _fs["prox"] is not None else "—"),
-                    ("", "última parcela", f"{_MES3[_fs['fim'].month - 1]}/{_fs['fim'].year}"),
-                ]
-                st.markdown("<table class='pj-tab'>" + "".join(
-                    f"<tr><td>{a}</td><td>{b}</td></tr>" for _, a, b in _fl) + "</table>",
-                    unsafe_allow_html=True)
-
-
-# ── Aba configurações ─────────────────────────────────────────────────────────
-with aba_config:
-  with st.container(key="cfg_area"):
-    _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
-    _fiis_cfg   = [a for a in _ativos_cfg if _classe_de.get(a) == 'FII']
-    _etfs_cfg   = [a for a in _ativos_cfg if _classe_de.get(a) == 'ETF']
-    _td_cfg     = [a for a in _ativos_cfg if a in ['Renda+ 2050']]
-    _cripto_cfg = [a for a in _ativos_cfg if a in ['BTC']]
-    _alvos_edit = dict(st.session_state.get("cfg_alvos", {}))
-    _n_fiis_cfg = len(_fiis_cfg)
-
-    def _parse_alvo(s):
-        try: return float(str(s).replace(',', '.').strip())
-        except: return None
-
-    def _fmt_v(cfg_ativo, campo):
-        banda = _get_banda({"_": cfg_ativo}, "_") if not isinstance(cfg_ativo, dict) else cfg_ativo
-        v = banda.get(campo)
-        return fmt_num(v, 1) if v is not None else ""
-
-    def _md(col, cls, txt):
-        col.markdown(f"<p class='{cls}'>{txt}</p>", unsafe_allow_html=True)
-
-    _n_linha = [0]
-    def _linha_banda(rotulo, banda, key_sfx):
-        """uma linha da grade: rótulo | mín | alvo | máx"""
-        _n_linha[0] += 1
-        with st.container(key=f"cfgrow_{_n_linha[0]}"):
-            c0, c1, c2, c3 = st.columns(4, vertical_alignment="center")
-            _md(c0, "cfg-ativo", rotulo)
-            _mn = c1.text_input("mín",  value=_fmt_v(banda, 'min'),  label_visibility="collapsed", key=f"min_{key_sfx}")
-            _al = c2.text_input("alvo", value=_fmt_v(banda, 'alvo'), label_visibility="collapsed", key=f"alvo_{key_sfx}")
-            _mx = c3.text_input("máx",  value=_fmt_v(banda, 'max'),  label_visibility="collapsed", key=f"max_{key_sfx}")
-        return _mn, _al, _mx
-
-    # ── resumo por classe (alvos salvos) ─────────────────────────────────────
-    if _alvos_edit:
-        def _alvo_c(ativo): return _get_banda(_alvos_edit, ativo).get('alvo') or 0
-        _alvo_fii_cl = _get_banda(_alvos_edit, '__FIIs__').get('alvo') or 0
-        _soma_etfs_r = sum(_alvo_c(a) for a in _etfs_cfg)
-        _soma_td_r   = sum(_alvo_c(a) for a in _td_cfg)
-        _soma_cri_r  = sum(_alvo_c(a) for a in _cripto_cfg)
-        _soma_total_r = _soma_etfs_r + _alvo_fii_cl + _soma_td_r + _soma_cri_r
-        with st.container(key="cfg_resumo"):
-            r = st.columns(5)
-            card_html(r[0], "ETFs", fmt_pct(_soma_etfs_r))
-            card_html(r[1], "FIIs", fmt_pct(_alvo_fii_cl))
-            card_html(r[2], "tesouro", fmt_pct(_soma_td_r))
-            card_html(r[3], "cripto", fmt_pct(_soma_cri_r))
-            card_html(r[4], "total", fmt_pct(_soma_total_r),
-                      "pos" if abs(_soma_total_r - 100) < 0.01 else "neg")
-        st.markdown("---")
-
-    _cfg_lay = st.container(key="cfg_layout")
-    col_alvos, col_metas = _cfg_lay.columns([3, 2], gap="large")
-
-    # ── alvos de alocação ────────────────────────────────────────────────────
-  with col_alvos:
-    _md(st, "cfg-sec", "alvos de alocação")
-    _md(st, "cfg-nota", "% da carteira · a soma dos alvos precisa fechar em 100%")
-
-    with st.form("form_cfg", border=True):
-        with st.container(key="cfgrow_cab"):
-            h0, h1, h2, h3 = st.columns(4)
-            _md(h0, "cfg-col", "")
-            _md(h1, "cfg-col", "mín")
-            _md(h2, "cfg-col", "alvo")
-            _md(h3, "cfg-col", "máx")
-
-        _inp_etf, _inp_td, _inp_cri = {}, {}, {}
-        if _etfs_cfg:
-            _md(st, "cfg-grupo", "ETFs")
-            for a in _etfs_cfg:
-                _inp_etf[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
-
-        _md(st, "cfg-grupo", "FIIs · alvo da classe, dividido igualmente")
-        _fii_min, _fii_alvo, _fii_max = _linha_banda(f"{_n_fiis_cfg} FIIs", _alvos_edit.get("__FIIs__", {}) or {}, "__FIIs__")
-
-        if _td_cfg:
-            _md(st, "cfg-grupo", "tesouro")
-            for a in _td_cfg:
-                _inp_td[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
-
-        if _cripto_cfg:
-            _md(st, "cfg-grupo", "cripto")
-            for a in _cripto_cfg:
-                _inp_cri[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
-
-        st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
-        _salvar = st.form_submit_button("salvar", type="primary")
-        if _salvar:
-            _cfg_nova = {}
-            _ok = True
-            def _parse_banda(mn, al, mx, nome):
-                vmin  = _parse_alvo(mn)
-                valvo = _parse_alvo(al)
-                vmax  = _parse_alvo(mx)
-                if al.strip() and valvo is None:
-                    st.error(f"valor inválido para {nome}"); return None, False
-                if mn.strip() and vmin is None:
-                    st.error(f"mín inválido para {nome}"); return None, False
-                if mx.strip() and vmax is None:
-                    st.error(f"máx inválido para {nome}"); return None, False
-                return {'min': vmin, 'alvo': valvo, 'max': vmax}, True
-
-            for grp in [_inp_etf, _inp_td, _inp_cri]:
-                for a, (mn, al, mx) in grp.items():
-                    banda, ok = _parse_banda(mn, al, mx, a)
-                    if not ok: _ok = False
-                    else: _cfg_nova[a] = banda
-
-            banda_fii, ok_fii = _parse_banda(_fii_min, _fii_alvo, _fii_max, "FIIs")
-            if not ok_fii: _ok = False
-            else: _cfg_nova["__FIIs__"] = banda_fii
-
-            if _ok:
-                _soma_alvos = sum((v.get('alvo') or 0) for k,v in _cfg_nova.items() if k != "__FIIs__")
-                _soma_alvos += (_cfg_nova.get("__FIIs__", {}) or {}).get('alvo') or 0
-                if abs(_soma_alvos - 100) > 0.01:
-                    st.error(f"soma dos alvos: {fmt_pct(_soma_alvos)} — ajuste para fechar em 100%")
-                else:
-                    if salvar_configuracoes(_cfg_nova):
-                        st.session_state["cfg_alvos"] = _cfg_nova
-                        st.success("alvos salvos.")
-                        st.rerun(scope="app")
-
-    # ── metas de longo prazo ─────────────────────────────────────────────────
-  with col_metas:
-    _md(st, "cfg-sec", "metas")
-    _md(st, "cfg-nota", "acompanhadas nos cards da aba detalhe")
-    if "_metas" not in st.session_state:
-        st.session_state["_metas"] = ler_metas()
-    with st.container(key="cfg_metas_box", border=True), st.container(key="cfgrow_meta"):
-        m0, m1, m2 = st.columns(3, vertical_alignment="center")
-        _md(m0, "cfg-ativo-quebra", "títulos de Renda+ 2050 até dez/45")
-        _meta_str = m1.text_input(
-            "meta Renda+", label_visibility="collapsed",
-            value=fmt_num(st.session_state["_metas"].get("renda_2050_titulos_dez2045", 450), 2),
-            key="meta_renda_2045_input")
-        _salvar_meta = m2.button("salvar", key="btn_salvar_meta", type="primary")
-    if _salvar_meta:
-        try:
-            _v_meta = float(_meta_str.replace('.', '').replace(',', '.'))
-            if _v_meta <= 0:
-                raise ValueError
-            salvar_meta("renda_2050_titulos_dez2045", _v_meta)
-            st.success("meta salva.")
-            st.rerun(scope="app")
-        except ValueError:
-            st.error("valor inválido — use um número, ex.: 450")
-
-    # ── parâmetros PJ ────────────────────────────────────────────────────────
-    st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
-    _md(st, "cfg-sec", "parâmetros PJ/PF")
-    _md(st, "cfg-nota", "usados na previsão da aba PJ/PF")
-    if "_pj_par" not in st.session_state:
-        st.session_state["_pj_par"] = ler_pj_parametros()
-    _par_atual = st.session_state["_pj_par"]
-    _inp_pj = {}
-    with st.container(key="cfg_pj_box", border=True):
-        for _i, (_k, _rot, _pad, _cs) in enumerate(PJ_PARAMS):
-            with st.container(key=f"cfgrow_pj_{_i}"):
+    with _cpj_par:
+        # ── parâmetros PJ ────────────────────────────────────────────────────────
+        _md(st, "cfg-sec", "parâmetros PJ/PF")
+        _md(st, "cfg-nota", "usados na previsão da aba PJ/PF")
+        if "_pj_par" not in st.session_state:
+            st.session_state["_pj_par"] = ler_pj_parametros()
+        _par_atual = st.session_state["_pj_par"]
+        _inp_pj = {}
+        with st.container(key="cfg_pj_box", border=True):
+            for _i, (_k, _rot_p, _pad, _cs) in enumerate(PJ_PARAMS):
+                if _k in PJ_PARAMS_OCULTOS:
+                    continue
+                with st.container(key=f"cfgrow_pj_{_i}"):
+                    p0, p1 = st.columns(2, vertical_alignment="center")
+                    _md(p0, "cfg-ativo-quebra", _rot_p)
+                    _val0 = (str(_par_atual.get(_k, _pad)) if _cs is None
+                             else fmt_num(_par_atual.get(_k, _pad), _cs, milhar=True))
+                    _inp_pj[_k] = p1.text_input(_rot_p, label_visibility="collapsed", value=_val0,
+                                                placeholder="ex: 05/2026" if _cs is None else None,
+                                                key=f"pj_par_{_k}")
+            with st.container(key="cfgrow_pj_vig"):
                 p0, p1 = st.columns(2, vertical_alignment="center")
-                _md(p0, "cfg-ativo-quebra", _rot)
-                _val0 = (str(_par_atual.get(_k, _pad)) if _cs is None
-                         else fmt_num(_par_atual.get(_k, _pad), _cs, milhar=True))
-                _inp_pj[_k] = p1.text_input(_rot, label_visibility="collapsed", value=_val0,
-                                            placeholder="ex: 05/2026" if _cs is None else None,
-                                            key=f"pj_par_{_k}")
-        with st.container(key="cfgrow_pj_vig"):
-            p0, p1 = st.columns(2, vertical_alignment="center")
-            _md(p0, "cfg-ativo-quebra", "alterações valem a partir de (mm/aaaa)")
-            _hj = pd.Timestamp.today()
-            _vig_str = p1.text_input("vigência", label_visibility="collapsed",
-                                     value=f"{_hj.month:02d}/{_hj.year}", key="pj_par_vigencia")
-        st.markdown("<div style='height:0.3rem'></div>", unsafe_allow_html=True)
-        _salvar_pj = st.button("salvar", key="btn_salvar_pj_par", type="primary")
-    if "_pj_hist" not in st.session_state:
-        st.session_state["_pj_hist"] = ler_pj_param_hist()
-    _hist_cfg = st.session_state["_pj_hist"]
-    if _salvar_pj:
-        try:
-            _novo_par = {k: (v.strip() if k in PJ_PARAMS_TEXTO else _num_br(v)) for k, v in _inp_pj.items()}
-            if any(v < 0 for k, v in _novo_par.items() if k not in PJ_PARAMS_TEXTO):
-                raise ValueError
-            for _kt in PJ_PARAMS_TEXTO:                       # datas mm/aaaa
-                if _novo_par.get(_kt):
-                    if _mes_ano(_novo_par[_kt]) is None:
-                        raise ValueError
-            _vig_ts = _mes_ano(_vig_str)
-            if _vig_ts is None:
-                raise ValueError
-            _vig = _vig_ts.strftime("%Y-%m")
-            # parâmetros com histórico que mudaram: guarda o valor antigo e registra o novo a partir de _vig
-            _hist_novo = list(_hist_cfg)
-            for _k in PJ_PARAMS_HIST:
-                _antigo = float(_par_atual.get(_k) or 0.0)
-                if abs(float(_novo_par[_k]) - _antigo) < 0.005:
-                    continue
-                if not any(e["chave"] == _k for e in _hist_novo):
-                    _hist_novo.append({"chave": _k, "desde": "0000-00", "valor": _antigo})
-                _hist_novo = [e for e in _hist_novo if not (e["chave"] == _k and e["desde"] == _vig)]
-                _hist_novo.append({"chave": _k, "desde": _vig, "valor": float(_novo_par[_k])})
-            if _hist_novo != _hist_cfg:
-                salvar_pj_param_hist(_hist_novo)
-            salvar_pj_parametros(_novo_par)
-            st.success("parâmetros salvos.")
-            st.rerun(scope="app")
-        except ValueError:
-            st.error("valor inválido — use números (ex.: 12.520,00) e a data como mm/aaaa (ex.: 05/2026)")
+                _md(p0, "cfg-ativo-quebra", "alterações valem a partir de (mm/aaaa)")
+                _hj = pd.Timestamp.today()
+                _vig_str = p1.text_input("vigência", label_visibility="collapsed",
+                                         value=f"{_hj.month:02d}/{_hj.year}", key="pj_par_vigencia")
+            st.markdown("<div style='height:0.3rem'></div>", unsafe_allow_html=True)
+            _salvar_pj = st.button("salvar", key="btn_salvar_pj_par", type="primary")
+        if "_pj_hist" not in st.session_state:
+            st.session_state["_pj_hist"] = ler_pj_param_hist()
+        _hist_cfg = st.session_state["_pj_hist"]
+        if _salvar_pj:
+            try:
+                _novo_par = {k: (v.strip() if k in PJ_PARAMS_TEXTO else _num_br(v)) for k, v in _inp_pj.items()}
+                _novo_par.update({k: _par_atual.get(k, d) for k, _, d, _ in PJ_PARAMS if k in PJ_PARAMS_OCULTOS})
+                if any(v < 0 for k, v in _novo_par.items() if k not in PJ_PARAMS_TEXTO):
+                    raise ValueError
+                for _kt in PJ_PARAMS_TEXTO:                       # datas mm/aaaa
+                    if _novo_par.get(_kt):
+                        if _mes_ano(_novo_par[_kt]) is None:
+                            raise ValueError
+                _vig_ts = _mes_ano(_vig_str)
+                if _vig_ts is None:
+                    raise ValueError
+                _vig = _vig_ts.strftime("%Y-%m")
+                # parâmetros com histórico que mudaram: guarda o valor antigo e registra o novo a partir de _vig
+                _hist_novo = list(_hist_cfg)
+                for _k in PJ_PARAMS_HIST:
+                    _antigo = float(_par_atual.get(_k) or 0.0)
+                    if abs(float(_novo_par[_k]) - _antigo) < 0.005:
+                        continue
+                    if not any(e["chave"] == _k for e in _hist_novo):
+                        _hist_novo.append({"chave": _k, "desde": "0000-00", "valor": _antigo})
+                    _hist_novo = [e for e in _hist_novo if not (e["chave"] == _k and e["desde"] == _vig)]
+                    _hist_novo.append({"chave": _k, "desde": _vig, "valor": float(_novo_par[_k])})
+                if _hist_novo != _hist_cfg:
+                    salvar_pj_param_hist(_hist_novo)
+                salvar_pj_parametros(_novo_par)
+                st.success("parâmetros salvos.")
+                st.rerun(scope="app")
+            except ValueError:
+                st.error("valor inválido — use números (ex.: 12.520,00) e a data como mm/aaaa (ex.: 05/2026)")
 
-    # ── histórico dos parâmetros ─────────────────────────────────────────────
-    st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
-    _md(st, "cfg-sec", "histórico dos parâmetros PJ/PF")
-    _md(st, "cfg-nota", "cada valor vale do mês 'desde' até a próxima alteração · desde em branco = "
-                        "desde sempre · pode corrigir, incluir ou apagar linhas")
-    _rot_hist = {k: r for k, r, _, _ in PJ_PARAMS if k in PJ_PARAMS_HIST}
-    _hist_inv = {r: k for k, r in _rot_hist.items()}
-    with st.form("form_pj_hist", border=True):
-        _df_h = pd.DataFrame({
-            "parâmetro": [_rot_hist[e["chave"]] for e in _hist_cfg],
-            "desde": ["" if e["desde"] == "0000-00" else f"{e['desde'][5:]}/{e['desde'][:4]}" for e in _hist_cfg],
-            "valor": pd.Series([float(e["valor"]) for e in _hist_cfg], dtype="float64"),
-        })
-        _df_h = _df_h.astype({"parâmetro": "object", "desde": "object"})
-        _df_h_ret = st.data_editor(
-            _df_h, hide_index=True, width="stretch", num_rows="dynamic", key="pj_hist_editor",
-            column_config={
-                "parâmetro": st.column_config.SelectboxColumn("parâmetro", options=list(_hist_inv),
-                                                              required=True),
-                "desde": st.column_config.TextColumn("desde (mm/aaaa)"),
-                "valor": st.column_config.NumberColumn("valor", min_value=0.0, step=0.01,
-                                                       format="localized", required=True),
+        # ── histórico dos parâmetros ─────────────────────────────────────────────
+        st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
+        _md(st, "cfg-sec", "histórico dos parâmetros PJ/PF")
+        _md(st, "cfg-nota", "cada valor vale do mês 'desde' até a próxima alteração · desde em branco = "
+                            "desde sempre · pode corrigir, incluir ou apagar linhas")
+        _rot_hist = {k: r for k, r, _, _ in PJ_PARAMS if k in PJ_PARAMS_HIST}
+        _hist_inv = {r: k for k, r in _rot_hist.items()}
+        with st.form("form_pj_hist", border=True):
+            _df_h = pd.DataFrame({
+                "parâmetro": [_rot_hist[e["chave"]] for e in _hist_cfg],
+                "desde": ["" if e["desde"] == "0000-00" else f"{e['desde'][5:]}/{e['desde'][:4]}" for e in _hist_cfg],
+                "valor": pd.Series([float(e["valor"]) for e in _hist_cfg], dtype="float64"),
             })
-        _salvar_h = st.form_submit_button("salvar", type="primary")
-    if _salvar_h:
-        try:
-            _lst = []
-            for _, r in _df_h_ret.iterrows():
-                if pd.isna(r["parâmetro"]) or pd.isna(r["valor"]):
-                    continue
-                _d = str(r["desde"] or "").strip() if not pd.isna(r["desde"]) else ""
-                if _d:
-                    _ts = _mes_ano(_d)
-                    if _ts is None:
-                        raise ValueError
-                    _d = _ts.strftime("%Y-%m")
-                else:
-                    _d = "0000-00"
-                _lst.append({"chave": _hist_inv[r["parâmetro"]], "desde": _d, "valor": float(r["valor"])})
-            salvar_pj_param_hist(_lst)
-            st.success("histórico salvo.")
-            st.rerun(scope="app")
-        except ValueError:
-            st.error("data inválida — use mm/aaaa (ex.: 03/2025)")
+            _df_h = _df_h.astype({"parâmetro": "object", "desde": "object"})
+            _df_h_ret = st.data_editor(
+                _df_h, hide_index=True, width="stretch", num_rows="dynamic", key="pj_hist_editor",
+                column_config={
+                    "parâmetro": st.column_config.SelectboxColumn("parâmetro", options=list(_hist_inv),
+                                                                  required=True),
+                    "desde": st.column_config.TextColumn("desde (mm/aaaa)"),
+                    "valor": st.column_config.NumberColumn("valor", min_value=0.0, step=0.01,
+                                                           format="localized", required=True),
+                })
+            _salvar_h = st.form_submit_button("salvar", type="primary")
+        if _salvar_h:
+            try:
+                _lst = []
+                for _, r in _df_h_ret.iterrows():
+                    if pd.isna(r["parâmetro"]) or pd.isna(r["valor"]):
+                        continue
+                    _d = str(r["desde"] or "").strip() if not pd.isna(r["desde"]) else ""
+                    if _d:
+                        _ts = _mes_ano(_d)
+                        if _ts is None:
+                            raise ValueError
+                        _d = _ts.strftime("%Y-%m")
+                    else:
+                        _d = "0000-00"
+                    _lst.append({"chave": _hist_inv[r["parâmetro"]], "desde": _d, "valor": float(r["valor"])})
+                salvar_pj_param_hist(_lst)
+                st.success("histórico salvo.")
+                st.rerun(scope="app")
+            except ValueError:
+                st.error("data inválida — use mm/aaaa (ex.: 03/2025)")
