@@ -1410,6 +1410,7 @@ PJ_PARAMS = [
     ("pro_labore",         "pró-labore bruto (R$)",             0.0,     2),
     ("inss_pct",           "INSS sobre pró-labore (%)",         11.0,    1),
     ("das_pct",            "DAS (% do faturamento)",            6.0,     1),
+    ("das_mes_seguinte",   "DAS no mês seguinte à nota (1 sim · 0 não)", 1.0, 0),
     ("contador",           "contador + taxas (R$/mês)",         0.0,     2),
     ("fies",               "FIES · parcela (R$)",               0.0,     2),
     ("fies_total",         "FIES · total de parcelas",          0.0,     0),
@@ -1421,6 +1422,12 @@ PJ_PARAMS = [
 ]
 
 PJ_PARAMS_TEXTO = {k for k, _, _, cs in PJ_PARAMS if cs is None}
+
+# parâmetros que mudam com o tempo e precisam guardar os valores antigos (aba pj_parametros_hist:
+# chave | desde (aaaa-mm) | valor). cada mês usa o último valor com desde <= mês.
+SHEET_PJ_HIST_TAB = "pj_parametros_hist"
+PJ_PARAMS_HIST = ["faturamento_minimo", "prev_pct", "pro_labore", "inss_pct", "das_pct",
+                  "contador", "taxa_prefeitura"]
 
 def _mes_ano(s):
     """'12/2032' · '01/12/2032' · '2032-12-01' → Timestamp do dia 1º do mês, ou None"""
@@ -1569,6 +1576,49 @@ def ler_pj_faturamento():
         pass
     return fat
 
+def ler_pj_param_hist():
+    """[{'chave': 'pro_labore', 'desde': '2026-01', 'valor': 1700.0}, ...] ordenado"""
+    out = []
+    try:
+        rows = get_sheets_service().values().get(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_HIST_TAB}!A:C").execute().get("values", [])
+        for r in rows[1:]:
+            if len(r) >= 3 and str(r[0]).strip() in PJ_PARAMS_HIST:
+                _d = str(r[1]).strip()
+                _d = "0000-00" if _d in ("", "0000-00", "início", "inicio") else _d
+                if _d != "0000-00":
+                    _ts = _mes_ano(_d)
+                    if _ts is None:
+                        continue
+                    _d = _ts.strftime("%Y-%m")
+                try:
+                    out.append({"chave": str(r[0]).strip(), "desde": _d, "valor": _num_br(r[2])})
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return sorted(out, key=lambda e: (e["chave"], e["desde"]))
+
+def salvar_pj_param_hist(lista):
+    svc = get_sheets_service()
+    _garantir_aba_existe(svc, SHEET_PJ_HIST_TAB, ["chave", "desde", "valor"])
+    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_HIST_TAB}!A:C").execute()
+    lista = sorted(lista, key=lambda e: (e["chave"], e["desde"]))
+    corpo = [["chave", "desde", "valor"]] + [[e["chave"], e["desde"], float(e["valor"])] for e in lista]
+    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_HIST_TAB}!A1",
+                        valueInputOption="RAW", body={"values": corpo}).execute()
+    st.session_state.pop("_pj_hist", None)
+
+def par_vigente(par, hist, ano_mes):
+    """parâmetros valendo no mês: para cada chave com histórico, o último valor com desde <= mês
+    (antes do primeiro registro, vale o registro mais antigo); sem histórico, o valor atual"""
+    out = dict(par)
+    for k in {e["chave"] for e in hist}:
+        regs = [e for e in hist if e["chave"] == k]
+        validos = [e for e in regs if e["desde"] <= ano_mes]
+        out[k] = (validos[-1] if validos else regs[0])["valor"]
+    return out
+
 # fatura do cartão por mês de atividade, para os meses ANTES do controle real (Controle de Fatura)
 SHEET_PF_CARTAO_TAB = "pf_cartao"
 
@@ -1617,17 +1667,18 @@ def salvar_pj_faturamento(novos):
                         valueInputOption="RAW", body={"values": corpo}).execute()
     st.session_state.pop("_pj_fat", None)
 
-def calcular_pj_mes(fat, par, ano_mes, cartao=0.0):
+def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None):
     """
     fluxo de um mês: faturamento da PJ → custos → pró-labore + lucros → receita da PF.
     previdência = % do faturamento BASE (revisto a cada 18 meses), mesmo quando o faturamento
     do mês fica acima ou abaixo da base.
+    base_das = notas cujo DAS é pago neste mês (padrão: o próprio faturamento recebido)
     lucros = faturamento − previdência − DAS − contador − taxa prefeitura (fev) − pró-labore bruto
     receita PF = pró-labore líquido (bruto − INSS) + lucros  ·  parte dos lucros vai ao BB (FIES)
     """
     mes    = int(str(ano_mes)[5:7])
     prev   = par["faturamento_minimo"] * par["prev_pct"] / 100
-    das    = fat * par["das_pct"] / 100
+    das    = (fat if base_das is None else base_das) * par["das_pct"] / 100
     inss   = par["pro_labore"] * par["inss_pct"] / 100
     taxa   = par["taxa_prefeitura"] if mes == 2 else 0.0
     lucros = fat - prev - das - par["contador"] - taxa - par["pro_labore"]
@@ -2352,7 +2403,7 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
 _janela_sessao = janela_mercado(30)
 if st.session_state.get("_janela_sessao") != _janela_sessao:
     for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
-               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao"]:
+               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao", "_pj_hist"]:
         st.session_state.pop(_k, None)
     st.session_state["_janela_sessao"] = _janela_sessao
 
@@ -3974,6 +4025,9 @@ with aba_pj:
     if "_pj_fat" not in st.session_state:
         st.session_state["_pj_fat"] = ler_pj_faturamento()
     _par = st.session_state["_pj_par"]
+    if "_pj_hist" not in st.session_state:
+        st.session_state["_pj_hist"] = ler_pj_param_hist()
+    _hist_pj = st.session_state["_pj_hist"]
     # sessões abertas antes da coluna "extra" guardaram {mês: valor}; normaliza para {mês: {fat, extra}}
     _fat_salvo = {k: (v if isinstance(v, dict) else {"fat": float(v), "extra": 0.0})
                   for k, v in st.session_state["_pj_fat"].items()}
@@ -3996,7 +4050,8 @@ with aba_pj:
     _ant   = lambda k: (pd.Timestamp(f"{k}-01") - pd.DateOffset(months=1)).strftime("%Y-%m")
     _comp  = {k: _ant(k) for k in _meses}
     _meses_ativ = [f"{_ano}-{m:02d}" for m in range(1, 13)]            # editor: meses de atividade
-    _fat_de   = lambda a: float(_fat_salvo[a]["fat"]) if a in _fat_salvo else float(_par["faturamento_minimo"])
+    _fat_de   = lambda a: (float(_fat_salvo[a]["fat"]) if a in _fat_salvo
+                           else float(par_vigente(_par, _hist_pj, a)["faturamento_minimo"]))
     _extra_de = lambda a: float(_fat_salvo[a].get("extra", 0.0)) if a in _fat_salvo else 0.0
 
     # cartão por mês de atividade: antes do controle real = média estimada; do controle em
@@ -4021,7 +4076,18 @@ with aba_pj:
         return float(_cart_lim or 0.0), "previsto"
     _cart = {k: _cartao(_comp[k]) for k in _meses}
     # recebido no mês k = faturamento do mês anterior + extras do próprio mês
-    _calc = {k: calcular_pj_mes(_fat_de(_comp[k]) + _extra_de(k), _par, k, _cart[k][0]) for k in _meses}
+    # DAS: hoje é pago no mês seguinte à emissão da nota → no mês k pagam-se as notas de k−1
+    # (faturamento normal de k−1 + extras emitidos em k−1). com split payment (das_mes_seguinte=0)
+    # o imposto sai no recebimento → incide sobre o que entra em k.
+    _das_seg = float(_par.get("das_mes_seguinte", 1.0) or 0.0) >= 0.5
+    def _base_das(k):
+        if _das_seg:
+            return _fat_de(_comp[k]) + _extra_de(_comp[k])
+        return _fat_de(_comp[k]) + _extra_de(k)
+    # cada mês com os parâmetros vigentes nele (pró-labore, DAS, contador… mudam com o tempo)
+    _calc = {k: calcular_pj_mes(_fat_de(_comp[k]) + _extra_de(k), par_vigente(_par, _hist_pj, k), k,
+                                _cart[k][0], _base_das(k))
+             for k in _meses}
     _rot  = lambda k: f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}"
     _soma = lambda campo: sum(c[campo] for c in _calc.values())   # soma pelos meses de recebimento
     _neg  = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
@@ -4056,6 +4122,9 @@ with aba_pj:
         if f"{_base_prox.year}-{_base_prox.month:02d}" <= _meses[-1]:
             _txt_base += " (a previsão após essa data ainda usa a base atual)"
     _cap_pj(_txt_base)
+    _cap_pj("DAS: pago no mês seguinte à emissão da nota — no caixa de cada mês sai o imposto das notas "
+            "do mês anterior, inclusive extras." if _das_seg else
+            "DAS: retido no recebimento (split payment) — sai junto com o valor recebido no mês.")
     if _cart_erro:
         _cap_pj(f"cartão: não foi possível ler o Controle de Fatura ({_cart_erro}) — considerado R$0.")
     else:
@@ -4136,7 +4205,8 @@ with aba_pj:
         ] + ([("", f"(+) extra de {_rot(_mes_sel)} (recebido no mês)", formatar_brl(_extra_de(_mes_sel)))]
              if _extra_de(_mes_sel) else []) + [
             ("", "(−) previdência", formatar_brl(c["prev"])),
-            ("", "(−) DAS", formatar_brl(c["das"])),
+            ("", (f"(−) DAS (notas de {_rot(_comp[_mes_sel])})" if _das_seg else "(−) DAS (retido no recebimento)"),
+             formatar_brl(c["das"])),
             ("", "(−) contador + taxas", formatar_brl(c["contador"])),
         ]
         if c["taxa"] > 0:
@@ -4351,8 +4421,17 @@ with aba_config:
                 _inp_pj[_k] = p1.text_input(_rot, label_visibility="collapsed", value=_val0,
                                             placeholder="ex: 05/2026" if _cs is None else None,
                                             key=f"pj_par_{_k}")
+        with st.container(key="cfgrow_pj_vig"):
+            p0, p1 = st.columns(2, vertical_alignment="center")
+            _md(p0, "cfg-ativo-quebra", "alterações valem a partir de (mm/aaaa)")
+            _hj = pd.Timestamp.today()
+            _vig_str = p1.text_input("vigência", label_visibility="collapsed",
+                                     value=f"{_hj.month:02d}/{_hj.year}", key="pj_par_vigencia")
         st.markdown("<div style='height:0.3rem'></div>", unsafe_allow_html=True)
         _salvar_pj = st.button("salvar", key="btn_salvar_pj_par", type="primary")
+    if "_pj_hist" not in st.session_state:
+        st.session_state["_pj_hist"] = ler_pj_param_hist()
+    _hist_cfg = st.session_state["_pj_hist"]
     if _salvar_pj:
         try:
             _novo_par = {k: (v.strip() if k in PJ_PARAMS_TEXTO else _num_br(v)) for k, v in _inp_pj.items()}
@@ -4362,8 +4441,69 @@ with aba_config:
                 if _novo_par.get(_kt):
                     if _mes_ano(_novo_par[_kt]) is None:
                         raise ValueError
+            _vig_ts = _mes_ano(_vig_str)
+            if _vig_ts is None:
+                raise ValueError
+            _vig = _vig_ts.strftime("%Y-%m")
+            # parâmetros com histórico que mudaram: guarda o valor antigo e registra o novo a partir de _vig
+            _hist_novo = list(_hist_cfg)
+            for _k in PJ_PARAMS_HIST:
+                _antigo = float(_par_atual.get(_k) or 0.0)
+                if abs(float(_novo_par[_k]) - _antigo) < 0.005:
+                    continue
+                if not any(e["chave"] == _k for e in _hist_novo):
+                    _hist_novo.append({"chave": _k, "desde": "0000-00", "valor": _antigo})
+                _hist_novo = [e for e in _hist_novo if not (e["chave"] == _k and e["desde"] == _vig)]
+                _hist_novo.append({"chave": _k, "desde": _vig, "valor": float(_novo_par[_k])})
+            if _hist_novo != _hist_cfg:
+                salvar_pj_param_hist(_hist_novo)
             salvar_pj_parametros(_novo_par)
             st.success("parâmetros salvos.")
             st.rerun(scope="app")
         except ValueError:
             st.error("valor inválido — use números (ex.: 12.520,00) e a data como mm/aaaa (ex.: 05/2026)")
+
+    # ── histórico dos parâmetros ─────────────────────────────────────────────
+    st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
+    _md(st, "cfg-sec", "histórico dos parâmetros PJ/PF")
+    _md(st, "cfg-nota", "cada valor vale do mês 'desde' até a próxima alteração · desde em branco = "
+                        "desde sempre · pode corrigir, incluir ou apagar linhas")
+    _rot_hist = {k: r for k, r, _, _ in PJ_PARAMS if k in PJ_PARAMS_HIST}
+    _hist_inv = {r: k for k, r in _rot_hist.items()}
+    with st.form("form_pj_hist", border=True):
+        _df_h = pd.DataFrame({
+            "parâmetro": [_rot_hist[e["chave"]] for e in _hist_cfg],
+            "desde": ["" if e["desde"] == "0000-00" else f"{e['desde'][5:]}/{e['desde'][:4]}" for e in _hist_cfg],
+            "valor": pd.Series([float(e["valor"]) for e in _hist_cfg], dtype="float64"),
+        })
+        _df_h = _df_h.astype({"parâmetro": "object", "desde": "object"})
+        _df_h_ret = st.data_editor(
+            _df_h, hide_index=True, width="stretch", num_rows="dynamic", key="pj_hist_editor",
+            column_config={
+                "parâmetro": st.column_config.SelectboxColumn("parâmetro", options=list(_hist_inv),
+                                                              required=True),
+                "desde": st.column_config.TextColumn("desde (mm/aaaa)"),
+                "valor": st.column_config.NumberColumn("valor", min_value=0.0, step=0.01,
+                                                       format="localized", required=True),
+            })
+        _salvar_h = st.form_submit_button("salvar", type="primary")
+    if _salvar_h:
+        try:
+            _lst = []
+            for _, r in _df_h_ret.iterrows():
+                if pd.isna(r["parâmetro"]) or pd.isna(r["valor"]):
+                    continue
+                _d = str(r["desde"] or "").strip() if not pd.isna(r["desde"]) else ""
+                if _d:
+                    _ts = _mes_ano(_d)
+                    if _ts is None:
+                        raise ValueError
+                    _d = _ts.strftime("%Y-%m")
+                else:
+                    _d = "0000-00"
+                _lst.append({"chave": _hist_inv[r["parâmetro"]], "desde": _d, "valor": float(r["valor"])})
+            salvar_pj_param_hist(_lst)
+            st.success("histórico salvo.")
+            st.rerun(scope="app")
+        except ValueError:
+            st.error("data inválida — use mm/aaaa (ex.: 03/2025)")
