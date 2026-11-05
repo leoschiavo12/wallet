@@ -24,15 +24,15 @@ st.markdown("""
         /* ── aba configurações: campos e botões compactos, linhas em grade ───── */
         /* layout alvos | metas: lado a lado no computador, empilhado no celular */
         @media (max-width: 768px) {
-            :is(.st-key-cfg_layout, .st-key-pj_layout, .st-key-cfg_pj_layout) div[data-testid="stColumn"],
-            :is(.st-key-cfg_layout, .st-key-pj_layout, .st-key-cfg_pj_layout) div[data-testid="column"] {
+            :is(.st-key-cfg_layout, .st-key-pj_layout, .st-key-pj_layout2, .st-key-cfg_pj_layout) div[data-testid="stColumn"],
+            :is(.st-key-cfg_layout, .st-key-pj_layout, .st-key-pj_layout2, .st-key-cfg_pj_layout) div[data-testid="column"] {
                 width: 100% !important; min-width: 100% !important; flex: 1 1 100% !important;
             }
-            :is(.st-key-cfg_layout, .st-key-pj_layout, .st-key-cfg_pj_layout) > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) {
+            :is(.st-key-cfg_layout, .st-key-pj_layout, .st-key-pj_layout2, .st-key-cfg_pj_layout) > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) {
                 margin-top: 1.2rem !important;
             }
         }
-        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box) {
+        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box, .st-key-pj_ano_box) {
             padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
         }
         :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
@@ -68,6 +68,8 @@ st.markdown("""
         .pj-tab tr.pj-sub td { color: rgba(250,250,250,0.6); font-size: 0.82rem; }
         .pj-tab tr.pj-sub td:first-child { padding-left: 1rem; }
         .pj-tab tr.pj-esp td { border-bottom: none !important; height: 0.6rem; padding: 0; }
+        .pj-tab tr.pj-sec td { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
+                               text-transform: uppercase; color: rgba(250,250,250,0.5); padding-top: 0.15rem; }
         .cfg-nota  { font-size: 0.75rem; color: rgba(250,250,250,0.5); margin: 0; }
         /* linhas da grade (rótulo + 3 campos, ou rótulo + campo + botão): nunca quebram */
         :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [class*="st-key-cfgrow_"] [data-testid="stHorizontalBlock"] {
@@ -1422,6 +1424,7 @@ PJ_PARAMS = [
 ]
 
 PJ_PARAMS_TEXTO = {k for k, _, _, cs in PJ_PARAMS if cs is None}
+ANO_INICIO_PJ = 2026          # anos anteriores não aparecem no app (dez/25 ainda é lido da planilha)
 # fixos: ficam só na planilha (aba pj_parametros), fora da tela de configurações
 PJ_PARAMS_OCULTOS = {"fies", "fies_total", "fies_fim", "fies_dia"}
 
@@ -1676,7 +1679,8 @@ def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None):
     do mês fica acima ou abaixo da base.
     base_das = notas cujo DAS é pago neste mês (padrão: o próprio faturamento recebido)
     lucros = faturamento − previdência − DAS − contador − taxa prefeitura (fev) − pró-labore bruto
-    receita PF = pró-labore líquido (bruto − INSS) + lucros  ·  parte dos lucros vai ao BB (FIES)
+    FIES sai direto da conta PJ para o BB (despesa PJ): lucros distribuídos = lucros − FIES
+    receita PF (nubank) = pró-labore líquido (bruto − INSS) + lucros distribuídos
     """
     mes    = int(str(ano_mes)[5:7])
     prev   = par["faturamento_minimo"] * par["prev_pct"] / 100
@@ -1692,7 +1696,7 @@ def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None):
         "faturamento": fat, "prev": prev, "das": das, "contador": par["contador"], "taxa": taxa,
         "pro_labore": par["pro_labore"], "inss": inss, "pl_liq": pl_liq,
         "lucros": lucros, "fies": fies, "lucros_nubank": lucros - fies,
-        "receita_pf": pl_liq + lucros, "nubank": pl_liq + lucros - fies,
+        "receita_pf": pl_liq + lucros - fies, "nubank": pl_liq + lucros - fies,
         "cartao": cartao, "sobra": pl_liq + lucros - fies - cartao,
     }
 
@@ -4041,7 +4045,8 @@ with aba_pj:
         st.info("configure os parâmetros PJ/PF em configurações (ou na aba pj_parametros da planilha) "
                 "para ver a previsão.")
     # ano anterior sempre disponível: dez do ano passado vira a receita de jan deste ano
-    _anos = sorted(set([_hoje_pj.year - 1, _hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo]))
+    _anos = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo])
+                   if a >= ANO_INICIO_PJ)
     _ano = st.segmented_control("ano", _anos, default=_hoje_pj.year,
                                 label_visibility="collapsed", key="pj_ano") or _hoje_pj.year
 
@@ -4091,8 +4096,31 @@ with aba_pj:
                                 _cart[k][0], _base_das(k))
              for k in _meses}
     _rot  = lambda k: f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}"
-    _soma = lambda campo: sum(c[campo] for c in _calc.values())   # soma pelos meses de recebimento
     _neg  = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
+    if _cart_erro:
+        st.warning(f"Controle de Fatura indisponível ({_cart_erro}) — cartão considerado R$0.")
+
+    def _tabela_pj(c, fat, extra, r_fat, r_extra, r_das, r_cart, extras=()):
+        """mesma tabela para o mês e para o ano: débitos e créditos da PJ, depois da PF"""
+        lin = [("pj-sec", "PJ", ""), ("", f"(+) {r_fat}", formatar_brl(fat))]
+        if extra:
+            lin.append(("", f"(+) {r_extra}", formatar_brl(extra)))
+        lin += [("", f"(−) {r_das}", formatar_brl(c["das"])),
+                ("", "(−) previdência", formatar_brl(c["prev"])),
+                ("", "(−) contador + taxas", formatar_brl(c["contador"] + c["taxa"])),
+                ("", "(−) FIES (débito BB)", formatar_brl(c["fies"])),
+                ("", "(−) pró-labore bruto", formatar_brl(c["pro_labore"])),
+                ("pj-tot", "lucros distribuídos", _neg(c["lucros_nubank"])),
+                ("pj-esp", "", ""),
+                ("pj-sec", "PF", ""),
+                ("", "(+) pró-labore líquido", formatar_brl(c["pl_liq"])),
+                ("", "(+) lucros distribuídos", _neg(c["lucros_nubank"])),
+                ("pj-tot", "disponível (nubank)", _neg(c["nubank"])),
+                ("", f"(−) {r_cart}", formatar_brl(c["cartao"])),
+                ("pj-tot", "sobra para investir", _neg(c["sobra"]))]
+        lin += list(extras)
+        return "<table class='pj-tab'>" + "".join(
+            f"<tr class='{cl}'><td>{x}</td><td>{y}</td></tr>" for cl, x, y in lin) + "</table>"
 
     _lay_pj = st.container(key="pj_layout")
     col_comp, col_fies = _lay_pj.columns([1, 1], gap="large")
@@ -4100,45 +4128,22 @@ with aba_pj:
     # ── composição de um mês ─────────────────────────────────────────────────
     with col_comp:
         st.markdown("<p class='cfg-sec'>composição do mês</p>", unsafe_allow_html=True)
-        st.markdown("<p class='cfg-nota'>mês de recebimento</p>", unsafe_allow_html=True)
         _idx_padrao = (_hoje_pj.month - 1) if _ano == _hoje_pj.year else 0
         _mes_sel = st.selectbox("mês", _meses, index=_idx_padrao, label_visibility="collapsed",
                                 format_func=_rot, key="pj_mes_sel")
         c = _calc[_mes_sel]
-        _linhas = [
-            ("", f"faturamento de {_rot(_comp[_mes_sel])}", formatar_brl(_fat_de(_comp[_mes_sel]))),
-        ] + ([("", f"(+) extra de {_rot(_mes_sel)} (recebido no mês)", formatar_brl(_extra_de(_mes_sel)))]
-             if _extra_de(_mes_sel) else []) + [
-            ("", "(−) previdência", formatar_brl(c["prev"])),
-            ("", (f"(−) DAS (notas de {_rot(_comp[_mes_sel])})" if _das_seg else "(−) DAS (retido no recebimento)"),
-             formatar_brl(c["das"])),
-            ("", "(−) contador + taxas", formatar_brl(c["contador"])),
-        ]
-        if c["taxa"] > 0:
-            _linhas.append(("", "(−) taxa prefeitura", formatar_brl(c["taxa"])))
-        _linhas += [
-            ("", "(−) pró-labore bruto", formatar_brl(c["pro_labore"])),
-            ("pj-tot", "lucros distribuídos", _neg(c["lucros"])),
-            ("pj-esp", "", ""),
-            ("", "pró-labore líquido", formatar_brl(c["pl_liq"])),
-            ("pj-sub", f"INSS retido (DARF): {formatar_brl(c['inss'])}", ""),
-            ("", "(+) lucros distribuídos", _neg(c["lucros"])),
-            ("pj-tot", "receita PF", _neg(c["receita_pf"])),
-            ("pj-esp", "", ""),
-            ("", "(−) FIES (débito BB)", formatar_brl(c["fies"])),
-            ("pj-sub", f"no nubank: {_neg(c['nubank'])}", ""),
-            ("", f"(−) fatura de {_rot(_comp[_mes_sel])} ({_cart[_mes_sel][1]})", formatar_brl(c["cartao"])),
-            ("pj-tot", "sobra para investir", _neg(c["sobra"])),
-        ]
-        _html = "<table class='pj-tab'>" + "".join(
-            f"<tr class='{cl}'><td>{a}</td><td>{b}</td></tr>" for cl, a, b in _linhas) + "</table>"
+        _ca = _comp[_mes_sel]
         with st.container(key="pj_comp_box", border=True):
-            st.markdown(_html, unsafe_allow_html=True)
-        if c["lucros"] < 0:
-            st.warning("faturamento abaixo dos custos fixos — não sobra lucro para distribuir neste mês.")
+            st.markdown(_tabela_pj(
+                c, _fat_de(_ca), _extra_de(_mes_sel),
+                f"faturamento de {_rot(_ca)}", f"extra de {_rot(_mes_sel)}",
+                f"DAS (notas de {_rot(_ca)})" if _das_seg else "DAS",
+                f"fatura de {_rot(_ca)} ({_cart[_mes_sel][1]})"), unsafe_allow_html=True)
+        if c["lucros_nubank"] < 0:
+            st.warning("faturamento abaixo dos custos — não sobra lucro para distribuir neste mês.")
 
+    # ── dívida: FIES ─────────────────────────────────────────────────────────
     with col_fies:
-        # ── dívida: FIES ─────────────────────────────────────────────────────
         _fs = fies_status(_par)
         if _fs and _fs["total"]:
             st.markdown("<p class='cfg-sec'>FIES</p>", unsafe_allow_html=True)
@@ -4146,83 +4151,51 @@ with aba_pj:
                 st.progress(_fs["pagas"] / _fs["total"],
                             text=f"{_fs['pagas']} de {_fs['total']} parcelas pagas · faltam {_fs['restantes']}")
                 _fl = [
-                    ("", "saldo devedor (nominal)", formatar_brl(_fs["saldo"])),
-                    ("", "parcela", formatar_brl(_par["fies"])),
-                    ("", "próximo débito",
-                     _fs["prox"].strftime("%d/%m/%Y") if _fs["prox"] is not None else "—"),
-                    ("", "última parcela", f"{_MES3[_fs['fim'].month - 1]}/{_fs['fim'].year}"),
+                    ("saldo devedor (nominal)", formatar_brl(_fs["saldo"])),
+                    ("parcela", formatar_brl(_par["fies"])),
+                    ("próximo débito", _fs["prox"].strftime("%d/%m/%Y") if _fs["prox"] is not None else "—"),
+                    ("última parcela", f"{_MES3[_fs['fim'].month - 1]}/{_fs['fim'].year}"),
                 ]
                 st.markdown("<table class='pj-tab'>" + "".join(
-                    f"<tr><td>{a}</td><td>{b}</td></tr>" for _, a, b in _fl) + "</table>",
+                    f"<tr><td>{x}</td><td>{y}</td></tr>" for x, y in _fl) + "</table>",
                     unsafe_allow_html=True)
 
     st.markdown("---")
 
-    # ── resumo do ano ────────────────────────────────────────────────────────
-    with st.container(key="row_all_pj_resumo"):
-        a1, a2, a3 = st.columns(3)
-        a1.metric(f"faturamento · {_ano}", formatar_brl(_soma("faturamento")))
-        a2.metric(f"receita PF · {_ano}", formatar_brl(_soma("receita_pf")))
-        a3.metric("média mensal PF", formatar_brl(_soma("receita_pf") / 12))
-        b1, b2, b3 = st.columns(3)
-        b1.metric("impostos (DAS + INSS)", formatar_brl(_soma("das") + _soma("inss")))
-        b2.metric("previdência", formatar_brl(_soma("prev")))
-        b3.metric("contador + taxas", formatar_brl(_soma("contador") + _soma("taxa")))
-        c1, c2, c3 = st.columns(3)
-        c1.metric(f"cartão · {_ano}", formatar_brl(_soma("cartao")))
-        c2.metric(f"FIES · {_ano}", formatar_brl(_soma("fies")))
-        c3.metric(f"sobra p/ investir · {_ano}", _neg(_soma("sobra")))
-    _cap_pj("valores pelo mês de recebimento: o faturamento e a fatura do cartão de um mês entram no "
-            "caixa do mês seguinte (o faturamento de dez/25 é a receita de jan/26); extras recebidos no "
-            "próprio mês entram no mês em que foram faturados.")
-    _sem_valor = [k for k in _comp.values() if k not in _fat_salvo]
-    if _sem_valor:
-        _cap_pj(f"{len(_sem_valor)} mês(es) sem faturamento informado — usando o faturamento base "
-                   f"({formatar_brl(_par['faturamento_minimo'])}) como previsão.")
-    _base_ini, _base_prox = pj_proxima_base(_par)
-    _txt_base = (f"previdência: {fmt_num(_par['prev_pct'], 1)}% do faturamento base "
-                 f"({formatar_brl(_par['faturamento_minimo'])})")
-    if _base_ini is not None:
-        _txt_base += (f" · vigente desde {_MES3[_base_ini.month - 1]}/{_base_ini.year}"
-                      f" · próxima atualização: {_MES3[_base_prox.month - 1]}/{_base_prox.year}")
-        if f"{_base_prox.year}-{_base_prox.month:02d}" <= _meses[-1]:
-            _txt_base += " (a previsão após essa data ainda usa a base atual)"
-    _cap_pj(_txt_base)
-    _cap_pj("DAS: pago no mês seguinte à emissão da nota — no caixa de cada mês sai o imposto das notas "
-            "do mês anterior, inclusive extras." if _das_seg else
-            "DAS: retido no recebimento (split payment) — sai junto com o valor recebido no mês.")
-    if _cart_erro:
-        _cap_pj(f"cartão: não foi possível ler o Controle de Fatura ({_cart_erro}) — considerado R$0.")
-    else:
-        _cap_pj("cartão: meses já fechados usam o valor da aba pf_cartao da planilha; sem valor lá, "
-                "o total do Controle de Fatura (ou a estimativa, antes do controle). mês atual "
-                f"parcial; meses futuros previstos pelo limite mensal ({formatar_brl(_cart_lim or 0)}).")
+    # ── resumo do ano (mesmo formato) + disponível por mês ───────────────────
+    _tot = {f: sum(v[f] for v in _calc.values()) for f in
+            ["das", "prev", "contador", "taxa", "fies", "pro_labore", "lucros_nubank",
+             "pl_liq", "nubank", "cartao", "sobra"]}
+    _lay2 = st.container(key="pj_layout2")
+    col_ano, col_graf = _lay2.columns([1, 1], gap="large")
+    with col_ano:
+        st.markdown(f"<p class='cfg-sec'>resumo de {_ano}</p>", unsafe_allow_html=True)
+        with st.container(key="pj_ano_box", border=True):
+            st.markdown(_tabela_pj(
+                _tot, sum(_fat_de(_comp[k]) for k in _meses), sum(_extra_de(k) for k in _meses),
+                "faturamento recebido", "extras", "DAS", "cartão",
+                extras=[("pj-sub", f"média mensal no nubank: {_neg(_tot['nubank'] / 12)}", "")]),
+                unsafe_allow_html=True)
 
-    st.markdown("---")
-
-    # ── receita da PF por mês ────────────────────────────────────────────────
-    _x  = [f"{_MES3[int(k[5:]) - 1]}" for k in _meses]
-    _y  = [_calc[k]["receita_pf"] for k in _meses]
-    _cor = ["#42A5F5" if (k <= _mes_atual_pj and _comp[k] in _fat_salvo) else "rgba(66,165,245,0.45)"
-            for k in _meses]
-    _hv = [f"<b>{_rot(k)}</b>"
-           f"<br>faturamento de {_rot(_comp[k])}: {formatar_brl(_fat_de(_comp[k]))}"
-           + (f"<br>extra de {_rot(k)}: {formatar_brl(_extra_de(k))}" if _extra_de(k) else "")
-           + f"<br>receita PF: {formatar_brl(_calc[k]['receita_pf'])}"
-           f"<br>FIES: {formatar_brl(_calc[k]['fies'])}"
-           f"<br>fatura de {_rot(_comp[k])} ({_cart[k][1]}): {formatar_brl(_calc[k]['cartao'])}"
-           f"<br>sobra: {_neg(_calc[k]['sobra'])}" for k in _meses]
-    fig_pj = go.Figure(go.Bar(x=_x, y=_y, marker_color=_cor,
-                              hovertemplate="%{customdata}<extra></extra>", customdata=_hv))
-    fig_pj.update_layout(
-        dragmode=False, height=260, showlegend=False, bargap=0.25,
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(showgrid=False, fixedrange=True),
-        yaxis=dict(showgrid=True, gridcolor="#222", fixedrange=True, tickformat="~s"),
-        margin=dict(t=10, b=10, l=10, r=10))
-    st.plotly_chart(fig_pj, width="stretch", config={"displayModeBar": False, "scrollZoom": False})
-    _cap_pj("receita PF por mês de recebimento · barras mais escuras: previsão "
-               "(mês futuro ou faturamento ainda não informado)")
+    with col_graf:
+        st.markdown("<p class='cfg-sec'>disponível (nubank) por mês</p>", unsafe_allow_html=True)
+        _x  = [f"{_MES3[int(k[5:]) - 1]}" for k in _meses]
+        _y  = [_calc[k]["nubank"] for k in _meses]
+        _cor = ["#42A5F5" if (k <= _mes_atual_pj and _comp[k] in _fat_salvo) else "rgba(66,165,245,0.45)"
+                for k in _meses]
+        _hv = [f"<b>{_rot(k)}</b>"
+               f"<br>disponível: {formatar_brl(_calc[k]['nubank'])}"
+               f"<br>cartão ({_cart[k][1]}): {formatar_brl(_calc[k]['cartao'])}"
+               f"<br>sobra: {_neg(_calc[k]['sobra'])}" for k in _meses]
+        fig_pj = go.Figure(go.Bar(x=_x, y=_y, marker_color=_cor,
+                                  hovertemplate="%{customdata}<extra></extra>", customdata=_hv))
+        fig_pj.update_layout(
+            dragmode=False, height=300, showlegend=False, bargap=0.25,
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(showgrid=False, fixedrange=True),
+            yaxis=dict(showgrid=True, gridcolor="#222", fixedrange=True, tickformat="~s"),
+            margin=dict(t=10, b=10, l=10, r=10))
+        st.plotly_chart(fig_pj, width="stretch", config={"displayModeBar": False, "scrollZoom": False})
 
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
@@ -4386,8 +4359,8 @@ with aba_config:
         st.markdown("<p class='cfg-sec'>faturamento por mês</p>", unsafe_allow_html=True)
         st.markdown("<p class='cfg-nota'>por mês de atividade — recebido no mês seguinte</p>",
                     unsafe_allow_html=True)
-        _anos_c = sorted(set([_hoje_pj.year - 1, _hoje_pj.year, _hoje_pj.year + 1] +
-                             [int(k[:4]) for k in _fat_salvo]))
+        _anos_c = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo])
+                         if a >= ANO_INICIO_PJ)
         _ano_c = st.segmented_control("ano do faturamento", _anos_c, default=_hoje_pj.year,
                                       label_visibility="collapsed", key="cfg_pj_ano") or _hoje_pj.year
         _ano = _ano_c
