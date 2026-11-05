@@ -21,6 +21,54 @@ st.markdown("""
         .stDataFrame div [role="columnheader"] > div { justify-content: center !important; text-align: center !important; }
         [data-testid="stMetricDelta"] { display: none !important; }
 
+        /* ── aba configurações: campos e botões compactos, linhas em grade ───── */
+        .st-key-cfg_area { max-width: 560px; }
+        .st-key-cfg_area [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
+        .st-key-cfg_area [data-testid="stMarkdownContainer"]:has(> p[class^="cfg-"]) { margin-bottom: 0 !important; }
+        .st-key-cfg_area [data-baseweb="input"],
+        .st-key-cfg_area [data-baseweb="base-input"] {
+            min-height: 2rem !important; height: 2rem !important;
+        }
+        .st-key-cfg_area [data-testid="stTextInput"] input {
+            padding: 0.15rem 0.4rem !important;
+            font-size: 0.85rem !important;
+            text-align: center;
+        }
+        .st-key-cfg_area button {
+            min-height: 2rem !important; padding: 0.15rem 1rem !important;
+        }
+        .st-key-cfg_area button p { font-size: 0.85rem !important; }
+        .st-key-cfg_area [data-testid="stForm"] {
+            padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
+        }
+        .cfg-sec   { font-size: 0.95rem; font-weight: 600; margin: 0.4rem 0 0 0; }
+        .cfg-grupo { font-size: 0.72rem; color: rgba(250,250,250,0.45); margin: 0.6rem 0 0 0; }
+        .cfg-ativo { font-size: 0.88rem; margin: 0; white-space: nowrap;
+                     overflow: hidden; text-overflow: ellipsis; }
+        .cfg-ativo-quebra { font-size: 0.85rem; margin: 0; line-height: 1.25; }
+        .cfg-col   { font-size: 0.7rem; color: rgba(250,250,250,0.5); text-align: center; margin: 0; }
+        .cfg-nota  { font-size: 0.75rem; color: rgba(250,250,250,0.5); margin: 0; }
+        /* linhas da grade (rótulo + 3 campos, ou rótulo + campo + botão): nunca quebram */
+        .st-key-cfg_area [class*="st-key-cfgrow_"] [data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important; gap: 0.4rem !important; align-items: center !important;
+        }
+        .st-key-cfg_area [class*="st-key-cfgrow_"] div[data-testid="stColumn"],
+        .st-key-cfg_area [class*="st-key-cfgrow_"] div[data-testid="column"] {
+            min-width: 0 !important; width: auto !important; flex: 1 1 0 !important;
+        }
+        .st-key-cfg_area [class*="st-key-cfgrow_"] div[data-testid="stColumn"]:first-child,
+        .st-key-cfg_area [class*="st-key-cfgrow_"] div[data-testid="column"]:first-child {
+            flex: 1.5 1 0 !important;
+        }
+        /* resumo por classe: 5 cards numa linha */
+        .st-key-cfg_resumo [data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important; gap: 0.3rem !important;
+        }
+        .st-key-cfg_resumo div[data-testid="stColumn"],
+        .st-key-cfg_resumo div[data-testid="column"] {
+            min-width: 0 !important; width: auto !important; flex: 1 1 0 !important;
+        }
+
         /* ── cards (st.metric + cards HTML): tipografia única para o app inteiro ──
            tudo que é "rótulo em cima / número embaixo" usa estes tokens; nenhum container
            deve redefinir tamanho de fonte de card. Mobile só troca os valores das variáveis. */
@@ -3648,6 +3696,7 @@ with aba_aportes:
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
+  with st.container(key="cfg_area"):
     _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
     _fiis_cfg   = [a for a in _ativos_cfg if _classe_de.get(a) == 'FII']
     _etfs_cfg   = [a for a in _ativos_cfg if _classe_de.get(a) == 'ETF']
@@ -3663,21 +3712,24 @@ with aba_config:
     def _fmt_v(cfg_ativo, campo):
         banda = _get_banda({"_": cfg_ativo}, "_") if not isinstance(cfg_ativo, dict) else cfg_ativo
         v = banda.get(campo)
-        return f"{v:.1f}".replace('.', ',') if v is not None else ""
+        return fmt_num(v, 1) if v is not None else ""
 
-    def _inputs_banda(container, ativo, cfg):
-        """renderiza 3 colunas mín/alvo/máx para um ativo"""
-        _banda = cfg.get(ativo, {})
-        c1, c2, c3 = container.columns(3)
-        c1.caption("mín")
-        c2.caption("alvo")
-        c3.caption("máx")
-        _min  = c1.text_input(f"{ativo}_min",  value=_fmt_v(_banda, 'min'),  label_visibility="collapsed", placeholder="ex: 18,0", key=f"min_{ativo}")
-        _alvo = c2.text_input(f"{ativo}_alvo", value=_fmt_v(_banda, 'alvo'), label_visibility="collapsed", placeholder="ex: 20,0", key=f"alvo_{ativo}")
-        _max  = c3.text_input(f"{ativo}_max",  value=_fmt_v(_banda, 'max'),  label_visibility="collapsed", placeholder="ex: 22,0", key=f"max_{ativo}")
-        return _min, _alvo, _max
+    def _md(col, cls, txt):
+        col.markdown(f"<p class='{cls}'>{txt}</p>", unsafe_allow_html=True)
 
-    # ── resumo por classe (topo) ──────────────────────────────────────────────
+    _n_linha = [0]
+    def _linha_banda(rotulo, banda, key_sfx):
+        """uma linha da grade: rótulo | mín | alvo | máx"""
+        _n_linha[0] += 1
+        with st.container(key=f"cfgrow_{_n_linha[0]}"):
+            c0, c1, c2, c3 = st.columns(4, vertical_alignment="center")
+            _md(c0, "cfg-ativo", rotulo)
+            _mn = c1.text_input("mín",  value=_fmt_v(banda, 'min'),  label_visibility="collapsed", key=f"min_{key_sfx}")
+            _al = c2.text_input("alvo", value=_fmt_v(banda, 'alvo'), label_visibility="collapsed", key=f"alvo_{key_sfx}")
+            _mx = c3.text_input("máx",  value=_fmt_v(banda, 'max'),  label_visibility="collapsed", key=f"max_{key_sfx}")
+        return _mn, _al, _mx
+
+    # ── resumo por classe (alvos salvos) ─────────────────────────────────────
     if _alvos_edit:
         def _alvo_c(ativo): return _get_banda(_alvos_edit, ativo).get('alvo') or 0
         _alvo_fii_cl = _get_banda(_alvos_edit, '__FIIs__').get('alvo') or 0
@@ -3685,78 +3737,49 @@ with aba_config:
         _soma_td_r   = sum(_alvo_c(a) for a in _td_cfg)
         _soma_cri_r  = sum(_alvo_c(a) for a in _cripto_cfg)
         _soma_total_r = _soma_etfs_r + _alvo_fii_cl + _soma_td_r + _soma_cri_r
-        _cor_r = "🟢" if abs(_soma_total_r - 100) < 0.01 else "🔴"
-        st.caption(f"{_cor_r} soma dos alvos: **{fmt_pct(_soma_total_r)}**")
-        _cols_rc = st.columns(4)
-        _cols_rc[0].metric("ETFs", fmt_pct(_soma_etfs_r))
-        _cols_rc[1].metric("FIIs", fmt_pct(_alvo_fii_cl))
-        _cols_rc[2].metric("Tesouro Direto", fmt_pct(_soma_td_r))
-        _cols_rc[3].metric("Cripto", fmt_pct(_soma_cri_r))
-        if _n_fiis_cfg > 0 and _alvo_fii_cl > 0:
-            st.caption(f"→ cada FII: {fmt_pct(_alvo_fii_cl / _n_fiis_cfg)} ({_n_fiis_cfg} ativos)")
+        with st.container(key="cfg_resumo"):
+            r = st.columns(5)
+            card_html(r[0], "ETFs", fmt_pct(_soma_etfs_r))
+            card_html(r[1], "FIIs", fmt_pct(_alvo_fii_cl))
+            card_html(r[2], "tesouro", fmt_pct(_soma_td_r))
+            card_html(r[3], "cripto", fmt_pct(_soma_cri_r))
+            card_html(r[4], "total", fmt_pct(_soma_total_r),
+                      "pos" if abs(_soma_total_r - 100) < 0.01 else "neg")
         st.markdown("---")
 
-    # ── formulário ───────────────────────────────────────────────────────────
-    st.caption("valores em % do total da carteira · a soma dos alvos deve fechar em 100%")
+    # ── alvos de alocação ────────────────────────────────────────────────────
+    _md(st, "cfg-sec", "alvos de alocação")
+    _md(st, "cfg-nota", "% da carteira · a soma dos alvos precisa fechar em 100%")
 
-    # ── fator de desconto vs PM ───────────────────────────────────────────────
-    st.markdown("#### pesos do simulador de aportes")
-    st.caption("fatores que ajustam a prioridade de cada ativo além do desvio de alocação")
-    _cf1, _cf2 = st.columns(2)
+    with st.form("form_cfg", border=True):
+        with st.container(key="cfgrow_cab"):
+            h0, h1, h2, h3 = st.columns(4)
+            _md(h0, "cfg-col", "")
+            _md(h1, "cfg-col", "mín")
+            _md(h2, "cfg-col", "alvo")
+            _md(h3, "cfg-col", "máx")
 
-    _fator_pm_atual = st.session_state.get("cfg_fator_pm", 0.3)
-    _fator_pm_str = _cf1.text_input(
-        "desconto vs preço médio (0–1)",
-        value=f"{_fator_pm_atual:.1f}".replace('.', ','),
-        placeholder="ex: 0,3", key="fator_pm_input",
-        help="0 = ignora · 1 = mesmo peso do desvio · recomendado: 0,3"
-    )
-    try:
-        _fpm = max(0.0, min(1.0, float(_fator_pm_str.replace(',', '.'))))
-        st.session_state["cfg_fator_pm"] = _fpm
-    except: pass
+        _inp_etf, _inp_td, _inp_cri = {}, {}, {}
+        if _etfs_cfg:
+            _md(st, "cfg-grupo", "ETFs")
+            for a in _etfs_cfg:
+                _inp_etf[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
 
-    _fator_perf_atual = st.session_state.get("cfg_fator_perf", 0.2)
-    _fator_perf_str = _cf2.text_input(
-        "queda nos últimos 90 dias (0–1)",
-        value=f"{_fator_perf_atual:.1f}".replace('.', ','),
-        placeholder="ex: 0,2", key="fator_perf_input",
-        help="0 = ignora · 1 = mesmo peso do desvio · recomendado: 0,2"
-    )
-    try:
-        _fperf = max(0.0, min(1.0, float(_fator_perf_str.replace(',', '.'))))
-        st.session_state["cfg_fator_perf"] = _fperf
-    except: pass
-    st.markdown("---")
+        _md(st, "cfg-grupo", "FIIs · alvo da classe, dividido igualmente")
+        _fii_min, _fii_alvo, _fii_max = _linha_banda(f"{_n_fiis_cfg} FIIs", _alvos_edit.get("__FIIs__", {}) or {}, "__FIIs__")
 
-    with st.form("form_cfg"):
-        st.markdown("**ETFs**")
-        _inp_etf = {}
-        for a in _etfs_cfg:
-            st.markdown(f"*{a}*")
-            _inp_etf[a] = _inputs_banda(st, a, _alvos_edit)
+        if _td_cfg:
+            _md(st, "cfg-grupo", "tesouro")
+            for a in _td_cfg:
+                _inp_td[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
 
-        st.markdown("**FIIs** *(alvo da classe — dividido igualmente entre os {n} ativos)*".format(n=_n_fiis_cfg))
-        _banda_fii = _alvos_edit.get("__FIIs__", {}) or {}
-        _cf1, _cf2, _cf3 = st.columns(3)
-        _cf1.caption("mín"); _cf2.caption("alvo"); _cf3.caption("máx")
-        _fii_min  = _cf1.text_input("fii_min",  value=_fmt_v(_banda_fii,'min'),  label_visibility="collapsed", placeholder="ex: 22,0", key="min___FIIs__")
-        _fii_alvo = _cf2.text_input("fii_alvo", value=_fmt_v(_banda_fii,'alvo'), label_visibility="collapsed", placeholder="ex: 25,0", key="alvo___FIIs__")
-        _fii_max  = _cf3.text_input("fii_max",  value=_fmt_v(_banda_fii,'max'),  label_visibility="collapsed", placeholder="ex: 28,0", key="max___FIIs__")
+        if _cripto_cfg:
+            _md(st, "cfg-grupo", "cripto")
+            for a in _cripto_cfg:
+                _inp_cri[a] = _linha_banda(a, _alvos_edit.get(a, {}), a)
 
-        st.markdown("**Tesouro Direto**")
-        _inp_td = {}
-        for a in _td_cfg:
-            st.markdown(f"*{a}*")
-            _inp_td[a] = _inputs_banda(st, a, _alvos_edit)
-
-        st.markdown("**Cripto**")
-        _inp_cri = {}
-        for a in _cripto_cfg:
-            st.markdown(f"*{a}*")
-            _inp_cri[a] = _inputs_banda(st, a, _alvos_edit)
-
-        _salvar = st.form_submit_button("salvar")
+        st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
+        _salvar = st.form_submit_button("salvar alvos", type="primary")
         if _salvar:
             _cfg_nova = {}
             _ok = True
@@ -3790,20 +3813,23 @@ with aba_config:
                 else:
                     if salvar_configuracoes(_cfg_nova):
                         st.session_state["cfg_alvos"] = _cfg_nova
-                        st.success("configurações salvas.")
+                        st.success("alvos salvos.")
                         st.rerun(scope="app")
 
     # ── metas de longo prazo ─────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown("#### metas")
+    _md(st, "cfg-sec", "metas")
     if "_metas" not in st.session_state:
         st.session_state["_metas"] = ler_metas()
-    _mc1, _mc2 = st.columns([3, 1], vertical_alignment="bottom")
-    _meta_str = _mc1.text_input(
-        "Renda+ 2050 — títulos até dez/2045",
-        value=fmt_num(st.session_state["_metas"].get("renda_2050_titulos_dez2045", 450), 2),
-        key="meta_renda_2045_input")
-    if _mc2.button("salvar meta", key="btn_salvar_meta", width="stretch"):
+    with st.container(key="cfgrow_meta"):
+        m0, m1, m2 = st.columns(3, vertical_alignment="center")
+        _md(m0, "cfg-ativo-quebra", "títulos de Renda+ 2050 até dez/45")
+        _meta_str = m1.text_input(
+            "meta Renda+", label_visibility="collapsed",
+            value=fmt_num(st.session_state["_metas"].get("renda_2050_titulos_dez2045", 450), 2),
+            key="meta_renda_2045_input")
+        _salvar_meta = m2.button("salvar", key="btn_salvar_meta")
+    if _salvar_meta:
         try:
             _v_meta = float(_meta_str.replace('.', '').replace(',', '.'))
             if _v_meta <= 0:
