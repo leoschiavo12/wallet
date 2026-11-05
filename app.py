@@ -32,7 +32,7 @@ st.markdown("""
                 margin-top: 1.2rem !important;
             }
         }
-        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box) {
+        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box) {
             padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
         }
         :is(.st-key-cfg_area, .st-key-pj_area) [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
@@ -1411,7 +1411,10 @@ PJ_PARAMS = [
     ("inss_pct",           "INSS sobre pró-labore (%)",         11.0,    1),
     ("das_pct",            "DAS (% do faturamento)",            6.0,     1),
     ("contador",           "contador + taxas (R$/mês)",         189.0,   2),
-    ("fies",               "débito BB / FIES (R$/mês)",         635.29,  2),
+    ("fies",               "FIES · parcela (R$)",               635.29,  2),
+    ("fies_total",         "FIES · total de parcelas",          174.0,   0),
+    ("fies_fim",           "FIES · última parcela (mm/aaaa)",   "12/2032", None),
+    ("fies_dia",           "FIES · dia do débito",              10.0,    0),
     ("taxa_prefeitura",    "taxa prefeitura (R$, em fevereiro)", 0.0,    2),
 ]
 
@@ -1424,6 +1427,78 @@ def pj_proxima_base(par, meses=18):
     except (ValueError, TypeError):
         return None, None
     return ini, ini + pd.DateOffset(months=meses)
+
+def fies_status(par, hoje=None):
+    """parcelas pagas/restantes, saldo nominal e próximo débito do FIES"""
+    hoje = (hoje or pd.Timestamp.today()).normalize()
+    try:
+        fim = pd.to_datetime("01/" + str(par.get("fies_fim", "")).strip(), format="%d/%m/%Y")
+    except (ValueError, TypeError):
+        return None
+    dia = int(par.get("fies_dia") or 10)
+    total = int(par.get("fies_total") or 0)
+    base = hoje.replace(day=1) if hoje.day < dia else (hoje.replace(day=1) + pd.DateOffset(months=1))
+    restantes = max((fim.year - base.year) * 12 + (fim.month - base.month) + 1, 0)
+    if total:
+        restantes = min(restantes, total)
+    prox = base.replace(day=min(dia, 28)) if restantes else None
+    return {"fim": fim, "restantes": restantes, "pagas": max(total - restantes, 0), "total": total,
+            "saldo": restantes * float(par.get("fies") or 0), "prox": prox}
+
+# planilha do app Controle de Fatura (mesma conta de serviço; só leitura)
+SHEET_ID_FATURA = "1JvAXJm6ThknEv3j8xd8Q1xAhLGnrGLt3MRGgsXBIsow"
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ler_cartao_mensal():
+    """
+    gasto no cartão por mês, lido do Controle de Fatura: aba lancamentos + abas arquivo_AAAA
+    (colunas data, categoria, descricao, valor). retorna ({'2026-11': 1234.5, ...},
+    limite_mensal da aba config ou None, erro ou None)
+    """
+    try:
+        svc = get_sheets_service()
+        abas = [s["properties"]["title"] for s in svc.get(
+            spreadsheetId=SHEET_ID_FATURA, fields="sheets.properties.title").execute()["sheets"]]
+        alvo = [a for a in abas if a == "lancamentos" or a.startswith("arquivo_")]
+        res = svc.values().batchGet(spreadsheetId=SHEET_ID_FATURA,
+                                    ranges=[f"'{a}'!A:D" for a in alvo] + ["'config'!A:B"] if "config" in abas
+                                    else [f"'{a}'!A:D" for a in alvo],
+                                    valueRenderOption="UNFORMATTED_VALUE",
+                                    dateTimeRenderOption="FORMATTED_STRING").execute()
+        faixas = res.get("valueRanges", [])
+        linhas = []
+        for fx in faixas[:len(alvo)]:
+            vals = fx.get("values", [])
+            if not vals:
+                continue
+            cab = [str(c).strip().lower() for c in vals[0]]
+            if "data" not in cab or "valor" not in cab:
+                continue
+            i_d, i_v = cab.index("data"), cab.index("valor")
+            for r in vals[1:]:
+                if len(r) > max(i_d, i_v):
+                    linhas.append((r[i_d], r[i_v]))
+        df = pd.DataFrame(linhas, columns=["data", "valor"])
+        if df.empty:
+            mensal = {}
+        else:
+            d = pd.to_datetime(df["data"].astype(str), format="%Y-%m-%d", errors="coerce")
+            d = d.fillna(pd.to_datetime(df["data"].astype(str), dayfirst=True, errors="coerce"))
+            v = df["valor"].apply(lambda x: x if isinstance(x, (int, float)) else _num_br(x)
+                                  if str(x).strip() else 0.0)
+            df = pd.DataFrame({"mes": d.dt.strftime("%Y-%m"), "valor": pd.to_numeric(v, errors="coerce")}).dropna()
+            mensal = df.groupby("mes")["valor"].sum().round(2).to_dict()
+        limite = None
+        if len(faixas) > len(alvo):
+            for r in faixas[-1].get("values", [])[1:]:
+                if len(r) >= 2 and str(r[0]).strip() == "limite_mensal":
+                    try:
+                        limite = float(r[1]) if isinstance(r[1], (int, float)) else _num_br(r[1])
+                    except ValueError:
+                        pass
+        return mensal, limite, None
+    except Exception as e:
+        return {}, None, str(e)[:80]
 
 def ler_pj_parametros():
     par = {k: d for k, _, d, _ in PJ_PARAMS}
@@ -1481,7 +1556,7 @@ def salvar_pj_faturamento(novos):
                         valueInputOption="RAW", body={"values": corpo}).execute()
     st.session_state.pop("_pj_fat", None)
 
-def calcular_pj_mes(fat, par, mes):
+def calcular_pj_mes(fat, par, ano_mes, cartao=0.0):
     """
     fluxo de um mês: faturamento da PJ → custos → pró-labore + lucros → receita da PF.
     previdência = % do faturamento BASE (revisto a cada 18 meses), mesmo quando o faturamento
@@ -1489,18 +1564,22 @@ def calcular_pj_mes(fat, par, mes):
     lucros = faturamento − previdência − DAS − contador − taxa prefeitura (fev) − pró-labore bruto
     receita PF = pró-labore líquido (bruto − INSS) + lucros  ·  parte dos lucros vai ao BB (FIES)
     """
+    mes    = int(str(ano_mes)[5:7])
     prev   = par["faturamento_minimo"] * par["prev_pct"] / 100
     das    = fat * par["das_pct"] / 100
     inss   = par["pro_labore"] * par["inss_pct"] / 100
     taxa   = par["taxa_prefeitura"] if mes == 2 else 0.0
     lucros = fat - prev - das - par["contador"] - taxa - par["pro_labore"]
-    fies   = min(par["fies"], max(lucros, 0.0))
+    _st_f  = fies_status(par)
+    _ativo = _st_f is None or str(ano_mes) <= _st_f["fim"].strftime("%Y-%m")
+    fies   = min(par["fies"], max(lucros, 0.0)) if _ativo else 0.0
     pl_liq = par["pro_labore"] - inss
     return {
         "faturamento": fat, "prev": prev, "das": das, "contador": par["contador"], "taxa": taxa,
         "pro_labore": par["pro_labore"], "inss": inss, "pl_liq": pl_liq,
         "lucros": lucros, "fies": fies, "lucros_nubank": lucros - fies,
         "receita_pf": pl_liq + lucros, "nubank": pl_liq + lucros - fies,
+        "cartao": cartao, "sobra": pl_liq + lucros - fies - cartao,
     }
 
 def salvar_meta(chave, valor, descricao=""):
@@ -2348,7 +2427,7 @@ for _a, _v in _ativos_info.items():
 _classe_de = dict(zip(_posicao['ativo'], _posicao['classe'])) if not _posicao.empty else {}
 
 aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_pj, aba_config = st.tabs(
-    ["dashboard", "detalhe", "lançamentos", "simulador", "PJ", "configurações"])
+    ["dashboard", "detalhe", "lançamentos", "simulador", "PJ/PF", "configurações"])
 
 with aba_dash:
 
@@ -3838,7 +3917,17 @@ with aba_pj:
 
     _meses = [f"{_ano}-{m:02d}" for m in range(1, 13)]
     _fat_mes = {k: float(_fat_salvo.get(k, _par["faturamento_minimo"])) for k in _meses}
-    _calc = {k: calcular_pj_mes(_fat_mes[k], _par, int(k[5:])) for k in _meses}
+    # cartão: meses passados = real (Controle de Fatura); mês atual e futuros = previsão pelo
+    # limite mensal de lá (ou o real, se já tiver passado do limite)
+    _cart_real, _cart_lim, _cart_erro = ler_cartao_mensal()
+    _mes_atual_pj = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
+    def _cartao(k):
+        real = float(_cart_real.get(k, 0.0))
+        if k < _mes_atual_pj:
+            return real, "real"
+        return max(real, float(_cart_lim or 0.0)), ("previsto" if _cart_lim else "parcial")
+    _cart = {k: _cartao(k) for k in _meses}
+    _calc = {k: calcular_pj_mes(_fat_mes[k], _par, k, _cart[k][0]) for k in _meses}
     _soma = lambda campo: sum(c[campo] for c in _calc.values())
     _neg  = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
 
@@ -3852,6 +3941,10 @@ with aba_pj:
         b1.metric("impostos (DAS + INSS)", formatar_brl(_soma("das") + _soma("inss")))
         b2.metric("previdência", formatar_brl(_soma("prev")))
         b3.metric("contador + taxas", formatar_brl(_soma("contador") + _soma("taxa")))
+        c1, c2, c3 = st.columns(3)
+        c1.metric(f"cartão · {_ano}", formatar_brl(_soma("cartao")))
+        c2.metric(f"FIES · {_ano}", formatar_brl(_soma("fies")))
+        c3.metric(f"sobra p/ investir · {_ano}", _neg(_soma("sobra")))
     _sem_valor = [k for k in _meses if k not in _fat_salvo]
     if _sem_valor:
         st.caption(f"{len(_sem_valor)} mês(es) sem faturamento informado — usando o faturamento base "
@@ -3865,22 +3958,33 @@ with aba_pj:
         if f"{_base_prox.year}-{_base_prox.month:02d}" <= _meses[-1]:
             _txt_base += " (a previsão após essa data ainda usa a base atual)"
     st.caption(_txt_base)
+    if _cart_erro:
+        st.caption(f"cartão: não foi possível ler o Controle de Fatura ({_cart_erro}) — considerado R$0.")
+    elif _cart_lim:
+        st.caption(f"cartão: real até o mês passado (Controle de Fatura); mês atual e futuros previstos pelo "
+                   f"limite mensal de lá ({formatar_brl(_cart_lim)}).")
 
     st.markdown("---")
 
     # ── receita da PF por mês ────────────────────────────────────────────────
-    _mes_atual_pj = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
     _x  = [f"{_MES3[int(k[5:]) - 1]}" for k in _meses]
     _y  = [_calc[k]["receita_pf"] for k in _meses]
     _cor = ["#42A5F5" if (k <= _mes_atual_pj and k in _fat_salvo) else "rgba(66,165,245,0.45)" for k in _meses]
     _hv = [f"<b>{_MES3[int(k[5:]) - 1]}/{k[2:4]}</b>"
            f"<br>faturamento: {formatar_brl(_calc[k]['faturamento'])}"
            f"<br>receita PF: {formatar_brl(_calc[k]['receita_pf'])}"
-           f"<br>nubank: {formatar_brl(_calc[k]['nubank'])}" for k in _meses]
-    fig_pj = go.Figure(go.Bar(x=_x, y=_y, marker_color=_cor,
-                              hovertemplate="%{customdata}<extra></extra>", customdata=_hv))
+           f"<br>FIES: {formatar_brl(_calc[k]['fies'])}"
+           f"<br>cartão ({_cart[k][1]}): {formatar_brl(_calc[k]['cartao'])}"
+           f"<br>sobra: {_neg(_calc[k]['sobra'])}" for k in _meses]
+    fig_pj = go.Figure()
+    fig_pj.add_trace(go.Bar(x=_x, y=_y, marker_color=_cor, name="receita PF",
+                            hovertemplate="%{customdata}<extra></extra>", customdata=_hv))
+    fig_pj.add_trace(go.Scatter(x=_x, y=[_calc[k]["sobra"] for k in _meses], name="sobra p/ investir",
+                                mode="lines+markers", line=dict(color="#9FE7C9", width=2.5),
+                                marker=dict(size=6), hoverinfo="skip"))
     fig_pj.update_layout(
-        dragmode=False, height=260, showlegend=False, bargap=0.25,
+        dragmode=False, height=280, showlegend=True, bargap=0.25,
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="left", x=0, font=dict(size=11)),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         xaxis=dict(showgrid=False, fixedrange=True),
         yaxis=dict(showgrid=True, gridcolor="#222", fixedrange=True, tickformat="~s"),
@@ -3938,8 +4042,11 @@ with aba_pj:
             ("pj-sub", f"INSS retido (DARF): {formatar_brl(c['inss'])}", ""),
             ("", "(+) lucros distribuídos", _neg(c["lucros"])),
             ("pj-tot", "receita PF", _neg(c["receita_pf"])),
-            ("pj-sub", "BB / FIES", formatar_brl(c["fies"])),
-            ("pj-sub", "nubank", _neg(c["nubank"])),
+            ("pj-esp", "", ""),
+            ("", "(−) FIES (débito BB)", formatar_brl(c["fies"])),
+            ("pj-sub", f"no nubank: {_neg(c['nubank'])}", ""),
+            ("", f"(−) cartão de crédito ({_cart[_mes_sel][1]})", formatar_brl(c["cartao"])),
+            ("pj-tot", "sobra para investir", _neg(c["sobra"])),
         ]
         _html = "<table class='pj-tab'>" + "".join(
             f"<tr class='{cl}'><td>{a}</td><td>{b}</td></tr>" for cl, a, b in _linhas) + "</table>"
@@ -3947,6 +4054,25 @@ with aba_pj:
             st.markdown(_html, unsafe_allow_html=True)
         if c["lucros"] < 0:
             st.warning("faturamento abaixo dos custos fixos — não sobra lucro para distribuir neste mês.")
+
+        # ── dívida: FIES ─────────────────────────────────────────────────────
+        _fs = fies_status(_par)
+        if _fs and _fs["total"]:
+            st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+            st.markdown("<p class='cfg-sec'>FIES</p>", unsafe_allow_html=True)
+            with st.container(key="pj_fies_box", border=True):
+                st.progress(_fs["pagas"] / _fs["total"],
+                            text=f"{_fs['pagas']} de {_fs['total']} parcelas pagas · faltam {_fs['restantes']}")
+                _fl = [
+                    ("", "saldo devedor (nominal)", formatar_brl(_fs["saldo"])),
+                    ("", "parcela", formatar_brl(_par["fies"])),
+                    ("", "próximo débito",
+                     _fs["prox"].strftime("%d/%m/%Y") if _fs["prox"] is not None else "—"),
+                    ("", "última parcela", f"{_MES3[_fs['fim'].month - 1]}/{_fs['fim'].year}"),
+                ]
+                st.markdown("<table class='pj-tab'>" + "".join(
+                    f"<tr><td>{a}</td><td>{b}</td></tr>" for _, a, b in _fl) + "</table>",
+                    unsafe_allow_html=True)
 
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
