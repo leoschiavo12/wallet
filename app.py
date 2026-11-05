@@ -24,33 +24,33 @@ st.markdown("""
         /* ── aba configurações: campos e botões compactos, linhas em grade ───── */
         /* layout alvos | metas: lado a lado no computador, empilhado no celular */
         @media (max-width: 768px) {
-            .st-key-cfg_layout div[data-testid="stColumn"],
-            .st-key-cfg_layout div[data-testid="column"] {
+            :is(.st-key-cfg_layout, .st-key-pj_layout) div[data-testid="stColumn"],
+            :is(.st-key-cfg_layout, .st-key-pj_layout) div[data-testid="column"] {
                 width: 100% !important; min-width: 100% !important; flex: 1 1 100% !important;
             }
-            .st-key-cfg_layout > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) {
+            :is(.st-key-cfg_layout, .st-key-pj_layout) > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) {
                 margin-top: 1.2rem !important;
             }
         }
-        .st-key-cfg_metas_box {
+        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box) {
             padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
         }
-        .st-key-cfg_area [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
-        .st-key-cfg_area [data-testid="stMarkdownContainer"]:has(> p[class^="cfg-"]) { margin-bottom: 0 !important; }
-        .st-key-cfg_area [data-baseweb="input"],
-        .st-key-cfg_area [data-baseweb="base-input"] {
+        :is(.st-key-cfg_area, .st-key-pj_area) [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
+        :is(.st-key-cfg_area, .st-key-pj_area) [data-testid="stMarkdownContainer"]:has(> p[class^="cfg-"]) { margin-bottom: 0 !important; }
+        :is(.st-key-cfg_area, .st-key-pj_area) [data-baseweb="input"],
+        :is(.st-key-cfg_area, .st-key-pj_area) [data-baseweb="base-input"] {
             min-height: 2rem !important; height: 2rem !important;
         }
-        .st-key-cfg_area [data-testid="stTextInput"] input {
+        :is(.st-key-cfg_area, .st-key-pj_area) [data-testid="stTextInput"] input {
             padding: 0.15rem 0.4rem !important;
             font-size: 0.85rem !important;
             text-align: center;
         }
-        .st-key-cfg_area button {
+        :is(.st-key-cfg_area, .st-key-pj_area) button {
             min-height: 2rem !important; padding: 0.15rem 1rem !important;
         }
-        .st-key-cfg_area button p { font-size: 0.85rem !important; }
-        .st-key-cfg_area [data-testid="stForm"] {
+        :is(.st-key-cfg_area, .st-key-pj_area) button p { font-size: 0.85rem !important; }
+        :is(.st-key-cfg_area, .st-key-pj_area) [data-testid="stForm"] {
             padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
         }
         .cfg-sec   { font-size: 0.95rem; font-weight: 600; margin: 0.4rem 0 0 0; }
@@ -59,25 +59,34 @@ st.markdown("""
                      overflow: hidden; text-overflow: ellipsis; }
         .cfg-ativo-quebra { font-size: 0.85rem; margin: 0; line-height: 1.25; }
         .cfg-col   { font-size: 0.7rem; color: rgba(250,250,250,0.5); text-align: center; margin: 0; }
+        .pj-tab    { width: 100%; border-collapse: collapse; font-size: 0.88rem; border: none !important; }
+        .pj-tab tr { border: none !important; background: transparent !important; }
+        .pj-tab td { padding: 0.28rem 0.2rem; border: none !important;
+                     border-bottom: 1px solid rgba(250,250,250,0.06) !important; }
+        .pj-tab td:last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .pj-tab tr.pj-tot td { font-weight: 600; border-bottom: 1px solid rgba(250,250,250,0.25) !important; }
+        .pj-tab tr.pj-sub td { color: rgba(250,250,250,0.6); font-size: 0.82rem; }
+        .pj-tab tr.pj-sub td:first-child { padding-left: 1rem; }
+        .pj-tab tr.pj-esp td { border-bottom: none !important; height: 0.6rem; padding: 0; }
         .cfg-nota  { font-size: 0.75rem; color: rgba(250,250,250,0.5); margin: 0; }
         /* linhas da grade (rótulo + 3 campos, ou rótulo + campo + botão): nunca quebram */
-        .st-key-cfg_area [class*="st-key-cfgrow_"] [data-testid="stHorizontalBlock"] {
+        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] [data-testid="stHorizontalBlock"] {
             flex-wrap: nowrap !important; gap: 0.4rem !important; align-items: center !important;
         }
-        .st-key-cfg_area [class*="st-key-cfgrow_"] div[data-testid="stColumn"],
-        .st-key-cfg_area [class*="st-key-cfgrow_"] div[data-testid="column"] {
+        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] div[data-testid="stColumn"],
+        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] div[data-testid="column"] {
             min-width: 0 !important; width: auto !important; flex: 1 1 0 !important;
         }
-        .st-key-cfg_area [class*="st-key-cfgrow_"] div[data-testid="stColumn"]:first-child,
-        .st-key-cfg_area [class*="st-key-cfgrow_"] div[data-testid="column"]:first-child {
+        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] div[data-testid="stColumn"]:first-child,
+        :is(.st-key-cfg_area, .st-key-pj_area) [class*="st-key-cfgrow_"] div[data-testid="column"]:first-child {
             flex: 1.5 1 0 !important;
         }
         /* resumo por classe: 5 cards numa linha */
-        .st-key-cfg_resumo [data-testid="stHorizontalBlock"] {
+        :is(.st-key-cfg_resumo, .st-key-pj_resumo) [data-testid="stHorizontalBlock"] {
             flex-wrap: nowrap !important; gap: 0.3rem !important;
         }
-        .st-key-cfg_resumo div[data-testid="stColumn"],
-        .st-key-cfg_resumo div[data-testid="column"] {
+        :is(.st-key-cfg_resumo, .st-key-pj_resumo) div[data-testid="stColumn"],
+        :is(.st-key-cfg_resumo, .st-key-pj_resumo) div[data-testid="column"] {
             min-width: 0 !important; width: auto !important; flex: 1 1 0 !important;
         }
 
@@ -1390,6 +1399,93 @@ def ler_metas():
             metas[k] = v
     return metas
 
+# ── PJ → PF: parâmetros e faturamento mensal (abas pj_parametros e pj_faturamento) ──
+SHEET_PJ_PAR_TAB = "pj_parametros"
+SHEET_PJ_FAT_TAB = "pj_faturamento"
+# chave, rótulo, padrão, casas decimais
+PJ_PARAMS = [
+    ("faturamento_minimo", "faturamento mínimo (R$)",           12520.0, 2),
+    ("prev_pct",           "previdência (% do fat. mínimo)",    10.0,    1),
+    ("pro_labore",         "pró-labore bruto (R$)",             1700.0,  2),
+    ("inss_pct",           "INSS sobre pró-labore (%)",         11.0,    1),
+    ("das_pct",            "DAS (% do faturamento)",            6.0,     1),
+    ("contador",           "contador + taxas (R$/mês)",         189.0,   2),
+    ("fies",               "débito BB / FIES (R$/mês)",         635.29,  2),
+    ("taxa_prefeitura",    "taxa prefeitura (R$, em fevereiro)", 0.0,    2),
+]
+
+def ler_pj_parametros():
+    par = {k: d for k, _, d, _ in PJ_PARAMS}
+    try:
+        rows = get_sheets_service().values().get(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_PAR_TAB}!A:B").execute().get("values", [])
+        for r in rows[1:]:
+            if len(r) >= 2 and r[0].strip() in par:
+                try:
+                    par[r[0].strip()] = _num_br(r[1])
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return par
+
+def salvar_pj_parametros(par):
+    svc = get_sheets_service()
+    _garantir_aba_existe(svc, SHEET_PJ_PAR_TAB, ["chave", "valor"])
+    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_PAR_TAB}!A:B").execute()
+    corpo = [["chave", "valor"]] + [[k, float(par[k])] for k, _, _, _ in PJ_PARAMS]
+    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_PAR_TAB}!A1",
+                        valueInputOption="RAW", body={"values": corpo}).execute()
+    st.session_state.pop("_pj_par", None)
+
+def ler_pj_faturamento():
+    """{'2026-11': 12520.0, ...}"""
+    fat = {}
+    try:
+        rows = get_sheets_service().values().get(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_FAT_TAB}!A:B").execute().get("values", [])
+        for r in rows[1:]:
+            if len(r) >= 2 and r[0].strip():
+                try:
+                    fat[r[0].strip()] = _num_br(r[1])
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return fat
+
+def salvar_pj_faturamento(novos):
+    """mescla {ano_mes: valor} com o que já existe e regrava a aba ordenada"""
+    tudo = ler_pj_faturamento()
+    tudo.update({k: float(v) for k, v in novos.items()})
+    svc = get_sheets_service()
+    _garantir_aba_existe(svc, SHEET_PJ_FAT_TAB, ["ano_mes", "faturamento"])
+    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_FAT_TAB}!A:B").execute()
+    corpo = [["ano_mes", "faturamento"]] + [[k, tudo[k]] for k in sorted(tudo)]
+    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_FAT_TAB}!A1",
+                        valueInputOption="RAW", body={"values": corpo}).execute()
+    st.session_state.pop("_pj_fat", None)
+
+def calcular_pj_mes(fat, par, mes):
+    """
+    fluxo de um mês: faturamento da PJ → custos → pró-labore + lucros → receita da PF.
+    lucros = faturamento − previdência − DAS − contador − taxa prefeitura (fev) − pró-labore bruto
+    receita PF = pró-labore líquido (bruto − INSS) + lucros  ·  parte dos lucros vai ao BB (FIES)
+    """
+    prev   = par["faturamento_minimo"] * par["prev_pct"] / 100
+    das    = fat * par["das_pct"] / 100
+    inss   = par["pro_labore"] * par["inss_pct"] / 100
+    taxa   = par["taxa_prefeitura"] if mes == 2 else 0.0
+    lucros = fat - prev - das - par["contador"] - taxa - par["pro_labore"]
+    fies   = min(par["fies"], max(lucros, 0.0))
+    pl_liq = par["pro_labore"] - inss
+    return {
+        "faturamento": fat, "prev": prev, "das": das, "contador": par["contador"], "taxa": taxa,
+        "pro_labore": par["pro_labore"], "inss": inss, "pl_liq": pl_liq,
+        "lucros": lucros, "fies": fies, "lucros_nubank": lucros - fies,
+        "receita_pf": pl_liq + lucros, "nubank": pl_liq + lucros - fies,
+    }
+
 def salvar_meta(chave, valor, descricao=""):
     """grava/atualiza uma meta na aba metas (cria a aba se precisar)"""
     svc = get_sheets_service()
@@ -2099,7 +2195,7 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
 _janela_sessao = janela_mercado(30)
 if st.session_state.get("_janela_sessao") != _janela_sessao:
     for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
-               "_ativos_info", "_metas", "_precos_falha"]:
+               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat"]:
         st.session_state.pop(_k, None)
     st.session_state["_janela_sessao"] = _janela_sessao
 
@@ -2234,7 +2330,8 @@ for _a, _v in _ativos_info.items():
 # classe de cada ativo em carteira (base das listas do simulador e das configurações)
 _classe_de = dict(zip(_posicao['ativo'], _posicao['classe'])) if not _posicao.empty else {}
 
-aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_config = st.tabs(["dashboard", "detalhe", "lançamentos", "simulador", "configurações"])
+aba_dash, aba_detalhe, aba_lanc, aba_aportes, aba_pj, aba_config = st.tabs(
+    ["dashboard", "detalhe", "lançamentos", "simulador", "PJ", "configurações"])
 
 with aba_dash:
 
@@ -3706,6 +3803,126 @@ with aba_aportes:
         # ── resumo da sugestão ────────────────────────────────────────────────
 
 
+# ── Aba PJ: faturamento da empresa → receita da pessoa física ────────────────
+with aba_pj:
+  with st.container(key="pj_area"):
+    if "_pj_par" not in st.session_state:
+        st.session_state["_pj_par"] = ler_pj_parametros()
+    if "_pj_fat" not in st.session_state:
+        st.session_state["_pj_fat"] = ler_pj_faturamento()
+    _par = st.session_state["_pj_par"]
+    _fat_salvo = st.session_state["_pj_fat"]
+
+    _MES3 = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
+    _hoje_pj = pd.Timestamp.today()
+    _anos = sorted(set([_hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo]))
+    _ano = st.segmented_control("ano", _anos, default=_hoje_pj.year,
+                                label_visibility="collapsed", key="pj_ano") or _hoje_pj.year
+
+    _meses = [f"{_ano}-{m:02d}" for m in range(1, 13)]
+    _fat_mes = {k: float(_fat_salvo.get(k, _par["faturamento_minimo"])) for k in _meses}
+    _calc = {k: calcular_pj_mes(_fat_mes[k], _par, int(k[5:])) for k in _meses}
+    _soma = lambda campo: sum(c[campo] for c in _calc.values())
+    _neg  = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
+
+    # ── resumo do ano ────────────────────────────────────────────────────────
+    with st.container(key="row_all_pj_resumo"):
+        a1, a2, a3 = st.columns(3)
+        a1.metric(f"faturamento · {_ano}", formatar_brl(_soma("faturamento")))
+        a2.metric(f"receita PF · {_ano}", formatar_brl(_soma("receita_pf")))
+        a3.metric("média mensal PF", formatar_brl(_soma("receita_pf") / 12))
+        b1, b2, b3 = st.columns(3)
+        b1.metric("impostos (DAS + INSS)", formatar_brl(_soma("das") + _soma("inss")))
+        b2.metric("previdência", formatar_brl(_soma("prev")))
+        b3.metric("contador + taxas", formatar_brl(_soma("contador") + _soma("taxa")))
+    _sem_valor = [k for k in _meses if k not in _fat_salvo]
+    if _sem_valor:
+        st.caption(f"{len(_sem_valor)} mês(es) sem faturamento informado — usando o faturamento mínimo "
+                   f"({formatar_brl(_par['faturamento_minimo'])}) como previsão.")
+
+    st.markdown("---")
+
+    # ── receita da PF por mês ────────────────────────────────────────────────
+    _mes_atual_pj = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
+    _x  = [f"{_MES3[int(k[5:]) - 1]}" for k in _meses]
+    _y  = [_calc[k]["receita_pf"] for k in _meses]
+    _cor = ["#42A5F5" if (k <= _mes_atual_pj and k in _fat_salvo) else "rgba(66,165,245,0.45)" for k in _meses]
+    _hv = [f"<b>{_MES3[int(k[5:]) - 1]}/{k[2:4]}</b>"
+           f"<br>faturamento: {formatar_brl(_calc[k]['faturamento'])}"
+           f"<br>receita PF: {formatar_brl(_calc[k]['receita_pf'])}"
+           f"<br>nubank: {formatar_brl(_calc[k]['nubank'])}" for k in _meses]
+    fig_pj = go.Figure(go.Bar(x=_x, y=_y, marker_color=_cor,
+                              hovertemplate="%{customdata}<extra></extra>", customdata=_hv))
+    fig_pj.update_layout(
+        dragmode=False, height=260, showlegend=False, bargap=0.25,
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(showgrid=False, fixedrange=True),
+        yaxis=dict(showgrid=True, gridcolor="#222", fixedrange=True, tickformat="~s"),
+        margin=dict(t=10, b=10, l=10, r=10))
+    st.plotly_chart(fig_pj, width="stretch", config={"displayModeBar": False, "scrollZoom": False})
+    st.caption("barras mais escuras: previsão (mês futuro ou sem faturamento informado)")
+
+    st.markdown("---")
+
+    _lay_pj = st.container(key="pj_layout")
+    col_fat, col_comp = _lay_pj.columns([1, 1], gap="large")
+
+    # ── faturamento por mês (editável) ───────────────────────────────────────
+    with col_fat:
+        st.markdown("<p class='cfg-sec'>faturamento por mês</p>", unsafe_allow_html=True)
+        st.markdown("<p class='cfg-nota'>informe o realizado e a previsão dos próximos meses</p>",
+                    unsafe_allow_html=True)
+        with st.form(f"form_pj_fat_{_ano}", border=True):
+            _df_ed = pd.DataFrame({"mês": [f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}" for k in _meses],
+                                   "faturamento": [_fat_mes[k] for k in _meses]})
+            _df_ret = st.data_editor(
+                _df_ed, hide_index=True, width="stretch", num_rows="fixed", key=f"pj_editor_{_ano}",
+                height="content",                    # 12 meses sem barra de rolagem
+                column_config={
+                    "mês": st.column_config.TextColumn("mês", disabled=True),
+                    "faturamento": st.column_config.NumberColumn("faturamento (R$)", min_value=0.0,
+                                                                 step=0.01, format="localized"),
+                })
+            if st.form_submit_button("salvar", type="primary"):
+                _novos = {k: float(v) for k, v in zip(_meses, _df_ret["faturamento"].fillna(0))}
+                salvar_pj_faturamento(_novos)
+                st.success("faturamento salvo.")
+                st.rerun(scope="app")
+
+    # ── composição de um mês ─────────────────────────────────────────────────
+    with col_comp:
+        st.markdown("<p class='cfg-sec'>composição do mês</p>", unsafe_allow_html=True)
+        _idx_padrao = (_hoje_pj.month - 1) if _ano == _hoje_pj.year else 0
+        _mes_sel = st.selectbox("mês", _meses, index=_idx_padrao, label_visibility="collapsed",
+                                format_func=lambda k: f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}", key="pj_mes_sel")
+        c = _calc[_mes_sel]
+        _linhas = [
+            ("", "faturamento", formatar_brl(c["faturamento"])),
+            ("", "(−) previdência", formatar_brl(c["prev"])),
+            ("", "(−) DAS", formatar_brl(c["das"])),
+            ("", "(−) contador + taxas", formatar_brl(c["contador"])),
+        ]
+        if c["taxa"] > 0:
+            _linhas.append(("", "(−) taxa prefeitura", formatar_brl(c["taxa"])))
+        _linhas += [
+            ("", "(−) pró-labore bruto", formatar_brl(c["pro_labore"])),
+            ("pj-tot", "lucros distribuídos", _neg(c["lucros"])),
+            ("pj-esp", "", ""),
+            ("", "pró-labore líquido", formatar_brl(c["pl_liq"])),
+            ("pj-sub", f"INSS retido (DARF): {formatar_brl(c['inss'])}", ""),
+            ("", "(+) lucros distribuídos", _neg(c["lucros"])),
+            ("pj-tot", "receita PF", _neg(c["receita_pf"])),
+            ("pj-sub", "BB / FIES", formatar_brl(c["fies"])),
+            ("pj-sub", "nubank", _neg(c["nubank"])),
+        ]
+        _html = "<table class='pj-tab'>" + "".join(
+            f"<tr class='{cl}'><td>{a}</td><td>{b}</td></tr>" for cl, a, b in _linhas) + "</table>"
+        with st.container(key="pj_comp_box", border=True):
+            st.markdown(_html, unsafe_allow_html=True)
+        if c["lucros"] < 0:
+            st.warning("faturamento abaixo dos custos fixos — não sobra lucro para distribuir neste mês.")
+
+
 # ── Aba configurações ─────────────────────────────────────────────────────────
 with aba_config:
   with st.container(key="cfg_area"):
@@ -3856,3 +4073,31 @@ with aba_config:
             st.rerun(scope="app")
         except ValueError:
             st.error("valor inválido — use um número, ex.: 450")
+
+    # ── parâmetros PJ ────────────────────────────────────────────────────────
+    st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
+    _md(st, "cfg-sec", "parâmetros PJ")
+    _md(st, "cfg-nota", "usados na previsão de receita da aba PJ")
+    if "_pj_par" not in st.session_state:
+        st.session_state["_pj_par"] = ler_pj_parametros()
+    _par_atual = st.session_state["_pj_par"]
+    _inp_pj = {}
+    with st.container(key="cfg_pj_box", border=True):
+        for _i, (_k, _rot, _pad, _cs) in enumerate(PJ_PARAMS):
+            with st.container(key=f"cfgrow_pj_{_i}"):
+                p0, p1 = st.columns(2, vertical_alignment="center")
+                _md(p0, "cfg-ativo-quebra", _rot)
+                _inp_pj[_k] = p1.text_input(_rot, label_visibility="collapsed",
+                                            value=fmt_num(_par_atual.get(_k, _pad), _cs, milhar=True), key=f"pj_par_{_k}")
+        st.markdown("<div style='height:0.3rem'></div>", unsafe_allow_html=True)
+        _salvar_pj = st.button("salvar", key="btn_salvar_pj_par", type="primary")
+    if _salvar_pj:
+        try:
+            _novo_par = {k: _num_br(v) for k, v in _inp_pj.items()}
+            if any(v < 0 for v in _novo_par.values()):
+                raise ValueError
+            salvar_pj_parametros(_novo_par)
+            st.success("parâmetros salvos.")
+            st.rerun(scope="app")
+        except ValueError:
+            st.error("valor inválido — use números, ex.: 12.520,00")
