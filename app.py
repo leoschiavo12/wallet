@@ -3939,7 +3939,10 @@ with aba_pj:
     if "_pj_fat" not in st.session_state:
         st.session_state["_pj_fat"] = ler_pj_faturamento()
     _par = st.session_state["_pj_par"]
-    _fat_salvo = st.session_state["_pj_fat"]
+    # sessões abertas antes da coluna "extra" guardaram {mês: valor}; normaliza para {mês: {fat, extra}}
+    _fat_salvo = {k: (v if isinstance(v, dict) else {"fat": float(v), "extra": 0.0})
+                  for k, v in st.session_state["_pj_fat"].items()}
+    st.session_state["_pj_fat"] = _fat_salvo
 
     _MES3 = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
     _hoje_pj = pd.Timestamp.today()
