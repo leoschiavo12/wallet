@@ -4008,6 +4008,11 @@ with aba_pj:
     _mes_atual_pj = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
     _rd_ts = _mes_ano(_par.get("cartao_real_desde"))
     _real_desde = _rd_ts.strftime("%Y-%m") if _rd_ts is not None else "0000-00"
+    if _rd_ts is None:
+        st.warning("cartão não configurado: preencha **cartão · controle real desde** e "
+                   "**cartão · média antes do controle** em configurações › parâmetros PJ/PF e salve. "
+                   "Sem isso a tabela *fatura do cartão* não aparece e os meses sem lançamento no "
+                   "Controle de Fatura entram como R$ 0.")
     def _cartao(a):
         if a < _real_desde:
             if a in _cart_manual:
