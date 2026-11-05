@@ -1404,8 +1404,9 @@ SHEET_PJ_PAR_TAB = "pj_parametros"
 SHEET_PJ_FAT_TAB = "pj_faturamento"
 # chave, rótulo, padrão, casas decimais
 PJ_PARAMS = [
-    ("faturamento_minimo", "faturamento mínimo (R$)",           12520.0, 2),
-    ("prev_pct",           "previdência (% do fat. mínimo)",    10.0,    1),
+    ("faturamento_minimo", "faturamento base (R$)",             12520.0, 2),
+    ("base_desde",         "base vigente desde (mm/aaaa)",      "",      None),
+    ("prev_pct",           "previdência (% do fat. base)",      10.0,    1),
     ("pro_labore",         "pró-labore bruto (R$)",             1700.0,  2),
     ("inss_pct",           "INSS sobre pró-labore (%)",         11.0,    1),
     ("das_pct",            "DAS (% do faturamento)",            6.0,     1),
@@ -1414,6 +1415,16 @@ PJ_PARAMS = [
     ("taxa_prefeitura",    "taxa prefeitura (R$, em fevereiro)", 0.0,    2),
 ]
 
+PJ_PARAMS_TEXTO = {k for k, _, _, cs in PJ_PARAMS if cs is None}
+
+def pj_proxima_base(par, meses=18):
+    """(início da base atual, próxima atualização) como Timestamps, ou (None, None)"""
+    try:
+        ini = pd.to_datetime("01/" + str(par.get("base_desde", "")).strip(), format="%d/%m/%Y")
+    except (ValueError, TypeError):
+        return None, None
+    return ini, ini + pd.DateOffset(months=meses)
+
 def ler_pj_parametros():
     par = {k: d for k, _, d, _ in PJ_PARAMS}
     try:
@@ -1421,6 +1432,9 @@ def ler_pj_parametros():
             spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_PAR_TAB}!A:B").execute().get("values", [])
         for r in rows[1:]:
             if len(r) >= 2 and r[0].strip() in par:
+                if r[0].strip() in PJ_PARAMS_TEXTO:
+                    par[r[0].strip()] = str(r[1]).strip()
+                    continue
                 try:
                     par[r[0].strip()] = _num_br(r[1])
                 except ValueError:
@@ -1433,7 +1447,8 @@ def salvar_pj_parametros(par):
     svc = get_sheets_service()
     _garantir_aba_existe(svc, SHEET_PJ_PAR_TAB, ["chave", "valor"])
     svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_PAR_TAB}!A:B").execute()
-    corpo = [["chave", "valor"]] + [[k, float(par[k])] for k, _, _, _ in PJ_PARAMS]
+    corpo = [["chave", "valor"]] + [[k, (str(par[k]) if k in PJ_PARAMS_TEXTO else float(par[k]))]
+                                    for k, _, _, _ in PJ_PARAMS]
     svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_PAR_TAB}!A1",
                         valueInputOption="RAW", body={"values": corpo}).execute()
     st.session_state.pop("_pj_par", None)
@@ -1469,6 +1484,8 @@ def salvar_pj_faturamento(novos):
 def calcular_pj_mes(fat, par, mes):
     """
     fluxo de um mês: faturamento da PJ → custos → pró-labore + lucros → receita da PF.
+    previdência = % do faturamento BASE (revisto a cada 18 meses), mesmo quando o faturamento
+    do mês fica acima ou abaixo da base.
     lucros = faturamento − previdência − DAS − contador − taxa prefeitura (fev) − pró-labore bruto
     receita PF = pró-labore líquido (bruto − INSS) + lucros  ·  parte dos lucros vai ao BB (FIES)
     """
@@ -3837,8 +3854,17 @@ with aba_pj:
         b3.metric("contador + taxas", formatar_brl(_soma("contador") + _soma("taxa")))
     _sem_valor = [k for k in _meses if k not in _fat_salvo]
     if _sem_valor:
-        st.caption(f"{len(_sem_valor)} mês(es) sem faturamento informado — usando o faturamento mínimo "
+        st.caption(f"{len(_sem_valor)} mês(es) sem faturamento informado — usando o faturamento base "
                    f"({formatar_brl(_par['faturamento_minimo'])}) como previsão.")
+    _base_ini, _base_prox = pj_proxima_base(_par)
+    _txt_base = (f"previdência: {fmt_num(_par['prev_pct'], 1)}% do faturamento base "
+                 f"({formatar_brl(_par['faturamento_minimo'])})")
+    if _base_ini is not None:
+        _txt_base += (f" · vigente desde {_MES3[_base_ini.month - 1]}/{_base_ini.year}"
+                      f" · próxima atualização: {_MES3[_base_prox.month - 1]}/{_base_prox.year}")
+        if f"{_base_prox.year}-{_base_prox.month:02d}" <= _meses[-1]:
+            _txt_base += " (a previsão após essa data ainda usa a base atual)"
+    st.caption(_txt_base)
 
     st.markdown("---")
 
@@ -4087,17 +4113,22 @@ with aba_config:
             with st.container(key=f"cfgrow_pj_{_i}"):
                 p0, p1 = st.columns(2, vertical_alignment="center")
                 _md(p0, "cfg-ativo-quebra", _rot)
-                _inp_pj[_k] = p1.text_input(_rot, label_visibility="collapsed",
-                                            value=fmt_num(_par_atual.get(_k, _pad), _cs, milhar=True), key=f"pj_par_{_k}")
+                _val0 = (str(_par_atual.get(_k, _pad)) if _cs is None
+                         else fmt_num(_par_atual.get(_k, _pad), _cs, milhar=True))
+                _inp_pj[_k] = p1.text_input(_rot, label_visibility="collapsed", value=_val0,
+                                            placeholder="ex: 05/2026" if _cs is None else None,
+                                            key=f"pj_par_{_k}")
         st.markdown("<div style='height:0.3rem'></div>", unsafe_allow_html=True)
         _salvar_pj = st.button("salvar", key="btn_salvar_pj_par", type="primary")
     if _salvar_pj:
         try:
-            _novo_par = {k: _num_br(v) for k, v in _inp_pj.items()}
-            if any(v < 0 for v in _novo_par.values()):
+            _novo_par = {k: (v.strip() if k in PJ_PARAMS_TEXTO else _num_br(v)) for k, v in _inp_pj.items()}
+            if any(v < 0 for k, v in _novo_par.items() if k not in PJ_PARAMS_TEXTO):
+                raise ValueError
+            if _novo_par.get("base_desde") and pj_proxima_base(_novo_par)[0] is None:
                 raise ValueError
             salvar_pj_parametros(_novo_par)
             st.success("parâmetros salvos.")
             st.rerun(scope="app")
         except ValueError:
-            st.error("valor inválido — use números, ex.: 12.520,00")
+            st.error("valor inválido — use números (ex.: 12.520,00) e a data como mm/aaaa (ex.: 05/2026)")
