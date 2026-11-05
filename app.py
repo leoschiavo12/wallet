@@ -1569,6 +1569,41 @@ def ler_pj_faturamento():
         pass
     return fat
 
+# fatura do cartão por mês de atividade, para os meses ANTES do controle real (Controle de Fatura)
+SHEET_PF_CARTAO_TAB = "pf_cartao"
+
+def ler_pf_cartao():
+    """{'2026-03': 5840.12, ...}"""
+    out = {}
+    try:
+        rows = get_sheets_service().values().get(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_PF_CARTAO_TAB}!A:B").execute().get("values", [])
+        for r in rows[1:]:
+            if len(r) >= 2 and str(r[0]).strip() and str(r[1]).strip():
+                try:
+                    out[str(r[0]).strip()] = _num_br(r[1])
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return out
+
+def salvar_pf_cartao(novos):
+    """mescla {ano_mes: valor ou None} (None apaga o mês) e regrava a aba ordenada"""
+    tudo = ler_pf_cartao()
+    for k, v in novos.items():
+        if v is None:
+            tudo.pop(k, None)
+        else:
+            tudo[k] = float(v)
+    svc = get_sheets_service()
+    _garantir_aba_existe(svc, SHEET_PF_CARTAO_TAB, ["ano_mes", "fatura"])
+    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_CARTAO_TAB}!A:B").execute()
+    corpo = [["ano_mes", "fatura"]] + [[k, tudo[k]] for k in sorted(tudo)]
+    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_CARTAO_TAB}!A1",
+                        valueInputOption="RAW", body={"values": corpo}).execute()
+    st.session_state.pop("_pf_cartao", None)
+
 def salvar_pj_faturamento(novos):
     """mescla {ano_mes: {'fat': x, 'extra': y}} com o que já existe e regrava a aba ordenada"""
     tudo = ler_pj_faturamento()
@@ -2317,7 +2352,7 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
 _janela_sessao = janela_mercado(30)
 if st.session_state.get("_janela_sessao") != _janela_sessao:
     for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
-               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat"]:
+               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao"]:
         st.session_state.pop(_k, None)
     st.session_state["_janela_sessao"] = _janela_sessao
 
@@ -3949,7 +3984,8 @@ with aba_pj:
     if not _par.get("faturamento_minimo"):
         st.info("configure os parâmetros PJ/PF em configurações (ou na aba pj_parametros da planilha) "
                 "para ver a previsão.")
-    _anos = sorted(set([_hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo]))
+    # ano anterior sempre disponível: dez do ano passado vira a receita de jan deste ano
+    _anos = sorted(set([_hoje_pj.year - 1, _hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo]))
     _ano = st.segmented_control("ano", _anos, default=_hoje_pj.year,
                                 label_visibility="collapsed", key="pj_ano") or _hoje_pj.year
 
@@ -3966,11 +4002,16 @@ with aba_pj:
     # cartão por mês de atividade: antes do controle real = média estimada; do controle em
     # diante = Controle de Fatura (mês atual parcial); meses futuros = limite mensal de lá
     _cart_real, _cart_lim, _cart_erro = ler_cartao_mensal()
+    if "_pf_cartao" not in st.session_state:
+        st.session_state["_pf_cartao"] = ler_pf_cartao()
+    _cart_manual = st.session_state["_pf_cartao"]
     _mes_atual_pj = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
     _rd_ts = _mes_ano(_par.get("cartao_real_desde"))
     _real_desde = _rd_ts.strftime("%Y-%m") if _rd_ts is not None else "0000-00"
     def _cartao(a):
         if a < _real_desde:
+            if a in _cart_manual:
+                return float(_cart_manual[a]), "informado"
             return float(_par.get("cartao_estimado") or 0.0), "estimado"
         if a < _mes_atual_pj:
             return float(_cart_real.get(a, 0.0)), "real"
@@ -4018,7 +4059,8 @@ with aba_pj:
         _cap_pj(f"cartão: não foi possível ler o Controle de Fatura ({_cart_erro}) — considerado R$0.")
     else:
         _rd = _par.get("cartao_real_desde", "")
-        _cap_pj(f"cartão: média estimada de {formatar_brl(_par.get('cartao_estimado') or 0)} até antes de "
+        _cap_pj(f"cartão: valor informado em 'fatura do cartão' (ou estimativa de "
+                f"{formatar_brl(_par.get('cartao_estimado') or 0)}) até antes de "
                    f"{_rd}; real (Controle de Fatura) a partir daí, com o mês atual parcial; meses futuros "
                    f"previstos pelo limite mensal de lá ({formatar_brl(_cart_lim or 0)}).")
 
@@ -4080,6 +4122,36 @@ with aba_pj:
                 salvar_pj_faturamento(_novos)
                 st.success("faturamento salvo.")
                 st.rerun(scope="app")
+
+        # ── fatura do cartão (meses antes do controle real) ─────────────────
+        _meses_cart = [k for k in _meses_ativ if k < _real_desde]
+        if _meses_cart:
+            st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
+            st.markdown("<p class='cfg-sec'>fatura do cartão</p>", unsafe_allow_html=True)
+            st.markdown(f"<p class='cfg-nota'>por mês dos gastos — só até antes de "
+                        f"{_rot(_real_desde)}; depois disso vem do Controle de Fatura. "
+                        f"meses não informados usam a estimativa ({formatar_brl(_par.get('cartao_estimado') or 0)})</p>",
+                        unsafe_allow_html=True)
+            with st.form(f"form_pf_cartao_{_ano}", border=True):
+                _df_c = pd.DataFrame({"mês": [_rot(k) for k in _meses_cart],
+                                      "fatura": [float(_cart_manual.get(k, _par.get("cartao_estimado") or 0.0))
+                                                 for k in _meses_cart]})
+                _df_c_ret = st.data_editor(
+                    _df_c, hide_index=True, width="stretch", num_rows="fixed", height="content",
+                    key=f"pf_cartao_editor_{_ano}",
+                    column_config={
+                        "mês": st.column_config.TextColumn("mês", disabled=True),
+                        "fatura": st.column_config.NumberColumn("fatura", min_value=0.0, step=0.01,
+                                                                format="localized"),
+                    })
+                if st.form_submit_button("salvar", type="primary"):
+                    # igual à estimativa (ou vazio) = não informado: o mês segue a estimativa
+                    _est_c = float(_par.get("cartao_estimado") or 0.0)
+                    _novos_c = {k: (None if pd.isna(v) or abs(float(v) - _est_c) < 0.005 else float(v))
+                                for k, v in zip(_meses_cart, _df_c_ret["fatura"])}
+                    salvar_pf_cartao(_novos_c)
+                    st.success("fatura salva.")
+                    st.rerun(scope="app")
 
     # ── composição de um mês ─────────────────────────────────────────────────
     with col_comp:
