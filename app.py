@@ -4055,16 +4055,26 @@ with aba_pj:
     # ano anterior sempre disponível: dez do ano passado vira a receita de jan deste ano
     _anos = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo])
                    if a >= ANO_INICIO_PJ)
-    _prox_pj = _hoje_pj + pd.DateOffset(months=1)                     # padrão: próximo mês
+    # mês exibido ao abrir: antes do dia 10, o mês atual (fatura do mês anterior já fechada);
+    # do dia 10 em diante, o próximo mês (fatura do mês atual ainda parcial)
+    _prox_pj = _hoje_pj if _hoje_pj.day < 10 else _hoje_pj + pd.DateOffset(months=1)
     if _prox_pj.year not in _anos:
         _anos = sorted(_anos + [_prox_pj.year])
-    _ano = st.segmented_control("ano", _anos, default=_prox_pj.year,
-                                label_visibility="collapsed", key="pj_ano") or _prox_pj.year
-    _mes_num = st.selectbox("mês", list(range(1, 13)) + [0],          # 0 = ano inteiro
-                            index=(_prox_pj.month - 1) if _ano == _prox_pj.year else 0,
-                            format_func=lambda m: _MES3[m - 1] if m else "ano", label_visibility="collapsed",
-                            key=f"pj_mes_num_{_ano}", width=80,
-                            filter_mode=None)                        # sem digitação
+
+    # tabela no topo; seletores de ano/mês num expander abaixo dela (preenchidos antes da tabela)
+    _lay_pj = st.container(key="pj_layout")
+    col_comp, col_fies = _lay_pj.columns([1, 1], gap="large")
+    with col_comp:
+        _ph_tit = st.empty()
+        _ph_tab = st.container()
+        with st.expander("histórico e próximos meses"):
+            _ano = st.segmented_control("ano", _anos, default=_prox_pj.year,
+                                        label_visibility="collapsed", key="pj_ano") or _prox_pj.year
+            _mes_num = st.selectbox("mês", list(range(1, 13)) + [0],          # 0 = ano inteiro
+                                    index=(_prox_pj.month - 1) if _ano == _prox_pj.year else 0,
+                                    format_func=lambda m: _MES3[m - 1] if m else "ano",
+                                    label_visibility="collapsed", key=f"pj_mes_num_{_ano}", width=80,
+                                    filter_mode=None)                        # sem digitação
 
     # regime: a atividade de um mês (faturamento da PJ e gastos no cartão) se realiza no mês
     # seguinte — o faturamento de fev entra em mar e a fatura de fev é paga em mar.
@@ -4137,18 +4147,13 @@ with aba_pj:
         return "<table class='pj-tab'>" + "".join(
             f"<tr class='{cl}'><td>{x}</td><td>{y}</td></tr>" for cl, x, y in lin) + "</table>"
 
-    _lay_pj = st.container(key="pj_layout")
-    col_comp, col_fies = _lay_pj.columns([1, 1], gap="large")
-
     # ── composição de um mês ─────────────────────────────────────────────────
     with col_comp:
         _MES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
                     'setembro','outubro','novembro','dezembro']
-        _mes_atual_ym = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
         if _mes_num:
             _mes_sel = f"{_ano}-{_mes_num:02d}"
-            _tit = (("resumo " if _mes_sel < _mes_atual_ym else "previsão ") + _MES_EXT[_mes_num - 1]
-                    + ("" if _ano == _prox_pj.year else f" {_ano}"))
+            _tit = _MES_EXT[_mes_num - 1] + ("" if _ano == _hoje_pj.year else f" {_ano}")
             c = _calc[_mes_sel]
             _ca = _comp[_mes_sel]
             _tab = _tabela_pj(
@@ -4158,17 +4163,18 @@ with aba_pj:
                 f"fatura de {_rot(_ca)} ({_cart[_mes_sel][1]})")
         else:
             # ano inteiro: soma dos 12 meses de recebimento
-            _tit = f"resumo {_ano}"
+            _tit = str(_ano)
             c = {f: sum(v[f] for v in _calc.values()) for f in
                  ["das", "prev", "contador", "taxa", "fies", "pro_labore", "lucros",
                   "pl_liq", "receita_pf", "cartao", "sobra"]}
             _tab = _tabela_pj(c, sum(_fat_de(_comp[k]) for k in _meses), sum(_extra_de(k) for k in _meses),
                               "faturamento recebido", "extras", "DAS", "cartão")
-        st.markdown(f"<p class='cfg-sec'>{_tit}</p>", unsafe_allow_html=True)
-        with st.container(key="pj_comp_box", border=True):
-            st.markdown(_tab, unsafe_allow_html=True)
-        if _mes_num and c["lucros"] < 0:
-            st.warning("faturamento abaixo dos custos — não sobra lucro para distribuir neste mês.")
+        _ph_tit.markdown(f"<p class='cfg-sec'>{_tit}</p>", unsafe_allow_html=True)
+        with _ph_tab:
+            with st.container(key="pj_comp_box", border=True):
+                st.markdown(_tab, unsafe_allow_html=True)
+            if _mes_num and c["lucros"] < 0:
+                st.warning("faturamento abaixo dos custos — não sobra lucro para distribuir neste mês.")
 
     # ── dívida: FIES ─────────────────────────────────────────────────────────
     with col_fies:
