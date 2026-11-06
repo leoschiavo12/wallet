@@ -4063,7 +4063,8 @@ with aba_pj:
     _mes_num = st.selectbox("mês", list(range(1, 13)) + [0],          # 0 = ano inteiro
                             index=(_prox_pj.month - 1) if _ano == _prox_pj.year else 0,
                             format_func=lambda m: _MES3[m - 1] if m else "ano", label_visibility="collapsed",
-                            key=f"pj_mes_num_{_ano}", width=80)
+                            key=f"pj_mes_num_{_ano}", width=80,
+                            filter_mode=None)                        # sem digitação
 
     # regime: a atividade de um mês (faturamento da PJ e gastos no cartão) se realiza no mês
     # seguinte — o faturamento de fev entra em mar e a fatura de fev é paga em mar.
