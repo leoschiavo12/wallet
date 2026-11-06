@@ -68,10 +68,14 @@ st.markdown("""
         .pj-tab tr.pj-sub td { color: rgba(250,250,250,0.6); font-size: 0.82rem; }
         .pj-tab tr.pj-sub td:first-child { padding-left: 1rem; }
         .pj-tab tr.pj-esp td { border-bottom: none !important; height: 0.6rem; padding: 0; }
-        [class*="st-key-pj_mes_num_"] [role="group"] { min-height: 1.9rem !important; height: 1.9rem !important; }
-        [class*="st-key-pj_mes_num_"] input { font-size: 0.82rem !important; padding-top: 0 !important;
-            padding-bottom: 0 !important; }
-        [class*="st-key-pj_mes_num_"] button svg { width: 1rem !important; height: 1rem !important; }
+        /* seletor de mês no mesmo visual do seletor de ano (contorno, altura e fonte iguais) */
+        [class*="st-key-pj_mes_num_"] [role="group"] { min-height: 0 !important; height: 28px !important;
+            background: transparent !important; border: 1px solid rgba(250,250,250,0.2) !important;
+            border-radius: 7px !important; }
+        [class*="st-key-pj_mes_num_"] input { font-size: 0.85rem !important; padding: 0 0 0 0.85rem !important;
+            height: 26px !important; line-height: 26px !important; }
+        [class*="st-key-pj_mes_num_"] button { padding: 0 0.4rem 0 0 !important; }
+        [class*="st-key-pj_mes_num_"] button svg { width: 0.95rem !important; height: 0.95rem !important; }
         .pj-tab tr.pj-sec td { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
                                text-transform: uppercase; color: rgba(250,250,250,0.5); padding-top: 0.15rem; }
         .cfg-nota  { font-size: 0.75rem; color: rgba(250,250,250,0.5); margin: 0; }
@@ -4059,7 +4063,7 @@ with aba_pj:
     _mes_num = st.selectbox("mês", list(range(1, 13)) + [0],          # 0 = ano inteiro
                             index=(_prox_pj.month - 1) if _ano == _prox_pj.year else 0,
                             format_func=lambda m: _MES3[m - 1] if m else "ano", label_visibility="collapsed",
-                            key=f"pj_mes_num_{_ano}", width=88)
+                            key=f"pj_mes_num_{_ano}", width=80)
 
     # regime: a atividade de um mês (faturamento da PJ e gastos no cartão) se realiza no mês
     # seguinte — o faturamento de fev entra em mar e a fatura de fev é paga em mar.
