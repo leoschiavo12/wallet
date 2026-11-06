@@ -4052,6 +4052,10 @@ with aba_pj:
         _anos = sorted(_anos + [_prox_pj.year])
     _ano = st.segmented_control("ano", _anos, default=_prox_pj.year,
                                 label_visibility="collapsed", key="pj_ano") or _prox_pj.year
+    _mes_num = st.segmented_control("mês", list(range(1, 13)),
+                                    default=_prox_pj.month if _ano == _prox_pj.year else 1,
+                                    format_func=lambda m: _MES3[m - 1], label_visibility="collapsed",
+                                    key="pj_mes_num") or (_prox_pj.month if _ano == _prox_pj.year else 1)
 
     # regime: a atividade de um mês (faturamento da PJ e gastos no cartão) se realiza no mês
     # seguinte — o faturamento de fev entra em mar e a fatura de fev é paga em mar.
@@ -4117,8 +4121,8 @@ with aba_pj:
                 ("pj-sec", "PF", ""),
                 ("", "(+) pró-labore líquido", formatar_brl(c["pl_liq"])),
                 ("", "(+) lucros distribuídos", _neg(c["lucros"])),
+                ("pj-tot", "saldo disponível / nubank", _neg(c["receita_pf"])),
                 ("", "(−) FIES / débito BB", formatar_brl(c["fies"])),
-                ("pj-tot", "saldo disponível / nubank", _neg(c["nubank"])),
                 ("", f"(−) {r_cart}", formatar_brl(c["cartao"])),
                 ("pj-tot", "sobra para investir", _neg(c["sobra"]))]
         return "<table class='pj-tab'>" + "".join(
@@ -4129,10 +4133,11 @@ with aba_pj:
 
     # ── composição de um mês ─────────────────────────────────────────────────
     with col_comp:
-        st.markdown("<p class='cfg-sec'>composição do mês</p>", unsafe_allow_html=True)
-        _idx_padrao = (_prox_pj.month - 1) if _ano == _prox_pj.year else 0
-        _mes_sel = st.selectbox("mês", _meses, index=_idx_padrao, label_visibility="collapsed",
-                                format_func=_rot, key="pj_mes_sel")
+        _mes_sel = f"{_ano}-{_mes_num:02d}"
+        _MES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
+                    'setembro','outubro','novembro','dezembro']
+        _tit = f"previsão {_MES_EXT[_mes_num - 1]}" + ("" if _ano == _prox_pj.year else f" {_ano}")
+        st.markdown(f"<p class='cfg-sec'>{_tit}</p>", unsafe_allow_html=True)
         c = _calc[_mes_sel]
         _ca = _comp[_mes_sel]
         with st.container(key="pj_comp_box", border=True):
