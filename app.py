@@ -4052,10 +4052,10 @@ with aba_pj:
         _anos = sorted(_anos + [_prox_pj.year])
     _ano = st.segmented_control("ano", _anos, default=_prox_pj.year,
                                 label_visibility="collapsed", key="pj_ano") or _prox_pj.year
-    _mes_num = st.segmented_control("mês", list(range(1, 13)),
-                                    default=_prox_pj.month if _ano == _prox_pj.year else 1,
-                                    format_func=lambda m: _MES3[m - 1], label_visibility="collapsed",
-                                    key="pj_mes_num") or (_prox_pj.month if _ano == _prox_pj.year else 1)
+    _mes_num = st.selectbox("mês", list(range(1, 13)),
+                            index=(_prox_pj.month - 1) if _ano == _prox_pj.year else 0,
+                            format_func=lambda m: _MES3[m - 1], label_visibility="collapsed",
+                            key=f"pj_mes_num_{_ano}", width=110)
 
     # regime: a atividade de um mês (faturamento da PJ e gastos no cartão) se realiza no mês
     # seguinte — o faturamento de fev entra em mar e a fatura de fev é paga em mar.
@@ -4136,7 +4136,9 @@ with aba_pj:
         _mes_sel = f"{_ano}-{_mes_num:02d}"
         _MES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
                     'setembro','outubro','novembro','dezembro']
-        _tit = f"previsão {_MES_EXT[_mes_num - 1]}" + ("" if _ano == _prox_pj.year else f" {_ano}")
+        _mes_atual_ym = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
+        _tit = (("resumo " if _mes_sel < _mes_atual_ym else "previsão ") + _MES_EXT[_mes_num - 1]
+                + ("" if _ano == _prox_pj.year else f" {_ano}"))
         st.markdown(f"<p class='cfg-sec'>{_tit}</p>", unsafe_allow_html=True)
         c = _calc[_mes_sel]
         _ca = _comp[_mes_sel]
@@ -4151,12 +4153,16 @@ with aba_pj:
 
     # ── dívida: FIES ─────────────────────────────────────────────────────────
     with col_fies:
-        _fs = fies_status(_par)
+        # situação ao fim do mês selecionado (já com o débito daquele mês)
+        _fim_mes_sel = pd.Timestamp(f"{_mes_sel}-01") + pd.offsets.MonthEnd(0)
+        _fs = fies_status(_par, _fim_mes_sel)
         if _fs and _fs["total"]:
-            st.markdown("<p class='cfg-sec'>FIES</p>", unsafe_allow_html=True)
+            st.markdown(f"<p class='cfg-sec'>FIES · fim de {_rot(_mes_sel)}</p>", unsafe_allow_html=True)
             with st.container(key="pj_fies_box", border=True):
-                st.progress(_fs["pagas"] / _fs["total"],
-                            text=f"{_fs['pagas']} de {_fs['total']} parcelas pagas · faltam {_fs['restantes']}")
+                _pct_fies = _fs["pagas"] / _fs["total"]
+                st.progress(_pct_fies,
+                            text=f"{_fs['pagas']} de {_fs['total']} parcelas pagas · "
+                                 f"{fmt_pct(_pct_fies * 100)} · faltam {_fs['restantes']}")
                 _fl = [
                     ("saldo devedor (nominal)", formatar_brl(_fs["saldo"])),
                     ("parcela", formatar_brl(_par["fies"])),
