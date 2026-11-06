@@ -1426,6 +1426,7 @@ PJ_PARAMS = [
     ("fies_total",         "FIES · total de parcelas",          0.0,     0),
     ("fies_fim",           "FIES · última parcela (mm/aaaa)",   "",      None),
     ("fies_dia",           "FIES · dia do débito",              10.0,    0),
+    ("reembolso_base",     "reembolsos · base mensal (R$)",     0.0,     2),
     ("taxa_prefeitura",    "taxa prefeitura (R$, em fevereiro)", 0.0,    2),
     ("cartao_estimado",    "cartão · média antes do controle (R$)", 0.0, 2),
     ("cartao_real_desde",  "cartão · controle real desde (mm/aaaa)", "", None),
@@ -1440,7 +1441,7 @@ PJ_PARAMS_OCULTOS = {"fies", "fies_total", "fies_fim", "fies_dia"}
 # chave | desde (aaaa-mm) | valor). cada mês usa o último valor com desde <= mês.
 SHEET_PJ_HIST_TAB = "pj_parametros_hist"
 PJ_PARAMS_HIST = ["faturamento_minimo", "prev_pct", "pro_labore", "inss_pct", "das_pct",
-                  "contador", "taxa_prefeitura"]
+                  "contador", "taxa_prefeitura", "reembolso_base"]
 
 def _mes_ano(s):
     """'12/2032' · '01/12/2032' · '2032-12-01' → Timestamp do dia 1º do mês, ou None"""
@@ -1667,6 +1668,40 @@ def salvar_pf_cartao(novos):
                         valueInputOption="RAW", body={"values": corpo}).execute()
     st.session_state.pop("_pf_cartao", None)
 
+SHEET_PF_REEMB_TAB = "pf_reembolsos"     # reembolsos extras por mês de recebimento (além da base)
+
+def ler_pf_reembolsos():
+    """{'2026-03': 450.0, ...} — só os extras; a base mensal vem dos parâmetros"""
+    out = {}
+    try:
+        rows = get_sheets_service().values().get(
+            spreadsheetId=SHEET_ID, range=f"{SHEET_PF_REEMB_TAB}!A:B").execute().get("values", [])
+        for r in rows[1:]:
+            if len(r) >= 2 and str(r[0]).strip() and str(r[1]).strip():
+                try:
+                    out[str(r[0]).strip()] = _num_br(r[1])
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return out
+
+def salvar_pf_reembolsos(novos):
+    """mescla {ano_mes: valor} (0 ou None apaga o mês) e regrava a aba ordenada"""
+    tudo = ler_pf_reembolsos()
+    for k, v in novos.items():
+        if v is None or abs(float(v)) < 0.005:
+            tudo.pop(k, None)
+        else:
+            tudo[k] = float(v)
+    svc = get_sheets_service()
+    _garantir_aba_existe(svc, SHEET_PF_REEMB_TAB, ["ano_mes", "reembolso_extra"])
+    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_REEMB_TAB}!A:B").execute()
+    corpo = [["ano_mes", "reembolso_extra"]] + [[k, tudo[k]] for k in sorted(tudo)]
+    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_REEMB_TAB}!A1",
+                        valueInputOption="RAW", body={"values": corpo}).execute()
+    st.session_state.pop("_pf_reemb", None)
+
 def salvar_pj_faturamento(novos):
     """mescla {ano_mes: {'fat': x, 'extra': y}} com o que já existe e regrava a aba ordenada"""
     tudo = ler_pj_faturamento()
@@ -1680,14 +1715,15 @@ def salvar_pj_faturamento(novos):
                         valueInputOption="RAW", body={"values": corpo}).execute()
     st.session_state.pop("_pj_fat", None)
 
-def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None):
+def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.0):
     """
     fluxo de um mês: faturamento da PJ → custos → pró-labore + lucros → receita da PF.
     previdência = % do faturamento BASE (revisto a cada 18 meses), mesmo quando o faturamento
     do mês fica acima ou abaixo da base.
     base_das = notas cujo DAS é pago neste mês (padrão: o próprio faturamento recebido)
     lucros = faturamento − previdência − DAS − contador − taxa prefeitura (fev) − pró-labore bruto
-    receita PF = pró-labore líquido (bruto − INSS) + lucros distribuídos
+    receita PF = pró-labore líquido (bruto − INSS) + lucros distribuídos + reembolsos
+    (reembolsos = base mensal + extras do mês; entram direto na PF, fora da PJ)
     saldo no nubank = receita PF − FIES (débito no BB)
     """
     mes    = int(str(ano_mes)[5:7])
@@ -1700,12 +1736,14 @@ def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None):
     _ativo = _st_f is None or str(ano_mes) <= _st_f["fim"].strftime("%Y-%m")
     fies   = min(par["fies"], max(lucros, 0.0)) if _ativo else 0.0
     pl_liq = par["pro_labore"] - inss
+    reemb  = float(par.get("reembolso_base") or 0.0) + float(reemb_extra or 0.0)
     return {
         "faturamento": fat, "prev": prev, "das": das, "contador": par["contador"], "taxa": taxa,
         "pro_labore": par["pro_labore"], "inss": inss, "pl_liq": pl_liq,
         "lucros": lucros, "fies": fies, "lucros_nubank": lucros - fies,
-        "receita_pf": pl_liq + lucros, "nubank": pl_liq + lucros - fies,
-        "cartao": cartao, "sobra": pl_liq + lucros - fies - cartao,
+        "reembolso": reemb,
+        "receita_pf": pl_liq + lucros + reemb, "nubank": pl_liq + lucros + reemb - fies,
+        "cartao": cartao, "sobra": pl_liq + lucros + reemb - fies - cartao,
     }
 
 def salvar_meta(chave, valor, descricao=""):
@@ -2417,7 +2455,7 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
 _janela_sessao = janela_mercado(30)
 if st.session_state.get("_janela_sessao") != _janela_sessao:
     for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
-               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao", "_pj_hist"]:
+               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao", "_pj_hist", "_pf_reemb"]:
         st.session_state.pop(_k, None)
     st.session_state["_janela_sessao"] = _janela_sessao
 
@@ -4042,6 +4080,9 @@ with aba_pj:
     if "_pj_hist" not in st.session_state:
         st.session_state["_pj_hist"] = ler_pj_param_hist()
     _hist_pj = st.session_state["_pj_hist"]
+    if "_pf_reemb" not in st.session_state:
+        st.session_state["_pf_reemb"] = ler_pf_reembolsos()
+    _reemb_extra = st.session_state["_pf_reemb"]
     # sessões abertas antes da coluna "extra" guardaram {mês: valor}; normaliza para {mês: {fat, extra}}
     _fat_salvo = {k: (v if isinstance(v, dict) else {"fat": float(v), "extra": 0.0})
                   for k, v in st.session_state["_pj_fat"].items()}
@@ -4119,7 +4160,7 @@ with aba_pj:
         return _fat_de(_comp[k]) + _extra_de(k)
     # cada mês com os parâmetros vigentes nele (pró-labore, DAS, contador… mudam com o tempo)
     _calc = {k: calcular_pj_mes(_fat_de(_comp[k]) + _extra_de(k), par_vigente(_par, _hist_pj, k), k,
-                                _cart[k][0], _base_das(k))
+                                _cart[k][0], _base_das(k), _reemb_extra.get(k, 0.0))
              for k in _meses}
     _rot  = lambda k: f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}"
     _neg  = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
@@ -4140,6 +4181,7 @@ with aba_pj:
                 ("pj-sec", "PF", ""),
                 ("", "(+) pró-labore líquido", formatar_brl(c["pl_liq"])),
                 ("", "(+) lucros distribuídos", _neg(c["lucros"])),
+                ("", "(+) reembolsos", formatar_brl(c["reembolso"])),
                 ("pj-tot", "saldo disponível / nubank", _neg(c["receita_pf"])),
                 ("", "(−) FIES / débito BB", formatar_brl(c["fies"])),
                 ("", f"(−) {r_cart}", formatar_brl(c["cartao"])),
@@ -4166,7 +4208,7 @@ with aba_pj:
             _tit = str(_ano)
             c = {f: sum(v[f] for v in _calc.values()) for f in
                  ["das", "prev", "contador", "taxa", "fies", "pro_labore", "lucros",
-                  "pl_liq", "receita_pf", "cartao", "sobra"]}
+                  "pl_liq", "reembolso", "receita_pf", "cartao", "sobra"]}
             _tab = _tabela_pj(c, sum(_fat_de(_comp[k]) for k in _meses), sum(_extra_de(k) for k in _meses),
                               "faturamento recebido", "extras", "DAS", "cartão")
         _ph_tit.markdown(f"<p class='cfg-sec'>{_tit}</p>", unsafe_allow_html=True)
@@ -4385,6 +4427,32 @@ with aba_config:
                           zip(_meses_ativ, _df_ret["faturamento"].fillna(0), _df_ret["extra"].fillna(0))}
                 salvar_pj_faturamento(_novos)
                 st.success("faturamento salvo.")
+                st.rerun(scope="app")
+
+        # ── reembolsos extras (PF) ───────────────────────────────────────────
+        if "_pf_reemb" not in st.session_state:
+            st.session_state["_pf_reemb"] = ler_pf_reembolsos()
+        _reemb_cfg = st.session_state["_pf_reemb"]
+        st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
+        st.markdown("<p class='cfg-sec'>reembolsos extras</p>", unsafe_allow_html=True)
+        st.markdown("<p class='cfg-nota'>por mês de recebimento · somados à base mensal dos parâmetros</p>",
+                    unsafe_allow_html=True)
+        with st.form(f"form_pf_reemb_{_ano}", border=True):
+            _df_r = pd.DataFrame({"mês": [_rot(k) for k in _meses_ativ],
+                                  "extra": pd.Series([float(_reemb_cfg.get(k, 0.0)) for k in _meses_ativ],
+                                                     dtype="float64")})
+            _df_r_ret = st.data_editor(
+                _df_r, hide_index=True, width="stretch", num_rows="fixed", key=f"pf_reemb_editor_{_ano}",
+                height="content",
+                column_config={
+                    "mês": st.column_config.TextColumn("mês", disabled=True),
+                    "extra": st.column_config.NumberColumn("reembolso extra", min_value=0.0, step=0.01,
+                                                           format="localized"),
+                })
+            if st.form_submit_button("salvar", type="primary"):
+                salvar_pf_reembolsos({k: (0.0 if pd.isna(v) else float(v))
+                                      for k, v in zip(_meses_ativ, _df_r_ret["extra"])})
+                st.success("reembolsos salvos.")
                 st.rerun(scope="app")
 
 
