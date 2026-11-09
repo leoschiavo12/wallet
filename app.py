@@ -2698,6 +2698,20 @@ if _grupo == "carteira":
         for _u in _CARTEIRA:
             with st.container(key=f"navs_{_u}", width="content"):
                 st.page_link(_PG[_u], label=_PG[_u].title)
+# teclado numérico no celular: campos de número (digitados como texto, com vírgula) ganham inputmode=decimal
+_ROTULOS_NUM = (["quantidade", "preço unitário", "$ disponível", "valor (R$)", "mín", "alvo", "máx", "meta Renda+"]
+                + [r for k, r, _, cs in PJ_PARAMS if cs is not None])
+st.html("""<script>(function(){
+  const L = new Set(%s);
+  const aplica = () => document.querySelectorAll('input').forEach(el => {
+    const r = el.getAttribute('aria-label');
+    if (r && L.has(r) && el.getAttribute('inputmode') !== 'decimal') el.setAttribute('inputmode', 'decimal');
+  });
+  window.__swRotulosNum = L;
+  if (!window.__swNumKb) { window.__swNumKb = true;
+    new MutationObserver(() => aplica()).observe(document.body, {childList: true, subtree: true}); }
+  aplica();
+})();</script>""" % __import__("json").dumps(_ROTULOS_NUM, ensure_ascii=False), unsafe_allow_javascript=True)
 _ph_avisos = st.container()          # avisos de leitura da planilha (preenchido no fim)
 
 # ── expiração da sessão: aba aberta há horas/dias não fica com dados velhos ──
@@ -3837,101 +3851,92 @@ if _pagina == "lançamentos":
         else:
             aporte_mes, media_6m = 0.0, 0.0
 
-        # ── cabeçalho: métricas + formulário ─────────────────────────────────
-        aberto = st.session_state.get("abrir_form_aporte", False)
-
-        if not aberto:
-            c1, c2, c3 = st.columns([1.4, 1, 0.7])
-            c1.metric(f"total aportado em {meses_pt[mes_atual]}", formatar_brl(aporte_mes))
-            c2.metric("média mensal (6m)", formatar_brl(media_6m))
+        # ── novo aporte: formulário numa janela por cima da página ───────────
+        @st.dialog("novo aporte")
+        def _dialogo_aporte():
+            c1, c2, c3 = st.columns([1.1, 0.7, 1.5])
+            with c1:
+                f_data = st.date_input("data", value=_date.today(),
+                                       format="DD/MM/YYYY", max_value=_date.today())
+            with c2:
+                f_tipo = st.selectbox("tipo", ["compra", "venda"], filter_mode=None)
             with c3:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("+ novo aporte", type="primary", width="stretch"):
-                    st.session_state["abrir_form_aporte"] = True
-                    st.rerun(scope="fragment")
-        else:
-            with st.container(border=True):
-                c1, c2, c3 = st.columns([1.1, 0.7, 1.5])
-                with c1:
-                    f_data = st.date_input("data", value=_date.today(),
-                                           format="DD/MM/YYYY", max_value=_date.today(),
-                                           label_visibility="collapsed")
-                with c2:
-                    f_tipo = st.selectbox("tipo", ["compra", "venda"], label_visibility="collapsed")
-                with c3:
-                    idx = st.selectbox("ativo", range(len(_nomes)),
-                                       format_func=lambda i: _nomes[i],
-                                       label_visibility="collapsed")
-                    f_ativo  = _opcoes[idx][0]
-                    f_classe = _opcoes[idx][1]
+                idx = st.selectbox("ativo", range(len(_nomes)),
+                                   format_func=lambda i: _nomes[i], filter_mode=None)
+                f_ativo  = _opcoes[idx][0]
+                f_classe = _opcoes[idx][1]
 
-                # ── ativo novo: ticker + classe + classificação ────────────────
-                _novo = f_ativo == '__novo__'
-                n_tipo = n_idx = n_pais = None
-                if _novo:
-                    n1, n2, n3 = st.columns([1.1, 0.8, 1.2])
-                    with n1:
-                        f_ativo = st.text_input("ticker", placeholder="ticker (ex.: HGLG11)",
-                                                label_visibility="collapsed").strip().upper()
-                    with n2:
-                        f_classe = st.selectbox("classe", ["FII", "ETF"], label_visibility="collapsed")
-                    with n3:
-                        if f_classe == "FII":
-                            n_tipo = st.selectbox("tipo FII", ["tijolo", "papel"], label_visibility="collapsed")
-                        else:
-                            n_pais = st.selectbox("país", PAISES_ETF, label_visibility="collapsed")
-                    if f_classe == "FII" and n_tipo == "papel":
-                        n_idx = st.selectbox("indexador", ["CDI", "IPCA"], label_visibility="collapsed")
-                c4, c5, c6 = st.columns([0.9, 1.1, 0.9])
-                with c4:
-                    f_qtd_str = st.text_input("qtd", placeholder="quantidade",
-                                              label_visibility="collapsed")
-                with c5:
-                    f_preco_str = st.text_input("preco", placeholder="preço unitário",
-                                                label_visibility="collapsed")
-                with c6:
-                    try:
-                        f_qtd   = float(f_qtd_str.replace(',','.')) if f_qtd_str else 0.0
-                        f_preco = float(f_preco_str.replace(',','.')) if f_preco_str else 0.0
-                    except:
-                        f_qtd, f_preco = 0.0, 0.0
-                    f_total = f_qtd * f_preco
-                    st.markdown(f"<div style='padding-top:6px;font-size:13px'>{formatar_brl(f_total)}</div>",
-                                unsafe_allow_html=True)
+            # ── ativo novo: ticker + classe + classificação ────────────────
+            _novo = f_ativo == '__novo__'
+            n_tipo = n_idx = n_pais = None
+            if _novo:
+                n1, n2, n3 = st.columns([1.1, 0.8, 1.2])
+                with n1:
+                    f_ativo = st.text_input("ticker", placeholder="ticker (ex.: HGLG11)",
+                                            ).strip().upper()
+                with n2:
+                    f_classe = st.selectbox("classe", ["FII", "ETF"], filter_mode=None)
+                with n3:
+                    if f_classe == "FII":
+                        n_tipo = st.selectbox("tipo FII", ["tijolo", "papel"], filter_mode=None)
+                    else:
+                        n_pais = st.selectbox("país", PAISES_ETF, filter_mode=None)
+                if f_classe == "FII" and n_tipo == "papel":
+                    n_idx = st.selectbox("indexador", ["CDI", "IPCA"], filter_mode=None)
+            c4, c5 = st.columns(2)
+            with c4:
+                f_qtd_str = st.text_input("quantidade", placeholder="ex.: 10")
+            with c5:
+                f_preco_str = st.text_input("preço unitário", placeholder="ex.: 98,50")
+            try:
+                f_qtd   = float(f_qtd_str.replace(',','.')) if f_qtd_str else 0.0
+                f_preco = float(f_preco_str.replace(',','.')) if f_preco_str else 0.0
+            except:
+                f_qtd, f_preco = 0.0, 0.0
+            f_total = f_qtd * f_preco
+            st.caption(f"total: {formatar_brl(f_total)}")
 
-                ca, cb = st.columns([1, 5])
-                with ca:
-                    if st.button("salvar", type="primary", width="stretch"):
-                        _erro_novo = None
+            ca, cb = st.columns([1, 5])
+            with ca:
+                if st.button("salvar", type="primary", width="stretch"):
+                    _erro_novo = None
+                    if _novo:
+                        import re as _re
+                        if not _re.fullmatch(r"[A-Z]{4}\d{1,2}", f_ativo or ""):
+                            _erro_novo = "ticker inválido — use o formato da B3 (ex.: HGLG11)."
+                        elif f_ativo in _classe_de:
+                            _erro_novo = f"{f_ativo} já está na carteira — selecione na lista."
+                        elif f_tipo != "compra":
+                            _erro_novo = "o primeiro lançamento de um ativo novo precisa ser compra."
+                        elif validar_ticker_b3(f_ativo) <= 0:
+                            _erro_novo = f"não encontrei cotação para {f_ativo} na B3."
+                    if _erro_novo:
+                        st.warning(_erro_novo)
+                    elif f_qtd > 0 and f_preco > 0:
                         if _novo:
-                            import re as _re
-                            if not _re.fullmatch(r"[A-Z]{4}\d{1,2}", f_ativo or ""):
-                                _erro_novo = "ticker inválido — use o formato da B3 (ex.: HGLG11)."
-                            elif f_ativo in _classe_de:
-                                _erro_novo = f"{f_ativo} já está na carteira — selecione na lista."
-                            elif f_tipo != "compra":
-                                _erro_novo = "o primeiro lançamento de um ativo novo precisa ser compra."
-                            elif validar_ticker_b3(f_ativo) <= 0:
-                                _erro_novo = f"não encontrei cotação para {f_ativo} na B3."
-                        if _erro_novo:
-                            st.warning(_erro_novo)
-                        elif f_qtd > 0 and f_preco > 0:
-                            if _novo:
-                                salvar_ativo_info(f_ativo, f_classe, tipo=n_tipo,
-                                                  indexador=n_idx, pais=n_pais)
-                            salvar_lancamento([
-                                f_data.strftime("%d/%m/%Y"),
-                                f_tipo, f_ativo, f_classe,
-                                float(f_qtd), float(f_preco), float(round(f_total, 2))
-                            ])
-                            st.session_state["abrir_form_aporte"] = False
-                            st.rerun(scope="app")
-                        else:
-                            st.warning("preencha quantidade e preço.")
-                with cb:
-                    if st.button("✕ cancelar"):
-                        st.session_state["abrir_form_aporte"] = False
-                        st.rerun()
+                            salvar_ativo_info(f_ativo, f_classe, tipo=n_tipo,
+                                              indexador=n_idx, pais=n_pais)
+                        salvar_lancamento([
+                            f_data.strftime("%d/%m/%Y"),
+                            f_tipo, f_ativo, f_classe,
+                            float(f_qtd), float(f_preco), float(round(f_total, 2))
+                        ])
+                        st.rerun(scope="app")
+                    else:
+                        st.warning("preencha quantidade e preço.")
+            with cb:
+                if st.button("✕ cancelar"):
+                    st.rerun(scope="app")
+
+
+        # ── cabeçalho: métricas + botão ──────────────────────────────────────
+        c1, c2, c3 = st.columns([1.4, 1, 0.7])
+        c1.metric(f"total aportado em {meses_pt[mes_atual]}", formatar_brl(aporte_mes))
+        c2.metric("média mensal (6m)", formatar_brl(media_6m))
+        with c3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("+ novo aporte", type="primary", width="stretch"):
+                _dialogo_aporte()
 
         st.markdown("---")
 
