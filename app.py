@@ -32,7 +32,7 @@ st.markdown("""
                 margin-top: 1.2rem !important;
             }
         }
-        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box, .st-key-pj_ano_box) {
+        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box, .st-key-pj_ano_box, .st-key-sim_box) {
             padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
         }
         :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
@@ -76,6 +76,12 @@ st.markdown("""
             height: 26px !important; line-height: 26px !important; }
         [class*="st-key-pj_mes_num_"] button { padding: 0 0.4rem 0 0 !important; }
         [class*="st-key-pj_mes_num_"] button svg { width: 0.95rem !important; height: 0.95rem !important; }
+        .sim-tab { width: 100%; border-collapse: collapse; font-size: 0.85rem; border: none !important; margin: 0 !important; }
+        .sim-tab tr { border: none !important; }
+        .sim-tab th, .sim-tab td { text-align: center !important; padding: 0.45rem 0.3rem;
+            border: none !important; border-bottom: 1px solid rgba(250,250,250,0.08) !important; }
+        .sim-tab th { font-weight: 400; font-size: 0.75rem; color: rgba(250,250,250,0.55); }
+        .sim-tab tr:last-child td { border-bottom: none !important; }
         .pj-mes-lbl { margin: 0 !important; min-width: 9.5rem; text-align: center; font-size: 0.9rem; }
         .st-key-pj_setas button[kind="tertiary"] p { font-size: 1.35rem !important; line-height: 1 !important; }
         .st-key-pj_setas { gap: 0.6rem !important; flex-wrap: nowrap !important; }
@@ -2534,27 +2540,38 @@ _PAGINAS = [
 _nav = st.navigation(_PAGINAS, position="hidden")
 _nav.run()
 _pagina = _nav.title
-_url_atual = next((p.url_path for p in _PAGINAS if p.title == _pagina), "dashboard")
+_PG = dict(zip(["dashboard", "detalhe", "lancamentos", "simulador", "pjpf", "configuracoes"], _PAGINAS))
+_url_atual = next((k for k, p in _PG.items() if p.title == _pagina), "dashboard")
+_CARTEIRA = ["dashboard", "detalhe", "lancamentos", "simulador"]
+_grupo = "carteira" if _url_atual in _CARTEIRA else _url_atual
 st.markdown(f"""<style>
-    div.st-key-nav_top[data-testid="stHorizontalBlock"], .st-key-nav_top {{ flex-wrap: nowrap !important; overflow-x: auto; gap: 0 !important;
-        border-bottom: 1px solid rgba(250,250,250,0.15); margin-bottom: 0.6rem; scrollbar-width: none; }}
-    .st-key-nav_top > div {{ flex: 0 0 auto !important; width: auto !important; min-width: 0 !important; }}
-    .st-key-nav_top a[data-testid="stPageLink-NavLink"] {{ background: transparent !important; padding: 0.45rem 0 !important;
-        border-radius: 0 !important; border-bottom: 2px solid transparent; margin-bottom: -1px; }}
-    .st-key-nav_top a[data-testid="stPageLink-NavLink"] p {{ font-size: 0.9rem !important; white-space: nowrap;
-        color: rgba(250,250,250,0.85); }}
-    .st-key-nav_top a[data-testid="stPageLink-NavLink"]:hover p {{ color: #ff4b4b; }}
-    .st-key-nav_top > div {{ margin-right: 1.1rem !important; }}
-    .st-key-nav_{_url_atual} {{ box-shadow: inset 0 -2px 0 #ff4b4b; }}
-    .st-key-nav_{_url_atual} a[data-testid="stPageLink-NavLink"] p {{ color: #ff4b4b !important; }}
-    @media (max-width: 640px) {{ .st-key-nav_top > div {{ margin-right: 0.7rem !important; }}
-        .st-key-nav_top a[data-testid="stPageLink-NavLink"] p {{ font-size: 0.8rem !important; }} }}
+    div.st-key-nav_top[data-testid="stHorizontalBlock"], div.st-key-nav_sub[data-testid="stHorizontalBlock"],
+    .st-key-nav_top, .st-key-nav_sub {{ flex-wrap: nowrap !important; overflow-x: auto; gap: 0 !important;
+        border-bottom: 1px solid rgba(250,250,250,0.15); margin-bottom: 0.4rem; scrollbar-width: none; }}
+    :is(.st-key-nav_top, .st-key-nav_sub) > div {{ flex: 0 0 auto !important; width: auto !important;
+        min-width: 0 !important; margin-right: 1.1rem !important; }}
+    :is(.st-key-nav_top, .st-key-nav_sub) a[data-testid="stPageLink-NavLink"] {{ background: transparent !important;
+        padding: 0.45rem 0 !important; border-radius: 0 !important; }}
+    :is(.st-key-nav_top, .st-key-nav_sub) a[data-testid="stPageLink-NavLink"] p {{ font-size: 0.9rem !important;
+        white-space: nowrap; color: rgba(250,250,250,0.85); }}
+    :is(.st-key-nav_top, .st-key-nav_sub) a[data-testid="stPageLink-NavLink"]:hover p {{ color: #ff4b4b; }}
+    .st-key-navt_{_grupo}, .st-key-navs_{_url_atual} {{ box-shadow: inset 0 -2px 0 #ff4b4b; }}
+    .st-key-navt_{_grupo} a[data-testid="stPageLink-NavLink"] p,
+    .st-key-navs_{_url_atual} a[data-testid="stPageLink-NavLink"] p {{ color: #ff4b4b !important; }}
+    @media (max-width: 640px) {{ :is(.st-key-nav_top, .st-key-nav_sub) > div {{ margin-right: 0.9rem !important; }} }}
     @media (min-width: 641px) {{ .main .block-container, [data-testid="stMainBlockContainer"] {{ padding-top: 2.5rem !important; }} }}
 </style>""", unsafe_allow_html=True)
+# 1ª linha: carteira · PJ/PF · configurações  ·  2ª linha (só na carteira): as páginas da carteira
 with st.container(horizontal=True, key="nav_top"):
-    for _p in _PAGINAS:
-        with st.container(key=f"nav_{_p.url_path}", width="content"):
-            st.page_link(_p, label=_p.title)
+    for _g, _dest, _rot_nav in [("carteira", "dashboard", "carteira"), ("pjpf", "pjpf", "PJ/PF"),
+                                ("configuracoes", "configuracoes", "configurações")]:
+        with st.container(key=f"navt_{_g}", width="content"):
+            st.page_link(_PG[_dest], label=_rot_nav)
+if _grupo == "carteira":
+    with st.container(horizontal=True, key="nav_sub"):
+        for _u in _CARTEIRA:
+            with st.container(key=f"navs_{_u}", width="content"):
+                st.page_link(_PG[_u], label=_PG[_u].title)
 _ph_avisos = st.container()          # avisos de leitura da planilha (preenchido no fim)
 
 # ── expiração da sessão: aba aberta há horas/dias não fica com dados velhos ──
@@ -4135,39 +4152,39 @@ if _pagina == "simulador":
 
         st.markdown("---")
 
-        # ── tabela de desvios ─────────────────────────────────────────────────
-        st.markdown("**desvios atuais**")
+        # ── tabela de desvios: só ativos abaixo do alvo, tabela estática ─────
+        st.markdown("<p class='cfg-sec'>desvios negativos</p>", unsafe_allow_html=True)
         _total_alocado     = sum(_sugestao.values())
         # denominador = soma atual dos ativos simulados + o que foi alocado
         _total_sim_atual   = df_sim['atual_rs'].sum()
         _total_futuro_real = _total_sim_atual + _total_alocado
-        _rows_disp = []
-        for _, row in df_sim.iterrows():
+        _cab_sim = ["", "ativo", "atual", "alvo", "desvio", "sugestão", "após aporte"]
+        _linhas_sim = []
+        for _, row in df_sim[df_sim['desvio_rs'] < 0].iterrows():
             _sug = _sugestao.get(row['ativo'], 0.0)
             _novo_total = row['atual_rs'] + _sug
             _novo_pct   = _novo_total / _total_futuro_real * 100 if _total_futuro_real > 0 else 0
-            _status = "🔴 abaixo mín" if row['abaixo_min'] else ("🟢 ok" if row['desvio_rs'] >= 0 else "🟡 desvio")
-            _preco_a = _precos_sim.get(row['ativo'], 0)
+            _preco_a = _precos_sim.get(row['ativo'], 0) if _sugestao else 0
             if _sug > 0 and _preco_a > 0:
-                if row['ativo'] in _FRACIONADOS:
-                    _cotas_str = fmt_num(_sug/_preco_a, 4)
+                if row['ativo'] == 'BTC':
+                    _cotas_str = abreviar_rs(_sug)
+                elif row['ativo'] in _FRACIONADOS:
+                    _cotas_str = fmt_num(_sug / _preco_a, 4)
                 else:
                     _cotas_str = str(int(round(_sug / _preco_a)))
             else:
                 _cotas_str = '—'
-            _rows_disp.append({
-                'ativo':          row['ativo'],
-                'atual %':        fmt_pct(row['atual_pct']),
-                'alvo %':         fmt_pct(row['alvo_pct']),
-                'desvio R$':      ('+' if row['desvio_rs'] >= 0 else '') + formatar_brl(row['desvio_rs']),
-                'status':         _status,
-                'sugestão':       _cotas_str if row['ativo'] != 'BTC' else (abreviar_rs(_sug) if _sug > 0 else '—'),
-                'após aporte %':  fmt_pct(_novo_pct),
-            })
-
-        df_disp = pd.DataFrame(_rows_disp)
-        _cfg_disp = {c: st.column_config.TextColumn(c, alignment="center") for c in df_disp.columns}
-        st.dataframe(df_disp, width="stretch", hide_index=True, column_config=_cfg_disp)
+            _linhas_sim.append([
+                "🔴" if row['abaixo_min'] else "🟡",
+                row['ativo'], fmt_pct(row['atual_pct']), fmt_pct(row['alvo_pct']),
+                f"({formatar_brl(abs(row['desvio_rs']))})", _cotas_str, fmt_pct(_novo_pct),
+            ])
+        if _linhas_sim:
+            with st.container(key="sim_box", border=True):
+                st.markdown(
+                    "<table class='sim-tab'><tr>" + "".join(f"<th>{c}</th>" for c in _cab_sim) + "</tr>" +
+                    "".join("<tr>" + "".join(f"<td>{v}</td>" for v in l) + "</tr>" for l in _linhas_sim) +
+                    "</table>", unsafe_allow_html=True)
 
         # ── resumo da sugestão ────────────────────────────────────────────────
 
