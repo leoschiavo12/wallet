@@ -2533,7 +2533,7 @@ _PAGINAS = [
     st.Page(_pg_detalhe, title="detalhe", url_path="detalhe"),
     st.Page(_pg_lancamentos, title="lançamentos", url_path="lancamentos"),
     st.Page(_pg_simulador, title="simulador", url_path="simulador"),
-    st.Page(_pg_pjpf, title="PJ/PF", url_path="pjpf"),
+    st.Page(_pg_pjpf, title="cashflow", url_path="cashflow"),
     st.Page(_pg_configuracoes, title="configurações", url_path="configuracoes"),
 ]
 # menu próprio (links no estilo das abas): fica visível também no celular, sem menu lateral
@@ -2563,7 +2563,7 @@ st.markdown(f"""<style>
 </style>""", unsafe_allow_html=True)
 # 1ª linha: carteira · PJ/PF · configurações  ·  2ª linha (só na carteira): as páginas da carteira
 with st.container(horizontal=True, key="nav_top"):
-    for _g, _dest, _rot_nav in [("carteira", "dashboard", "carteira"), ("pjpf", "pjpf", "PJ/PF"),
+    for _g, _dest, _rot_nav in [("carteira", "dashboard", "carteira"), ("pjpf", "pjpf", "cashflow"),
                                 ("configuracoes", "configuracoes", "configurações")]:
         with st.container(key=f"navt_{_g}", width="content"):
             st.page_link(_PG[_dest], label=_rot_nav)
@@ -2587,7 +2587,7 @@ if st.session_state.get("_janela_sessao") != _janela_sessao:
 prefetch_planilha()
 
 # a página PJ/PF não usa a carteira: pula a leitura de lançamentos, preços etc.
-if _pagina != "PJ/PF":
+if _pagina != "cashflow":
     # ── carregar dados principais (session_state cache) ──────────────────────────
     # relê do Sheets só na primeira renderização da sessão
     # ou após salvar/excluir lançamento (_lanc_versao muda)
@@ -2923,9 +2923,14 @@ if _pagina == "dashboard":
 
 
 if _pagina == "detalhe":
-    sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
-        ["geral", "FIIs", "ETFs", "cripto", "tesouro"]
-    )
+    # resumo primeiro; as classes em ordem decrescente de montante na carteira
+    _tot_cls = df.groupby('Classe')['Total Atual'].sum().to_dict() if not df.empty else {}
+    _ordem_cls = sorted([("FIIs", "FII"), ("ETFs", "ETF"), ("cripto", "Cripto"), ("tesouro", "Tesouro Direto")],
+                        key=lambda x: -float(_tot_cls.get(x[1], 0.0)))
+    _nomes_det = ["resumo"] + [n for n, _ in _ordem_cls]
+    _tab_det = dict(zip(_nomes_det, st.tabs(_nomes_det)))
+    sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = (
+        _tab_det[k] for k in ["resumo", "FIIs", "ETFs", "cripto", "tesouro"])
 
     # ── helpers compartilhados ────────────────────────────────────────────────
     def _lanc_json_cached():
@@ -4219,7 +4224,7 @@ def _pagina_pj():
     _MES3 = MESES3
     _hoje_pj = pd.Timestamp.today()
     if not _par.get("faturamento_minimo"):
-        st.info("configure os parâmetros PJ/PF em configurações (ou na aba pj_parametros da planilha) "
+        st.info("configure os parâmetros PJ/PF em configurações › cashflow (ou na aba pj_parametros da planilha) "
                 "para ver a previsão.")
     # ano anterior sempre disponível: dez do ano passado vira a receita de jan deste ano
     _anos = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo])
@@ -4400,7 +4405,7 @@ def _pagina_pj():
                       type="primary" if _modo_ano else "secondary")
 
 
-if _pagina == "PJ/PF":
+if _pagina == "cashflow":
     _pagina_pj()
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
@@ -4412,7 +4417,7 @@ if _pagina == "configurações":
   _fat_de = lambda a: (float(_fat_salvo[a]["fat"]) if a in _fat_salvo
                        else float(par_vigente(_par, _hist_pj, a)["faturamento_minimo"]))
   _extra_de = lambda a: float(_fat_salvo[a].get("extra", 0.0)) if a in _fat_salvo else 0.0
-  _sub_cart, _sub_pj = st.tabs(["carteira", "PJ/PF"])
+  _sub_cart, _sub_pj = st.tabs(["carteira", "cashflow"])
   with _sub_cart:
     with st.container(key="cfg_area"):
       _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
@@ -4631,7 +4636,7 @@ if _pagina == "configurações":
     with _cpj_par:
         # ── parâmetros PJ ────────────────────────────────────────────────────────
         _md(st, "cfg-sec", "parâmetros PJ/PF")
-        _md(st, "cfg-nota", "usados na previsão da aba PJ/PF")
+        _md(st, "cfg-nota", "usados na aba cashflow")
         if "_pj_par" not in st.session_state:
             st.session_state["_pj_par"] = ler_pj_parametros()
         _par_atual = st.session_state["_pj_par"]
@@ -4740,7 +4745,7 @@ if _pagina == "configurações":
 # ── rodapé: quando cada dado foi consultado pela última vez ──────────────────
 _marcas = _marcas_atualizacao()
 _partes_rod = []
-if _pagina != "PJ/PF":
+if _pagina != "cashflow":
     _partes_rod.append(f"cotações B3 {st.session_state.get('_precos_momento', '—')}")
     for _f in ["BTC", "Renda+"]:
         if _f in _marcas:
