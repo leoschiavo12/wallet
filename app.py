@@ -7,11 +7,14 @@ import pandas as pd
 import math
 import requests
 import openpyxl
+import threading
+import time as _time
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import date
 
 st.set_page_config(page_title="SmartWallet", layout="wide", page_icon="")
+_t_inicio_run = _time.perf_counter()
 
 st.markdown("""
     <style>
@@ -394,6 +397,39 @@ def _marcas_atualizacao():
 def marcar_atualizacao(chave):
     _marcas_atualizacao()[chave] = _agora_sp().strftime("%d/%m %H:%M")
 
+# ── cotações sem espera: devolve na hora o último valor bom e, quando a janela de atualização
+# vira, busca o novo em segundo plano (o próximo clique já pega o valor novo) ─────────────
+@st.cache_resource
+def _swr_store():
+    return {"lock": threading.Lock(), "itens": {}}
+
+def _swr_atualizar(store, k, janela, func, args):
+    try:
+        v = func(*args, janela)
+        with store["lock"]:
+            store["itens"][k] = {"janela": janela, "valor": v, "rodando": False}
+    except Exception:
+        with store["lock"]:
+            store["itens"][k]["rodando"] = False
+
+def sem_espera(nome, janela, func, *args):
+    """func(*args, janela) é a função cacheada; só a 1ª consulta do servidor espera pela resposta"""
+    store, k = _swr_store(), (nome, args)
+    with store["lock"]:
+        it = store["itens"].get(k)
+        if it and it["janela"] == janela:
+            return it["valor"]
+        if it and it["valor"] is not None:
+            if not it["rodando"]:
+                it["rodando"] = True
+                threading.Thread(target=_swr_atualizar, args=(store, k, janela, func, args),
+                                 daemon=True).start()
+            return it["valor"]
+    v = func(*args, janela)
+    with store["lock"]:
+        store["itens"][k] = {"janela": janela, "valor": v, "rodando": False}
+    return v
+
 def janela_mercado(minutos):
     """
     chave de cache que muda a cada `minutos` durante o pregão e fica fixa fora dele.
@@ -451,7 +487,7 @@ def _baixar_precos_b3(tickers_tupla, janela):
 def obter_precos_b3(tickers_lista):
     _tk = tuple(sorted(set(tickers_lista)))
     try:
-        precos, falhas, momento = _baixar_precos_b3(_tk, janela_mercado(5))
+        precos, falhas, momento = sem_espera("b3", janela_mercado(5), _baixar_precos_b3, _tk)
     except Exception:
         precos, falhas, momento = {t.upper(): 0.0 for t in _tk}, list(_tk), "—"
     if falhas:
@@ -464,7 +500,7 @@ def obter_precos_b3(tickers_lista):
 # dividendos via yfinance a partir do ticker salvo em lançamentos.
 ALIAS_FII_TICKERS = {'GALG11': 'GARE11'}
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=12 * 3600)      # mês fechado: os proventos não mudam; a chave já inclui o mês
 def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
     """
     dividendos recebidos num mês/ano específico (auto via yfinance + lançamentos manuais
@@ -562,7 +598,7 @@ def _preco_btc_janela(janela):
 def obter_preco_btc_brl():
     """preço do BTC em R$: atualiza de hora em hora, todos os dias"""
     try:
-        return _preco_btc_janela(janela_horaria())
+        return sem_espera("btc", janela_horaria(), _preco_btc_janela)
     except Exception:
         return 0.0
 
@@ -753,10 +789,8 @@ def _historico_btc_cached(chave_ts):
 
 def obter_historico_btc_brl():
     """wrapper: só cacheia resultado válido; em caso de erro tenta sempre"""
-    import time
-    # chave muda a cada hora, forçando retry em caso de falha anterior
-    chave = int(time.time() // 3600)
-    hist, fonte = _historico_btc_cached(chave)
+    # histórico diário de 5 anos: renova 1× por dia, em segundo plano (sem espera)
+    hist, fonte = sem_espera("btc_hist", _agora_sp().strftime("%Y%m%d"), _historico_btc_cached)
     if hist is None:
         # tenta sem cache imediatamente
         hist, fonte = _buscar_historico_btc_brl()
@@ -1113,7 +1147,7 @@ def _preco_renda_mais_janela(janela):
 
 def obter_preco_renda_mais_cached():
     """preço/taxa do Renda+: a cada 1h no pregão, congelado fora dele"""
-    return _preco_renda_mais_janela(janela_mercado(60))
+    return sem_espera("renda", janela_mercado(60), _preco_renda_mais_janela)
 
 def calcular_projecao_renda_mais(saldo_atual, taxa_real_aa, aporte_mensal, ano_conversao=2050,
                                   anos_pagamento=20, mes_atual=None, ano_atual=None):
@@ -4755,9 +4789,9 @@ else:
         _partes_rod.append(f"Controle de Fatura {_marcas['Controle de Fatura']}")
 if st.session_state.get("_planilha_momento"):
     _partes_rod.append(f"planilha {st.session_state['_planilha_momento']}")
-if _partes_rod:
-    st.markdown("<div style='height:1.2rem'></div>", unsafe_allow_html=True)
-    st.caption("atualizado: " + " · ".join(_partes_rod))
+_partes_rod.append(f"página em {fmt_num(_time.perf_counter() - _t_inicio_run, 1)} s")
+st.markdown("<div style='height:1.2rem'></div>", unsafe_allow_html=True)
+st.caption("atualizado: " + " · ".join(_partes_rod))
 
 # ── avisos de leitura (aba existente que não pôde ser lida) ──────────────────
 _falhas_leit = st.session_state.pop("_falhas_leitura", {})
