@@ -85,7 +85,8 @@ st.markdown("""
             border: none !important; border-bottom: 1px solid rgba(250,250,250,0.08) !important; }
         .sim-tab th { font-weight: 400; font-size: 0.75rem; color: rgba(250,250,250,0.55); }
         .sim-tab tr:last-child td { border-bottom: none !important; }
-        .pj-mes-lbl { margin: 0 !important; min-width: 9.5rem; text-align: center; font-size: 0.9rem; }
+        .pj-mes-lbl { margin: 0 !important; min-width: 7.5rem; text-align: center; }
+        .st-key-pj_setas button[kind="tertiary"] { padding: 0 0.3rem !important; min-height: 0 !important; }
         .st-key-pj_setas button[kind="tertiary"] p { font-size: 1.35rem !important; line-height: 1 !important; }
         .st-key-pj_setas { gap: 0.6rem !important; flex-wrap: nowrap !important; }
         .st-key-pj_setas > div { width: auto !important; min-width: 0 !important; flex: 0 0 auto !important; }
@@ -4396,20 +4397,38 @@ def _pagina_pj():
     if _prox_pj.year not in _anos:
         _anos = sorted(_anos + [_prox_pj.year])
 
-    # tabela no topo; seletores de ano/mês num expander abaixo dela (preenchidos antes da tabela)
-    _lay_pj = st.container(key="pj_layout")
-    col_comp, col_fies = _lay_pj.columns([1, 1], gap="large")
-    with col_comp:
-        _ph_tit = st.empty()
-        _ph_tab = st.container()
-
-    # seleção (mês exibido) na sessão; os controles ficam num expander no fim da página
+    # seleção (mês exibido) na sessão; setas ‹ › no topo; ano inteiro no fim
     if "pj_ref" not in st.session_state:
         st.session_state["pj_ref"] = _prox_pj.strftime("%Y-%m")
         st.session_state["pj_modo_ano"] = False
     _ref_min, _ref_max = f"{min(_anos)}-01", f"{max(_anos)}-12"
     if not (_ref_min <= st.session_state["pj_ref"] <= _ref_max):
         st.session_state["pj_ref"] = _prox_pj.strftime("%Y-%m")
+
+    _lay_pj = st.container(key="pj_layout")
+    col_comp, col_fies = _lay_pj.columns([1, 1], gap="large")
+    with col_comp:
+        # ‹ mês › no topo: as setas passam de um mês para o outro (e de um ano para o outro)
+        def _pj_mover(delta):
+            _ts = pd.Timestamp(f"{st.session_state['pj_ref']}-01") + pd.DateOffset(months=delta)
+            st.session_state["pj_ref"] = _ts.strftime("%Y-%m")
+            st.session_state["pj_ano_sel"] = _ts.year
+            st.session_state["pj_modo_ano"] = False
+        def _pj_ano_mudou():
+            _a = st.session_state.get("pj_ano_sel")
+            if _a:
+                st.session_state["pj_ref"] = f"{_a}-{st.session_state['pj_ref'][5:]}"
+        def _pj_alterna_ano():
+            st.session_state["pj_modo_ano"] = not st.session_state.get("pj_modo_ano")
+        st.session_state.setdefault("pj_ano_sel", int(st.session_state["pj_ref"][:4]))
+        with st.container(horizontal=True, vertical_alignment="center", key="pj_setas"):
+            st.button("‹", key="pj_ant", type="tertiary", on_click=_pj_mover, args=(-1,),
+                      disabled=st.session_state["pj_ref"] <= _ref_min)
+            _ph_tit = st.empty()
+            st.button("›", key="pj_prox", type="tertiary", on_click=_pj_mover, args=(1,),
+                      disabled=st.session_state["pj_ref"] >= _ref_max)
+        _ph_tab = st.container()
+
     _ano = int(st.session_state["pj_ref"][:4])
     _mes_num = 0 if st.session_state.get("pj_modo_ano") else int(st.session_state["pj_ref"][5:])
 
@@ -4506,7 +4525,7 @@ def _pagina_pj():
                   "pl_liq", "reembolso", "receita_pf", "cartao", "sobra"]}
             _tab = _tabela_pj(c, sum(_fat_de(_comp[k]) for k in _meses), sum(_extra_de(k) for k in _meses),
                               "faturamento recebido", "extras", "DAS", "cartão")
-        _ph_tit.markdown(f"<p class='cfg-sec'>{_tit}</p>", unsafe_allow_html=True)
+        _ph_tit.markdown(f"<p class='cfg-sec pj-mes-lbl'>{_tit}</p>", unsafe_allow_html=True)
         with _ph_tab:
             with st.container(key="pj_comp_box", border=True):
                 st.markdown(_tab, unsafe_allow_html=True)
@@ -4533,40 +4552,17 @@ def _pagina_pj():
                     f"<tr><td>{x}</td><td>{y}</td></tr>" for x, y in _fl) + "</table>",
                     unsafe_allow_html=True)
 
-    # ── histórico e próximos meses: ano + setas ‹ mês › + ano inteiro ────────
-    def _pj_mover(delta):
-        _ts = pd.Timestamp(f"{st.session_state['pj_ref']}-01") + pd.DateOffset(months=delta)
-        st.session_state["pj_ref"] = _ts.strftime("%Y-%m")
-        st.session_state["pj_ano_sel"] = _ts.year
-        st.session_state["pj_modo_ano"] = False
-    def _pj_ano_mudou():
-        _a = st.session_state.get("pj_ano_sel")
-        if _a:
-            st.session_state["pj_ref"] = f"{_a}-{st.session_state['pj_ref'][5:]}"
-    def _pj_alterna_ano():
-        st.session_state["pj_modo_ano"] = not st.session_state.get("pj_modo_ano")
-    st.session_state.setdefault("pj_ano_sel", _ano)
-
     st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
     if st.session_state.get("_nn_msg"):
         st.toast(st.session_state.pop("_nn_msg"))
     if st.button("+ nota fiscal / reembolso", type="primary", key="btn_nova_nota"):
         dialogo_nova_nota()
-    with st.expander("histórico e próximos meses"):
+    with st.expander("ano"):
         st.segmented_control("ano", _anos, label_visibility="collapsed", key="pj_ano_sel",
                              on_change=_pj_ano_mudou)
-        _ref_now = st.session_state["pj_ref"]
         _modo_ano = bool(st.session_state.get("pj_modo_ano"))
-        with st.container(horizontal=True, vertical_alignment="center", key="pj_setas"):
-            st.button("‹", key="pj_ant", type="tertiary", on_click=_pj_mover, args=(-1,),
-                      disabled=_ref_now <= _ref_min)
-            _lbl = (f"{_ano} inteiro" if _modo_ano
-                    else f"{_MES_EXT[int(_ref_now[5:]) - 1]} {_ref_now[:4]}")
-            st.markdown(f"<p class='pj-mes-lbl'>{_lbl}</p>", unsafe_allow_html=True)
-            st.button("›", key="pj_prox", type="tertiary", on_click=_pj_mover, args=(1,),
-                      disabled=_ref_now >= _ref_max)
-            st.button("ano inteiro", key="pj_btn_ano", on_click=_pj_alterna_ano,
-                      type="primary" if _modo_ano else "secondary")
+        st.button("ano inteiro", key="pj_btn_ano", on_click=_pj_alterna_ano,
+                  type="primary" if _modo_ano else "secondary")
 
 
 if _pagina == "cashflow":
