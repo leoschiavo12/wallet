@@ -76,6 +76,10 @@ st.markdown("""
             height: 26px !important; line-height: 26px !important; }
         [class*="st-key-pj_mes_num_"] button { padding: 0 0.4rem 0 0 !important; }
         [class*="st-key-pj_mes_num_"] button svg { width: 0.95rem !important; height: 0.95rem !important; }
+        .pj-mes-lbl { margin: 0 !important; min-width: 9.5rem; text-align: center; font-size: 0.9rem; }
+        .st-key-pj_setas button[kind="tertiary"] p { font-size: 1.35rem !important; line-height: 1 !important; }
+        .st-key-pj_setas { gap: 0.6rem !important; flex-wrap: nowrap !important; }
+        .st-key-pj_setas > div { width: auto !important; min-width: 0 !important; flex: 0 0 auto !important; }
         .pj-tab tr.pj-sec td { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
                                text-transform: uppercase; color: rgba(250,250,250,0.5); padding-top: 0.15rem; }
         .cfg-nota  { font-size: 0.75rem; color: rgba(250,250,250,0.5); margin: 0; }
@@ -2902,10 +2906,9 @@ if _pagina == "dashboard":
 
 
 if _pagina == "detalhe":
-    # um seletor no lugar das sub-abas: só a classe escolhida é calculada
-    _sub_det = st.segmented_control("classe", ["geral", "FIIs", "ETFs", "cripto", "tesouro"],
-                                    default="geral", label_visibility="collapsed",
-                                    key="det_classe") or "geral"
+    sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = st.tabs(
+        ["geral", "FIIs", "ETFs", "cripto", "tesouro"]
+    )
 
     # ── helpers compartilhados ────────────────────────────────────────────────
     def _lanc_json_cached():
@@ -2915,7 +2918,7 @@ if _pagina == "detalhe":
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: FIIs
     # ══════════════════════════════════════════════════════════════════════════
-    if _sub_det == "FIIs":
+    with sub_fiis:
         from datetime import date as _d
         hoje_d    = _d.today()
         mes_ref_f = hoje_d.month - 1 if hoje_d.month > 1 else 12
@@ -3163,7 +3166,7 @@ if _pagina == "detalhe":
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: ETFs
     # ══════════════════════════════════════════════════════════════════════════
-    if _sub_det == "ETFs":
+    with sub_etfs:
         df_etf = df[df['Classe'] == 'ETF'].copy()
         total_etf        = df_etf['Total Atual'].sum()
         total_inv_etf    = df_etf['custo_total'].sum()
@@ -3271,7 +3274,7 @@ if _pagina == "detalhe":
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: CRIPTO
     # ══════════════════════════════════════════════════════════════════════════
-    if _sub_det == "cripto":
+    with sub_cripto:
         preco_btc_atual = precos.get('BTC', 0.0)
         _btc_pos = _posicao[_posicao['ativo'] == 'BTC']
         qtd_btc  = float(_btc_pos['qtd_atual'].iloc[0]) if not _btc_pos.empty else 0.0
@@ -3352,7 +3355,7 @@ if _pagina == "detalhe":
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: TESOURO
     # ══════════════════════════════════════════════════════════════════════════
-    if _sub_det == "tesouro":
+    with sub_tesouro:
         df_td = df[df['Classe'] == 'Tesouro Direto'].copy()
 
         lanc_all = _df_lanc_raw
@@ -3487,7 +3490,7 @@ if _pagina == "detalhe":
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: CARTEIRA
     # ══════════════════════════════════════════════════════════════════════════
-    if _sub_det == "geral":
+    with sub_resumo:
         # ── linha 1: exposição geográfica ─────────────────────────────────────
         GEO_FLAG = {'Brasil': '🇧🇷', 'EUA': '🇺🇸', 'China': '🇨🇳', 'Europa': '🇪🇺',
                     'Emergentes': '🌏', 'Global': '🌐', 'Global (cripto)': '🌍'}
@@ -4216,14 +4219,16 @@ def _pagina_pj():
     with col_comp:
         _ph_tit = st.empty()
         _ph_tab = st.container()
-        with st.expander("histórico e próximos meses"):
-            _ano = st.segmented_control("ano", _anos, default=_prox_pj.year,
-                                        label_visibility="collapsed", key="pj_ano") or _prox_pj.year
-            _mes_num = st.selectbox("mês", list(range(1, 13)) + [0],          # 0 = ano inteiro
-                                    index=(_prox_pj.month - 1) if _ano == _prox_pj.year else 0,
-                                    format_func=lambda m: _MES3[m - 1] if m else "ano",
-                                    label_visibility="collapsed", key=f"pj_mes_num_{_ano}", width=80,
-                                    filter_mode=None)                        # sem digitação
+
+    # seleção (mês exibido) na sessão; os controles ficam num expander no fim da página
+    if "pj_ref" not in st.session_state:
+        st.session_state["pj_ref"] = _prox_pj.strftime("%Y-%m")
+        st.session_state["pj_modo_ano"] = False
+    _ref_min, _ref_max = f"{min(_anos)}-01", f"{max(_anos)}-12"
+    if not (_ref_min <= st.session_state["pj_ref"] <= _ref_max):
+        st.session_state["pj_ref"] = _prox_pj.strftime("%Y-%m")
+    _ano = int(st.session_state["pj_ref"][:4])
+    _mes_num = 0 if st.session_state.get("pj_modo_ano") else int(st.session_state["pj_ref"][5:])
 
     # regime: a atividade de um mês (faturamento da PJ e gastos no cartão) se realiza no mês
     # seguinte — o faturamento de fev entra em mar e a fatura de fev é paga em mar.
@@ -4345,6 +4350,37 @@ def _pagina_pj():
                 st.markdown("<table class='pj-tab'>" + "".join(
                     f"<tr><td>{x}</td><td>{y}</td></tr>" for x, y in _fl) + "</table>",
                     unsafe_allow_html=True)
+
+    # ── histórico e próximos meses: ano + setas ‹ mês › + ano inteiro ────────
+    def _pj_mover(delta):
+        _ts = pd.Timestamp(f"{st.session_state['pj_ref']}-01") + pd.DateOffset(months=delta)
+        st.session_state["pj_ref"] = _ts.strftime("%Y-%m")
+        st.session_state["pj_ano_sel"] = _ts.year
+        st.session_state["pj_modo_ano"] = False
+    def _pj_ano_mudou():
+        _a = st.session_state.get("pj_ano_sel")
+        if _a:
+            st.session_state["pj_ref"] = f"{_a}-{st.session_state['pj_ref'][5:]}"
+    def _pj_alterna_ano():
+        st.session_state["pj_modo_ano"] = not st.session_state.get("pj_modo_ano")
+    st.session_state.setdefault("pj_ano_sel", _ano)
+
+    st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+    with st.expander("histórico e próximos meses"):
+        st.segmented_control("ano", _anos, label_visibility="collapsed", key="pj_ano_sel",
+                             on_change=_pj_ano_mudou)
+        _ref_now = st.session_state["pj_ref"]
+        _modo_ano = bool(st.session_state.get("pj_modo_ano"))
+        with st.container(horizontal=True, vertical_alignment="center", key="pj_setas"):
+            st.button("‹", key="pj_ant", type="tertiary", on_click=_pj_mover, args=(-1,),
+                      disabled=_ref_now <= _ref_min)
+            _lbl = (f"{_ano} inteiro" if _modo_ano
+                    else f"{_MES_EXT[int(_ref_now[5:]) - 1]} {_ref_now[:4]}")
+            st.markdown(f"<p class='pj-mes-lbl'>{_lbl}</p>", unsafe_allow_html=True)
+            st.button("›", key="pj_prox", type="tertiary", on_click=_pj_mover, args=(1,),
+                      disabled=_ref_now >= _ref_max)
+            st.button("ano inteiro", key="pj_btn_ano", on_click=_pj_alterna_ano,
+                      type="primary" if _modo_ano else "secondary")
 
 
 if _pagina == "PJ/PF":
