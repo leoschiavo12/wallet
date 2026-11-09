@@ -1425,7 +1425,8 @@ def _abas_lote():
     return [f"{SHEET_TAB}!A:G", f"{SHEET_CFG}!A:D", f"{SHEET_PM_TAB}!A:C", f"{SHEET_METAS_TAB}!A:C",
             f"{SHEET_ATIVOS_INFO_TAB}!A:E", f"{SHEET_RENDA_TAB}!A:C", f"{SHEET_RENDA_MERCADO_TAB}!A:C",
             f"{SHEET_DIV_MENSAL_TAB}!A:C", f"{SHEET_PJ_PAR_TAB}!A:B", f"{SHEET_PJ_FAT_TAB}!A:C",
-            f"{SHEET_PJ_HIST_TAB}!A:C", f"{SHEET_PF_CARTAO_TAB}!A:B", f"{SHEET_PF_REEMB_TAB}!A:B"]
+            f"{SHEET_PJ_HIST_TAB}!A:C", f"{SHEET_PF_CARTAO_TAB}!A:B", f"{SHEET_PF_REEMB_TAB}!A:B",
+            f"{SHEET_PJ_NOTAS_TAB}!A:E"]
 
 def _falha_leitura(nome, erro):
     """registra falha real de leitura (aba inexistente não conta) para avisar na tela"""
@@ -1803,6 +1804,97 @@ def salvar_pf_reembolsos(novos):
     svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_REEMB_TAB}!A1",
                         valueInputOption="RAW", body={"values": corpo}).execute()
     st.session_state.pop("_pf_reemb", None)
+
+SHEET_PJ_NOTAS_TAB = "pj_notas"          # notas fiscais emitidas e reembolsos recebidos (um por linha)
+NOTAS_HEADERS = ["tipo", "data", "valor", "recebimento", "descricao"]
+NOTA_TIPOS    = ["nota fiscal", "reembolso"]
+NOTA_RECEB    = ["mês seguinte", "mesmo mês"]
+
+def ler_pj_notas():
+    """[{tipo, data (Timestamp), valor, recebimento, descricao}] · None se a aba ainda não existe"""
+    try:
+        rows = _ler_valores(f"{SHEET_PJ_NOTAS_TAB}!A:E").get("values", [])
+    except Exception as _e_leit:
+        _falha_leitura("notas fiscais", _e_leit)
+        return []
+    if not rows:
+        return None
+    out = []
+    for r in rows[1:]:
+        r = (list(r) + [""] * 5)[:5]
+        try:
+            d = pd.to_datetime(str(r[1]).strip(), dayfirst=True, errors="coerce")
+            v = _num_br(r[2]) if str(r[2]).strip() else None
+        except ValueError:
+            continue
+        if pd.isna(d) or v is None:
+            continue
+        tipo = "reembolso" if str(r[0]).strip().lower().startswith("reemb") else "nota fiscal"
+        out.append({"tipo": tipo, "data": d.normalize(), "valor": float(v),
+                    "recebimento": ("" if tipo == "reembolso" else
+                                    "mesmo mês" if "mesmo" in str(r[3]).lower() else "mês seguinte"),
+                    "descricao": str(r[4]).strip()})
+    return sorted(out, key=lambda n: n["data"])
+
+def salvar_pj_notas(lista):
+    svc = get_sheets_service()
+    _garantir_aba_existe(svc, SHEET_PJ_NOTAS_TAB, NOTAS_HEADERS)
+    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_NOTAS_TAB}!A:E").execute()
+    lista = sorted(lista, key=lambda n: n["data"])
+    corpo = [NOTAS_HEADERS] + [[n["tipo"], n["data"].strftime("%d/%m/%Y"), float(n["valor"]),
+                                n["recebimento"] if n["tipo"] == "nota fiscal" else "",
+                                n.get("descricao", "")] for n in lista]
+    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_NOTAS_TAB}!A1",
+                        valueInputOption="RAW", body={"values": corpo}).execute()
+    st.session_state.pop("_pj_notas", None)
+
+def migrar_para_notas(par):
+    """1ª vez: converte pj_faturamento (mês a mês) e pf_reembolsos em notas — as abas antigas ficam
+    intactas como backup. meses futuros iguais à base não viram nota (a base já é a projeção)."""
+    fat, reemb = ler_pj_faturamento(), ler_pf_reembolsos()
+    mes_atual = pd.Timestamp.today().strftime("%Y-%m")
+    base = float(par.get("faturamento_minimo") or 0.0)
+    notas = []
+    fim = lambda k: pd.Timestamp(f"{k}-01") + pd.offsets.MonthEnd(0)
+    for k, v in fat.items():
+        f, e = float(v.get("fat", 0.0)), float(v.get("extra", 0.0))
+        if f > 0 and not (k >= mes_atual and abs(f - base) < 0.005):
+            notas.append({"tipo": "nota fiscal", "data": fim(k), "valor": f,
+                          "recebimento": "mês seguinte", "descricao": ""})
+        if e > 0:
+            notas.append({"tipo": "nota fiscal", "data": fim(k), "valor": e,
+                          "recebimento": "mesmo mês", "descricao": "extra"})
+    for k, v in reemb.items():
+        if float(v) > 0:
+            notas.append({"tipo": "reembolso", "data": fim(k), "valor": float(v),
+                          "recebimento": "", "descricao": ""})
+    salvar_pj_notas(notas)
+    return sorted(notas, key=lambda n: n["data"])
+
+def resumo_notas(notas):
+    """notas → ({mês de emissão: {'fat': soma mês seguinte ou None, 'extra': soma mesmo mês}},
+                {mês: reembolsos})"""
+    fat, reemb = {}, {}
+    for n in notas:
+        k = n["data"].strftime("%Y-%m")
+        if n["tipo"] == "reembolso":
+            reemb[k] = reemb.get(k, 0.0) + n["valor"]
+            continue
+        d = fat.setdefault(k, {"fat": None, "extra": 0.0})
+        if n["recebimento"] == "mesmo mês":
+            d["extra"] += n["valor"]
+        else:
+            d["fat"] = (d["fat"] or 0.0) + n["valor"]
+    return fat, reemb
+
+def fat_do_mes(a, fat_salvo, par, hist):
+    """notas do mês (recebidas no seguinte); sem nota: mês passado = 0, atual/futuro = base vigente"""
+    v = fat_salvo.get(a, {}).get("fat")
+    if v is not None:
+        return float(v)
+    if a >= pd.Timestamp.today().strftime("%Y-%m"):
+        return float(par_vigente(par, hist, a)["faturamento_minimo"])
+    return 0.0
 
 def salvar_pj_faturamento(novos):
     """mescla {ano_mes: {'fat': x, 'extra': y}} com o que já existe e regrava a aba ordenada"""
@@ -2614,7 +2706,7 @@ _ph_avisos = st.container()          # avisos de leitura da planilha (preenchido
 _janela_sessao = janela_mercado(30)
 if st.session_state.get("_janela_sessao") != _janela_sessao:
     for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
-               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao", "_pj_hist", "_pf_reemb",
+               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao", "_pj_hist", "_pf_reemb", "_pj_notas",
                "_sheet_lote", "_sheet_abas"]:
         st.session_state.pop(_k, None)
     st.session_state["_janela_sessao"] = _janela_sessao
@@ -4232,20 +4324,18 @@ if _pagina == "simulador":
 MESES3 = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
 
 def carregar_dados_pj():
-    """parâmetros, histórico, faturamento e reembolsos (cache na sessão) — usados em PJ/PF e configurações"""
+    """parâmetros, histórico e notas/reembolsos (cache na sessão) — usados em cashflow e configurações"""
     if "_pj_par" not in st.session_state:
         st.session_state["_pj_par"] = ler_pj_parametros()
-    if "_pj_fat" not in st.session_state:
-        st.session_state["_pj_fat"] = ler_pj_faturamento()
     if "_pj_hist" not in st.session_state:
         st.session_state["_pj_hist"] = ler_pj_param_hist()
-    if "_pf_reemb" not in st.session_state:
-        st.session_state["_pf_reemb"] = ler_pf_reembolsos()
-    # sessões abertas antes da coluna "extra" guardaram {mês: valor}; normaliza para {mês: {fat, extra}}
-    _fs = {k: (v if isinstance(v, dict) else {"fat": float(v), "extra": 0.0})
-           for k, v in st.session_state["_pj_fat"].items()}
-    st.session_state["_pj_fat"] = _fs
-    return (st.session_state["_pj_par"], st.session_state["_pj_hist"], _fs, st.session_state["_pf_reemb"])
+    if "_pj_notas" not in st.session_state:
+        _n = ler_pj_notas()
+        if _n is None:                                   # aba ainda não existe: migra o formato antigo
+            _n = migrar_para_notas(st.session_state["_pj_par"])
+        st.session_state["_pj_notas"] = _n
+    _fs, _re = resumo_notas(st.session_state["_pj_notas"])
+    return (st.session_state["_pj_par"], st.session_state["_pj_hist"], _fs, _re)
 
 def _cap_pj(t):
     """legenda com R$ literal (dois "$" na mesma linha viram fórmula no markdown)"""
@@ -4293,8 +4383,7 @@ def _pagina_pj():
     _ant   = lambda k: (pd.Timestamp(f"{k}-01") - pd.DateOffset(months=1)).strftime("%Y-%m")
     _comp  = {k: _ant(k) for k in _meses}
     _meses_ativ = [f"{_ano}-{m:02d}" for m in range(1, 13)]            # editor: meses de atividade
-    _fat_de   = lambda a: (float(_fat_salvo[a]["fat"]) if a in _fat_salvo
-                           else float(par_vigente(_par, _hist_pj, a)["faturamento_minimo"]))
+    _fat_de   = lambda a: fat_do_mes(a, _fat_salvo, _par, _hist_pj)
     _extra_de = lambda a: float(_fat_salvo[a].get("extra", 0.0)) if a in _fat_salvo else 0.0
 
     # cartão por mês de atividade: antes do controle real = média estimada; do controle em
@@ -4448,8 +4537,7 @@ if _pagina == "configurações":
   _hoje_pj = pd.Timestamp.today()
   _MES3 = MESES3
   _rot = lambda k: f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}"
-  _fat_de = lambda a: (float(_fat_salvo[a]["fat"]) if a in _fat_salvo
-                       else float(par_vigente(_par, _hist_pj, a)["faturamento_minimo"]))
+  _fat_de = lambda a: fat_do_mes(a, _fat_salvo, _par, _hist_pj)
   _extra_de = lambda a: float(_fat_salvo[a].get("extra", 0.0)) if a in _fat_salvo else 0.0
   _sub_cart, _sub_pj = st.tabs(["carteira", "cashflow"])
   with _sub_cart:
@@ -4607,65 +4695,56 @@ if _pagina == "configurações":
     _cpj_fat, _cpj_par = st.container(key="cfg_pj_layout").columns([1, 1], gap="large")
     # ── faturamento por mês (editável) ───────────────────────────────────────
     with _cpj_fat:
-        st.markdown("<p class='cfg-sec'>faturamento por mês</p>", unsafe_allow_html=True)
-        st.markdown("<p class='cfg-nota'>por mês de atividade — recebido no mês seguinte</p>",
+        st.markdown("<p class='cfg-sec'>notas fiscais e reembolsos</p>", unsafe_allow_html=True)
+        st.markdown("<p class='cfg-nota'>uma linha por nota ou reembolso · mês passado sem nota = R$ 0 · "
+                    "mês atual/futuro sem nota = faturamento base · reembolso não tem imposto</p>",
                     unsafe_allow_html=True)
-        _anos_c = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo])
+        _notas_cfg = st.session_state.get("_pj_notas", [])
+        _anos_c = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [n["data"].year for n in _notas_cfg])
                          if a >= ANO_INICIO_PJ)
-        _ano_c = st.segmented_control("ano do faturamento", _anos_c, default=_hoje_pj.year,
+        _ano_c = st.segmented_control("ano das notas", _anos_c, default=_hoje_pj.year,
                                       label_visibility="collapsed", key="cfg_pj_ano") or _hoje_pj.year
-        _ano = _ano_c
-        _meses_ativ = [f"{_ano}-{m:02d}" for m in range(1, 13)]
-        with st.form(f"form_pj_fat_{_ano}", border=True):
-            _df_ed = pd.DataFrame({"mês": [_rot(k) for k in _meses_ativ],
-                                   "faturamento": [_fat_de(k) for k in _meses_ativ],
-                                   "extra": [_extra_de(k) for k in _meses_ativ]})
-            _df_ret = st.data_editor(
-                _df_ed, hide_index=True, width="stretch", num_rows="fixed", key=f"pj_editor_{_ano}",
-                height="content",                    # 12 meses sem barra de rolagem
-                column_config={
-                    "mês": st.column_config.TextColumn("mês", disabled=True),
-                    "faturamento": st.column_config.NumberColumn(
-                        "faturamento", min_value=0.0, step=0.01, format="localized",
-                        help="notas do mês recebidas no mês seguinte"),
-                    "extra": st.column_config.NumberColumn(
-                        "extra no mês", min_value=0.0, step=0.01, format="localized",
-                        help="notas além da base recebidas no próprio mês"),
-                })
-            if st.form_submit_button("salvar", type="primary"):
-                _novos = {k: {"fat": float(f), "extra": float(e)} for k, f, e in
-                          zip(_meses_ativ, _df_ret["faturamento"].fillna(0), _df_ret["extra"].fillna(0))}
-                salvar_pj_faturamento(_novos)
-                st.success("faturamento salvo.")
-                st.rerun(scope="app")
-
-        # ── reembolsos extras (PF) ───────────────────────────────────────────
-        if "_pf_reemb" not in st.session_state:
-            st.session_state["_pf_reemb"] = ler_pf_reembolsos()
-        _reemb_cfg = st.session_state["_pf_reemb"]
-        st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
-        st.markdown("<p class='cfg-sec'>reembolsos extras</p>", unsafe_allow_html=True)
-        st.markdown("<p class='cfg-nota'>por mês de recebimento · somados à base mensal dos parâmetros</p>",
-                    unsafe_allow_html=True)
-        with st.form(f"form_pf_reemb_{_ano}", border=True):
-            _df_r = pd.DataFrame({"mês": [_rot(k) for k in _meses_ativ],
-                                  "extra": pd.Series([float(_reemb_cfg.get(k, 0.0)) for k in _meses_ativ],
-                                                     dtype="float64")})
-            _df_r_ret = st.data_editor(
-                _df_r, hide_index=True, width="stretch", num_rows="fixed", key=f"pf_reemb_editor_{_ano}",
+        _do_ano = sorted([n for n in _notas_cfg if n["data"].year == _ano_c],
+                         key=lambda n: n["data"], reverse=True)
+        with st.form(f"form_pj_notas_{_ano_c}", border=True):
+            _df_n = pd.DataFrame({
+                "tipo":        pd.Series([n["tipo"] for n in _do_ano], dtype="object"),
+                "data":        pd.Series([n["data"].date() for n in _do_ano], dtype="object"),
+                "valor":       pd.Series([n["valor"] for n in _do_ano], dtype="float64"),
+                "recebimento": pd.Series([n["recebimento"] or "—" for n in _do_ano], dtype="object"),
+                "descrição":   pd.Series([n.get("descricao", "") for n in _do_ano], dtype="object"),
+            })
+            _df_n_ret = st.data_editor(
+                _df_n, hide_index=True, width="stretch", num_rows="dynamic", key=f"pj_notas_ed_{_ano_c}",
                 height="content",
                 column_config={
-                    "mês": st.column_config.TextColumn("mês", disabled=True),
-                    "extra": st.column_config.NumberColumn("reembolso extra", min_value=0.0, step=0.01,
-                                                           format="localized"),
+                    "tipo": st.column_config.SelectboxColumn("tipo", options=NOTA_TIPOS,
+                                                             default="nota fiscal", required=True),
+                    "data": st.column_config.DateColumn("emissão / recebimento", format="DD/MM/YYYY",
+                                                        required=True),
+                    "valor": st.column_config.NumberColumn("valor", min_value=0.0, step=0.01,
+                                                           format="localized", required=True),
+                    "recebimento": st.column_config.SelectboxColumn(
+                        "recebimento", options=NOTA_RECEB + ["—"], default="mês seguinte",
+                        help="nota fiscal: recebida no mês seguinte ou no mesmo mês da emissão"),
+                    "descrição": st.column_config.TextColumn("descrição"),
                 })
             if st.form_submit_button("salvar", type="primary"):
-                salvar_pf_reembolsos({k: (0.0 if pd.isna(v) else float(v))
-                                      for k, v in zip(_meses_ativ, _df_r_ret["extra"])})
-                st.success("reembolsos salvos.")
+                _novas = []
+                for _, r in _df_n_ret.iterrows():
+                    if pd.isna(r["data"]) or pd.isna(r["valor"]):
+                        continue
+                    _tp = r["tipo"] if r["tipo"] in NOTA_TIPOS else "nota fiscal"
+                    _novas.append({"tipo": _tp, "data": pd.Timestamp(r["data"]).normalize(),
+                                   "valor": float(r["valor"]),
+                                   "recebimento": ("" if _tp == "reembolso" else
+                                                   (r["recebimento"] if r["recebimento"] in NOTA_RECEB
+                                                    else "mês seguinte")),
+                                   "descricao": "" if pd.isna(r["descrição"]) else str(r["descrição"])})
+                _outras = [n for n in _notas_cfg if n["data"].year != _ano_c]
+                salvar_pj_notas(_outras + _novas)
+                st.success("notas salvas.")
                 st.rerun(scope="app")
-
-
 
     with _cpj_par:
         # ── parâmetros PJ ────────────────────────────────────────────────────────
