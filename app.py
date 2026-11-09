@@ -4323,6 +4323,38 @@ if _pagina == "simulador":
 # ── Aba PJ: faturamento da empresa → receita da pessoa física ────────────────
 MESES3 = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
 
+@st.dialog("lançar nota fiscal ou reembolso")
+def dialogo_nova_nota():
+    tipo = st.segmented_control("tipo", NOTA_TIPOS, default="nota fiscal", key="nn_tipo") or "nota fiscal"
+    c1, c2 = st.columns(2)
+    data = c1.date_input("data de emissão" if tipo == "nota fiscal" else "data do recebimento",
+                         value="today", format="DD/MM/YYYY", key="nn_data")
+    valor_txt = c2.text_input("valor (R$)", placeholder="ex.: 12.520,00", key="nn_valor")
+    receb = ""
+    if tipo == "nota fiscal":
+        receb = st.segmented_control("recebimento", NOTA_RECEB, default="mês seguinte",
+                                     key="nn_receb") or "mês seguinte"
+    desc = st.text_input("descrição (opcional)", key="nn_desc")
+    if st.button("lançar", type="primary", key="nn_ok"):
+        try:
+            valor = _num_br(valor_txt)
+            if valor <= 0:
+                raise ValueError
+        except ValueError:
+            st.error("valor inválido — use o formato 12.520,00")
+            return
+        _d = pd.Timestamp(data).normalize()
+        _notas = list(st.session_state.get("_pj_notas") or [])
+        salvar_pj_notas(_notas + [{"tipo": tipo, "data": _d, "valor": float(valor),
+                                   "recebimento": receb, "descricao": desc.strip()}])
+        _caixa = _d + pd.DateOffset(months=1) if receb == "mês seguinte" else _d
+        st.session_state["_nn_msg"] = (f"{tipo} de {formatar_brl(valor)} "
+                                       f"{'lançado' if tipo == 'reembolso' else 'lançada'} · entra no caixa de "
+                                       f"{MESES3[_caixa.month - 1]}/{str(_caixa.year)[2:]}")
+        for _k in ["nn_valor", "nn_desc"]:
+            st.session_state.pop(_k, None)
+        st.rerun()
+
 def carregar_dados_pj():
     """parâmetros, histórico e notas/reembolsos (cache na sessão) — usados em cashflow e configurações"""
     if "_pj_par" not in st.session_state:
@@ -4511,6 +4543,10 @@ def _pagina_pj():
     st.session_state.setdefault("pj_ano_sel", _ano)
 
     st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+    if st.session_state.get("_nn_msg"):
+        st.toast(st.session_state.pop("_nn_msg"))
+    if st.button("+ nota fiscal / reembolso", type="primary", key="btn_nova_nota"):
+        dialogo_nova_nota()
     with st.expander("histórico e próximos meses"):
         st.segmented_control("ano", _anos, label_visibility="collapsed", key="pj_ano_sel",
                              on_change=_pj_ano_mudou)
@@ -4696,9 +4732,8 @@ if _pagina == "configurações":
     # ── faturamento por mês (editável) ───────────────────────────────────────
     with _cpj_fat:
         st.markdown("<p class='cfg-sec'>notas fiscais e reembolsos</p>", unsafe_allow_html=True)
-        st.markdown("<p class='cfg-nota'>uma linha por nota ou reembolso · mês passado sem nota = R$ 0 · "
-                    "mês atual/futuro sem nota = faturamento base · reembolso não tem imposto</p>",
-                    unsafe_allow_html=True)
+        st.markdown("<p class='cfg-nota'>para lançar uma nova, use o botão na aba cashflow · aqui dá para "
+                    "corrigir ou apagar</p>", unsafe_allow_html=True)
         _notas_cfg = st.session_state.get("_pj_notas", [])
         _anos_c = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [n["data"].year for n in _notas_cfg])
                          if a >= ANO_INICIO_PJ)
