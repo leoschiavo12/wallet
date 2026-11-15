@@ -1749,12 +1749,53 @@ def ler_pf_pix():
         st.session_state["_pf_pix"] = df
     return st.session_state["_pf_pix"]
 
+@st.cache_data(ttl=600, show_spinner=False)
+def ler_pix_fatura():
+    """PIX lançados no Controle de Fatura (aba pix: data, tipo entrada/saida, categoria, descricao, valor).
+    retorna (DataFrame, erro ou None) — a aba fica fora da fatura do cartão"""
+    _vazio = pd.DataFrame(columns=["data", "tipo", "valor"])
+    if not SHEET_ID_FATURA:
+        return _vazio, "fatura_spreadsheet_id não configurado nos secrets"
+    try:
+        svc = get_sheets_service()
+        abas = [x["properties"]["title"] for x in svc.get(
+            spreadsheetId=SHEET_ID_FATURA, fields="sheets.properties.title").execute()["sheets"]]
+        if "pix" not in abas:
+            return _vazio, None
+        vals = svc.values().get(spreadsheetId=SHEET_ID_FATURA, range="'pix'!A:E",
+                                valueRenderOption="UNFORMATTED_VALUE",
+                                dateTimeRenderOption="FORMATTED_STRING").execute().get("values", [])
+        if len(vals) <= 1:
+            return _vazio, None
+        cab = [str(c).strip().lower() for c in vals[0]]
+        if not {"data", "tipo", "valor"} <= set(cab):
+            return _vazio, "aba pix sem as colunas data/tipo/valor"
+        ix = {c: cab.index(c) for c in ["data", "tipo", "valor"]}
+        df = pd.DataFrame([{c: (r[i] if len(r) > i else "") for c, i in ix.items()} for r in vals[1:]])
+        d = pd.to_datetime(df["data"].astype(str), format="%Y-%m-%d", errors="coerce")
+        df["data"] = d.fillna(pd.to_datetime(df["data"].astype(str), dayfirst=True, errors="coerce"))
+        df["tipo"] = df["tipo"].astype(str).str.strip().str.lower()
+        df["valor"] = pd.to_numeric(df["valor"].apply(
+            lambda x: x if isinstance(x, (int, float)) else (_num_br(x) if str(x).strip() else None)),
+            errors="coerce")
+        return df.dropna(subset=["data", "valor"]), None
+    except Exception as e:
+        return _vazio, str(e)[:80]
+
 def pix_mensal():
-    """{'2026-11': total no PIX no mês}"""
-    df = ler_pf_pix()
-    if df.empty:
-        return {}
-    return df.groupby(df["data"].dt.strftime("%Y-%m"))["valor"].sum().round(2).to_dict()
+    """{'2026-11': {'saida': x, 'entrada': y}} — Controle de Fatura (aba pix) + aba pf_pix antiga
+    desta planilha (só saídas), se existir"""
+    out = {}
+    df, _ = ler_pix_fatura()
+    for _, r in df.iterrows():
+        t = "entrada" if r["tipo"].startswith("entr") else "saida"
+        d = out.setdefault(r["data"].strftime("%Y-%m"), {"saida": 0.0, "entrada": 0.0})
+        d[t] += float(r["valor"])
+    leg = ler_pf_pix()
+    for _, r in leg.iterrows():
+        d = out.setdefault(r["data"].strftime("%Y-%m"), {"saida": 0.0, "entrada": 0.0})
+        d["saida"] += float(r["valor"])
+    return out
 
 def ler_pj_parametros():
     par = {k: d for k, _, d, _ in PJ_PARAMS}
@@ -2017,7 +2058,7 @@ def salvar_pj_faturamento(novos):
                         valueInputOption="RAW", body={"values": corpo}).execute()
     st.session_state.pop("_pj_fat", None)
 
-def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.0, pix=0.0):
+def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.0, pix=0.0, pix_in=0.0):
     """
     fluxo de um mês: faturamento da PJ → custos → pró-labore + lucros → receita da PF.
     previdência = % do faturamento BASE (revisto a cada 18 meses), mesmo quando o faturamento
@@ -2045,7 +2086,8 @@ def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.
         "lucros": lucros, "fies": fies, "lucros_nubank": lucros - fies,
         "reembolso": reemb,
         "receita_pf": pl_liq + lucros + reemb, "nubank": pl_liq + lucros + reemb - fies,
-        "cartao": cartao, "pix": pix, "sobra": pl_liq + lucros + reemb - fies - cartao - pix,
+        "cartao": cartao, "pix": pix, "pix_in": pix_in,
+        "sobra": pl_liq + lucros + reemb - fies - cartao - pix + pix_in,
     }
 
 def salvar_meta(chave, valor, descricao=""):
@@ -4568,10 +4610,12 @@ def fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano):
             return _fat_de(_comp[k]) + _extra_de(_comp[k])
         return _fat_de(_comp[k]) + _extra_de(k)
     # cada mês com os parâmetros vigentes nele (pró-labore, DAS, contador… mudam com o tempo)
-    # PIX: sai da conta no próprio mês da compra
+    # PIX (Controle de Fatura): entra/sai da conta no próprio mês
     _pix = pix_mensal()
+    _px = lambda k, t: float(_pix.get(k, {}).get(t, 0.0))
     _calc = {k: calcular_pj_mes(_fat_de(_comp[k]) + _extra_de(k), par_vigente(_par, _hist_pj, k), k,
-                                _cart[k][0], _base_das(k), _reemb_extra.get(k, 0.0), _pix.get(k, 0.0))
+                                _cart[k][0], _base_das(k), _reemb_extra.get(k, 0.0),
+                                _px(k, "saida"), _px(k, "entrada"))
              for k in _meses}
     return {"pix": _pix, "meses": _meses, "comp": _comp, "calc": _calc, "cart": _cart, "das_seg": _das_seg,
             "cart_erro": _cart_erro, "fat_de": _fat_de, "extra_de": _extra_de}
@@ -4662,7 +4706,7 @@ def _pagina_pj():
     if _cart_erro:
         st.warning(f"Controle de Fatura indisponível ({_cart_erro}) — cartão considerado R$0.")
 
-    def _tabela_pj(c, fat, extra, r_fat, r_extra, r_das, r_cart, r_pix="compras PIX"):
+    def _tabela_pj(c, fat, extra, r_fat, r_extra, r_das, r_cart, r_pix="PIX"):
         """débitos e créditos da PJ, depois da PF"""
         lin = [("pj-sec", "PJ", ""), ("", f"(+) {r_fat}", formatar_brl(fat))]
         if extra:
@@ -4680,7 +4724,8 @@ def _pagina_pj():
                 ("pj-tot", "saldo disponível / nubank", _neg(c["receita_pf"])),
                 ("", "(−) FIES / débito BB", formatar_brl(c["fies"])),
                 ("", f"(−) {r_cart}", formatar_brl(c["cartao"])),
-                ("", f"(−) {r_pix}", formatar_brl(c["pix"])),
+                ("", f"(+) entradas {r_pix}", formatar_brl(c["pix_in"])),
+                ("", f"(−) saídas {r_pix}", formatar_brl(c["pix"])),
                 ("pj-tot", "sobra para investir", _neg(c["sobra"]))]
         return "<table class='pj-tab'>" + "".join(
             f"<tr class='{cl}'><td>{x}</td><td>{y}</td></tr>" for cl, x, y in lin) + "</table>"
@@ -4704,7 +4749,7 @@ def _pagina_pj():
             _tit = str(_ano)
             c = {f: sum(v[f] for v in _calc.values()) for f in
                  ["das", "prev", "contador", "taxa", "fies", "pro_labore", "lucros",
-                  "pl_liq", "reembolso", "receita_pf", "cartao", "pix", "sobra"]}
+                  "pl_liq", "reembolso", "receita_pf", "cartao", "pix", "pix_in", "sobra"]}
             _tab = _tabela_pj(c, sum(_fat_de(_comp[k]) for k in _meses), sum(_extra_de(k) for k in _meses),
                               "faturamento recebido", "extras", "DAS", "cartão", "PIX")
         _ph_tit.markdown(f"<p class='cfg-sec pj-mes-lbl'>{_tit}</p>", unsafe_allow_html=True)
@@ -4905,7 +4950,8 @@ def _pagina_mes():
 
     df_f, cats, erro_f = ler_fatura_detalhe()
     _, limite, _ = ler_cartao_mensal()
-    pix_k = float(pix_mensal().get(k, 0.0))
+    _pk = pix_mensal().get(k, {})
+    pix_k, pix_in_k = float(_pk.get("saida", 0.0)), float(_pk.get("entrada", 0.0))
     df_m = df_f[df_f["data"].dt.strftime("%Y-%m") == k] if not df_f.empty else df_f
     gasto = float(df_m["valor"].sum()) if not df_m.empty else 0.0
 
@@ -4917,8 +4963,9 @@ def _pagina_mes():
         else:
             lim = float(limite or 0.0)
             fx_render_cards_limite(df_m, lim)
-        if pix_k:
-            _cap_pj(f"compras no PIX em {MESES3[hoje.month - 1]}: {formatar_brl(pix_k)}")
+        if pix_k or pix_in_k:
+            _cap_pj(f"PIX em {MESES3[hoje.month - 1]}: entradas {formatar_brl(pix_in_k)} · "
+                    f"saídas {formatar_brl(pix_k)}")
         st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
         render_fies(carregar_dados_pj()[0], "mes_fies_box")
 
@@ -4935,7 +4982,7 @@ def _pagina_mes():
                 fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, hoje.year)
                 c = fx["calc"][k]
                 # a fatura considerada é a do próprio mês (aberta), não a do mês anterior
-                sobra = c["nubank"] - gasto - pix_k
+                sobra = c["nubank"] - gasto - pix_k + pix_in_k
             # proventos do mês em curso (data-com no mês, até hoje) — reinvestidos no próximo aporte
             try:
                 prov, _ = calcular_dividendos_mes(_df_lanc_raw.to_dict(orient="records"), hoje.month, hoje.year)
@@ -4953,8 +5000,8 @@ def _pagina_mes():
                 _s = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
                 _m = MESES3[hoje.month - 1]
                 _cap_pj(f"sobra = receita PF de {_m} ({_s(c['receita_pf'])}) − FIES ({formatar_brl(c['fies'])}) "
-                        f"− fatura de {_m}, em aberto ({formatar_brl(gasto)}) − PIX de {_m} "
-                        f"({formatar_brl(pix_k)}).")
+                        f"− fatura de {_m}, em aberto ({formatar_brl(gasto)}) − saídas PIX "
+                        f"({formatar_brl(pix_k)}) + entradas PIX ({formatar_brl(pix_in_k)}).")
             if aporte > 0 and st.button("distribuir no simulador", key="btn_distribuir",
                                         use_container_width=True):
                 st.session_state["_aporte_do_mes"] = fmt_num(aporte, 2)
