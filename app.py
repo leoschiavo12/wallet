@@ -1697,16 +1697,6 @@ def ler_fatura_detalhe():
     except Exception as e:
         return _vazio, [], str(e)[:80]
 
-def salvar_despesa_fatura(data_iso, categoria_id, descricao, valor):
-    """grava uma despesa na aba lancamentos do Controle de Fatura — mesmo formato do app de lá
-    (data aaaa-mm-dd, id da categoria, descrição, valor numérico)"""
-    get_sheets_service().values().append(
-        spreadsheetId=SHEET_ID_FATURA, range="'lancamentos'!A:D", valueInputOption="RAW",
-        insertDataOption="INSERT_ROWS",
-        body={"values": [[data_iso, categoria_id, descricao, float(valor)]]}).execute()
-    ler_fatura_detalhe.clear()
-    ler_cartao_mensal.clear()
-
 SHEET_PF_PIX_TAB = "pf_pix"
 PIX_HEADERS = ["data", "categoria", "descricao", "valor"]
 
@@ -1735,14 +1725,6 @@ def pix_mensal():
     if df.empty:
         return {}
     return df.groupby(df["data"].dt.strftime("%Y-%m"))["valor"].sum().round(2).to_dict()
-
-def salvar_pix(data_iso, categoria_id, descricao, valor):
-    svc = get_sheets_service()
-    _garantir_aba_existe(svc, SHEET_PF_PIX_TAB, PIX_HEADERS)
-    svc.values().append(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_PIX_TAB}!A:D", valueInputOption="RAW",
-                        insertDataOption="INSERT_ROWS",
-                        body={"values": [[data_iso, categoria_id, descricao, float(valor)]]}).execute()
-    st.session_state.pop("_pf_pix", None)
 
 def ler_pj_parametros():
     par = {k: d for k, _, d, _ in PJ_PARAMS}
@@ -4685,171 +4667,190 @@ if _pagina == "cashflow":
 MESES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
              'setembro','outubro','novembro','dezembro']
 
-# lançador de despesas: cópia do formulário do app Controle de Fatura (mesmos campos, estilo e
-# máscara de centavos), com a escolha cartão / pix. cartão → planilha do Controle de Fatura;
-# pix → aba pf_pix desta planilha (fica fora da fatura, sai do caixa no próprio mês)
-CSS_LANCADOR = """<style>
-.st-key-mes_lancador { --altura-campo: 2.5rem; }
-.st-key-mes_lancador div[data-testid="stFormSubmitButton"] button {
-    min-height: var(--altura-campo) !important; height: var(--altura-campo) !important;
-    font-size: 0.9rem !important; line-height: 1 !important; border-radius: 8px !important; }
-.st-key-mes_lancador div[data-baseweb="input"] {
-    min-height: var(--altura-campo) !important; height: var(--altura-campo) !important;
-    border: 1px solid #2c2c33 !important; border-radius: 8px !important; box-sizing: border-box !important; }
-.st-key-mes_lancador div[data-baseweb="base-input"] {
-    min-height: 0 !important; height: 100% !important; border: none !important; background: transparent !important; }
-.st-key-mes_lancador div[data-baseweb="input"] input {
-    height: 100% !important; min-height: 0 !important; border: none !important; background: transparent !important;
-    padding: 0 0.7rem !important; font-size: 0.9rem !important; }
-.st-key-mes_lancador :is(div[data-testid="stTextInput"], div[data-testid="stDateInput"],
-    div[data-testid="stSelectbox"], div[data-testid="stElementContainer"]) { margin-bottom: 0 !important; }
-.st-key-mes_lancador [data-testid="stWidgetLabel"] p {
-    font-size: 0.68rem !important; text-transform: uppercase !important; letter-spacing: 0.04em !important;
-    color: rgba(230,230,230,0.55) !important; font-weight: 500 !important; }
-.st-key-mes_lancador [data-testid="stWidgetLabel"] { margin-bottom: 0.2rem !important; }
-.st-key-mes_lancador :is(div[data-testid="stSelectbox"] div[role="group"], div[data-baseweb="select"] > div) {
-    min-height: var(--altura-campo) !important; height: var(--altura-campo) !important;
-    border: 1px solid #2c2c33 !important; border-radius: 8px !important; box-sizing: border-box !important;
-    cursor: pointer !important; }
-.st-key-mes_lancador div[data-testid="stSelectbox"] input {
-    height: 100% !important; min-height: 0 !important; border: none !important; background: transparent !important;
-    padding: 0 0.7rem !important; font-size: 0.9rem !important; caret-color: transparent !important;
-    cursor: pointer !important; }
-.st-key-mes_lancador div[data-testid="stForm"] {
-    padding: 1rem 1.1rem !important; border: 1px solid #202024 !important; border-radius: 12px !important; }
-.st-key-mes_lancador div[data-testid="stForm"] div[data-testid="stVerticalBlock"] { gap: 0.9rem !important; }
-@media (max-width: 640px) {
-    .st-key-mes_lancador div[data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
-    .st-key-mes_lancador div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] { min-width: 0 !important; }
-}
-</style>"""
+# ── resumo da fatura: cópia dos painéis do app Controle de Fatura (aba lançar: limite;
+# aba dashboard: rosca + barras por categoria), com a mesma formatação de lá ──
+FATURA_FIXED_ID = "parcel"
 
-def ativar_campos_formulario(aria_label_valor):
-    """igual ao Controle de Fatura: seletor de categoria não abre o teclado do celular;
-    campo de valor com teclado numérico e máscara de centavos (1 → 0,01 · 1250 → 12,50)"""
-    import streamlit.components.v1 as components
-    components.html(f"""
-    <script>
-    const doc = window.parent.document;
-    function formatarCentavos(txt) {{
-        const dig = txt.replace(/\\D/g, '');
-        if (!dig) return '';
-        const c = parseInt(dig, 10);
-        return Math.floor(c / 100) + ',' + String(c % 100).padStart(2, '0');
-    }}
-    function ajustar() {{
-        doc.querySelectorAll('.st-key-mes_lancador div[data-testid="stSelectbox"] input').forEach(el => {{
-            el.setAttribute('inputmode', 'none');
-        }});
-        doc.querySelectorAll('.st-key-mes_lancador input[aria-label="{aria_label_valor}"]').forEach(el => {{
-            el.setAttribute('inputmode', 'numeric');
-            if (el.dataset.mascara) return;
-            el.dataset.mascara = '1';
-            el.addEventListener('input', () => {{
-                const novo = formatarCentavos(el.value);
-                if (novo === el.value) return;
-                const setter = Object.getOwnPropertyDescriptor(
-                    window.parent.HTMLInputElement.prototype, 'value').set;
-                setter.call(el, novo);
-                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            }});
-        }});
-    }}
-    ajustar();
-    new MutationObserver(ajustar).observe(doc.body, {{ childList: true, subtree: true }});
-    </script>
-    """, height=0)
+def _fx_brl(valor):
+    """formatação do Controle de Fatura ('R$ 1234', sem centavos) — cifrão como entidade HTML"""
+    return ("R$ " + f"{valor:.0f}").replace("$", "&#36;")
 
-def _parse_valor_fatura(txt):
-    """igual ao Controle de Fatura: '1.234,56' · '1234,56' · '1234.56' → float (inválido → 0)"""
-    if not txt:
-        return 0.0
-    txt = str(txt).strip().replace(".", "").replace(",", ".") if "," in str(txt) else str(txt).strip()
-    try:
-        return float(txt)
-    except ValueError:
-        return 0.0
+def _fx_pct(p):
+    if p == 0:
+        return "0%"
+    return f"{p:.1f}".replace(".", ",") + "%"
 
-@st.fragment
-def form_lancamento(df_f, cats):
-    hoje = pd.Timestamp.today()
-    mes_ant = (hoje.replace(day=1) - pd.Timedelta(days=1)).strftime("%Y-%m")
-    df_ant = df_f[df_f["data"].dt.strftime("%Y-%m") == mes_ant] if not df_f.empty else df_f
-    gasto_mes_ant = df_ant.groupby("categoria")["valor"].sum().to_dict() if not df_ant.empty else {}
+_FX_ICONE_CARTAO = (
+    "<svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#9a9a9a' stroke-width='1.8' "
+    "stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='5' width='20' height='14' rx='2.5'/>"
+    "<line x1='2' y1='10' x2='22' y2='10'/><line x1='6' y1='15' x2='10' y2='15'/></svg>"
+)
+_FX_ICONE_CALENDARIO = (
+    "<svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#9a9a9a' stroke-width='1.8' "
+    "stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4.5' width='18' height='16.5' rx='2.5'/>"
+    "<line x1='3' y1='10' x2='21' y2='10'/><line x1='8' y1='2.5' x2='8' y2='6.5'/>"
+    "<line x1='16' y1='2.5' x2='16' y2='6.5'/></svg>"
+)
 
-    todas = sorted(cats, key=lambda c: c["nome"].lower())
-    opcoes_ids = [c["id"] for c in todas]
-    opcoes_labels = {c["id"]: c["nome"].lower() for c in todas}
-    if gasto_mes_ant:
-        categoria_default = max(gasto_mes_ant, key=gasto_mes_ant.get)
-        index_default = opcoes_ids.index(categoria_default) if categoria_default in opcoes_ids else 0
+def _fx_barra_html(titulo, direita, pct, cor):
+    largura = min(max(pct, 0), 1) * 100
+    return (
+        "<div style='margin-top:16px;'>"
+        "<div style='display:flex;justify-content:space-between;align-items:center;"
+        "font-size:12px;color:#9a9a9a;margin-bottom:6px;'>"
+        f"<span style='display:flex;align-items:center;'>{titulo}</span>"
+        f"<span>{direita}</span></div>"
+        "<div style='position:relative;height:8px;background:#202024;border-radius:6px;'>"
+        f"<div style='width:{largura:.1f}%;height:100%;background:{cor};border-radius:6px;'></div>"
+        "</div></div>"
+    )
+
+def fx_render_cards_limite(df_mes, limite_mensal):
+    """total da fatura / limite disponível + barras de fatura e de mês (igual ao Controle de Fatura)"""
+    import calendar
+    total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
+    disponivel = limite_mensal - total_gasto
+    hoje = date.today()
+    dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
+    pct_mes = hoje.day / dias_no_mes
+    pct_fatura = total_gasto / limite_mensal if limite_mensal > 0 else 0
+    if pct_fatura > 1:
+        cor_fatura = "#e05252"
+    elif pct_fatura > pct_mes:
+        cor_fatura = "#E5B800"
     else:
-        index_default = 0
+        cor_fatura = "#6b7280"
+    label_disp = "limite disponível (R$)" if disponivel >= 0 else "limite excedido (R$)"
+    cor_disp = "inherit" if disponivel >= 0 else "#e05252"
+    html = (
+        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr;align-items:end;column-gap:12px;'>"
+        "<div style='justify-self:start;text-align:center;'>"
+        "<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>total da fatura (R&#36;)</div>"
+        f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;'>{total_gasto:.0f}</div>"
+        "</div>"
+        "<div style='justify-self:end;text-align:center;'>"
+        f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{label_disp.replace('$', '&#36;')}</div>"
+        f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;color:{cor_disp};'>{abs(disponivel):.0f}</div>"
+        "</div></div>"
+        + _fx_barra_html(_FX_ICONE_CARTAO,
+                         f"<span style='color:{cor_fatura};'>{_fx_pct(pct_fatura * 100)} consumido</span>",
+                         pct_fatura, cor_fatura)
+        + _fx_barra_html(_FX_ICONE_CALENDARIO, f"{_fx_pct(pct_mes * 100)} decorrido", pct_mes, "#6b7280")
+        + "</div>"
+    )
+    st.markdown(html, unsafe_allow_html=True)
 
-    with st.form("form_lancar", clear_on_submit=True):
-        categoria_id = st.selectbox(
-            "categoria", options=opcoes_ids, index=index_default,
-            format_func=lambda x: opcoes_labels[x],
-        )
-        pagamento = st.segmented_control("pagamento", ["cartão", "pix"], default="cartão",
-                                         key="lanc_pagamento")
+def fx_render_grafico_categorias(df_mes, limite_mensal, cats, chave, mes_ref):
+    """rosca + barras de progresso por categoria (igual ao Controle de Fatura)"""
+    total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
+    gasto_parcel = df_mes[df_mes["categoria"] == FATURA_FIXED_ID]["valor"].sum() if not df_mes.empty else 0
+    gasto_outros = max(0, total_gasto - gasto_parcel)
+    disponivel = limite_mensal - total_gasto
+    nome_mes_atual = MESES_EXT[mes_ref.month - 1]
+    # ordem fixa das fatias: disponível, mês atual, parcelamentos (parcelamentos termina às 12h)
+    fatia_disp = max(0, disponivel)
+    labels, valores, cores = [], [], []
+    if fatia_disp > 0:
+        labels.append("disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
+    if gasto_outros > 0:
+        labels.append(nome_mes_atual); valores.append(gasto_outros); cores.append("#D85A30")
+    if gasto_parcel > 0:
+        labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
+    if valores:
+        soma_valores = sum(valores)
+        percentuais = [_fx_pct(v / soma_valores * 100) for v in valores]
+        valores_fmt = [f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") for v in valores]
+        fig = go.Figure(data=[go.Pie(
+            labels=labels, values=valores, hole=0.65, marker=dict(colors=cores),
+            sort=False, direction="clockwise", rotation=0,
+            text=percentuais, texttemplate="%{label}<br>%{text}", textposition="outside",
+            textfont=dict(size=13, color="#e8e8e6"),
+            customdata=valores_fmt,
+            hovertemplate="%{label}<br>R$ %{customdata}<br>%{text}<extra></extra>",
+            automargin=True,
+        )])
+        fig.update_layout(showlegend=False, margin=dict(t=50, b=50, l=70, r=70), height=380,
+                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"pie_{chave}")
+    else:
+        st.caption("sem lançamentos neste mês.")
 
-        col_data, col_val = st.columns([1, 1])
-        with col_data:
-            data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
-        with col_val:
-            valor_txt = st.text_input("valor (R$)", placeholder="0,00")
+    gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict() if not df_mes.empty else {}
+    cats_ordenadas = sorted([c for c in cats if c["id"] != FATURA_FIXED_ID],
+                            key=lambda c: -gasto_por_cat.get(c["id"], 0.0))
+    if not cats_ordenadas:
+        st.caption("nenhuma categoria configurada.")
+    else:
+        for c in cats_ordenadas:
+            orcamento = c["valor_alvo"]
+            gasto = gasto_por_cat.get(c["id"], 0.0)
+            pct = min(gasto / orcamento, 1.0) if orcamento > 0 else 0
+            estourou = gasto > orcamento and orcamento > 0
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
+                f"<span>{c['nome'].lower()}</span>"
+                f"<span style='color:{'#e05252' if estourou else '#888'};'>"
+                f"{_fx_brl(gasto)} / {_fx_brl(orcamento)}</span></div>",
+                unsafe_allow_html=True,
+            )
+            st.progress(pct)
+        gasto_parcel_mes = gasto_por_cat.get(FATURA_FIXED_ID, 0)
+        if gasto_parcel_mes > 0:
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
+                f"<span>parcelamentos</span><span style='color:#888;'>{_fx_brl(gasto_parcel_mes)}</span></div>",
+                unsafe_allow_html=True,
+            )
 
-        descricao = st.text_input("descrição")
+# ── variação de preço em 12 meses por ativo (sem proventos) ──
+def _ref_12m():
+    return pd.Timestamp.today().normalize() - pd.DateOffset(years=1)
 
-        ativar_campos_formulario("valor (R$)")
+def _preco_em(serie, ref):
+    """último preço da série até ref (no máx. 10 dias antes) ou None"""
+    if serie is None or len(serie) == 0:
+        return None
+    s = serie[serie.index <= ref]
+    if s.empty or (ref - s.index[-1]).days > 10:
+        return None
+    return float(s.iloc[-1])
 
-        enviado = st.form_submit_button("registrar despesa", use_container_width=True)
+@st.cache_data(ttl=86400, show_spinner=False)
+def _precos_ref_12m_b3(tickers, janela):
+    """preço de fechamento real (sem ajuste) de cada ticker da B3 há 12 meses"""
+    ref, out = _ref_12m(), {}
+    for t in tickers:
+        try:
+            out[t] = _preco_em(_fechamentos_historicos(f"{t}.SA"), ref)
+        except Exception:
+            out[t] = None
+    return out
 
-        if enviado:
-            valor = _parse_valor_fatura(valor_txt)
-            if valor <= 0:
-                st.error("informe um valor válido.")
-            else:
-                try:
-                    if pagamento == "pix":
-                        salvar_pix(data_lanc.isoformat(), categoria_id, descricao, valor)
-                    else:
-                        salvar_despesa_fatura(data_lanc.isoformat(), categoria_id, descricao, valor)
-                except Exception as e:
-                    st.error(f"não consegui gravar ({str(e)[:80]})")
-                    return
-                st.session_state["_dp_msg"] = (f"{opcoes_labels.get(categoria_id, categoria_id)} · "
-                                               f"{formatar_brl(valor)} no {pagamento or 'cartão'} · registrado!")
-                st.rerun(scope="app")
-
-def _barras_categorias(gasto_cat, cats):
-    """uma linha por categoria: nome · gasto / orçamento · barra (vermelha se estourou)"""
-    lin = []
-    for c in sorted(cats, key=lambda c: -gasto_cat.get(c["id"], 0.0)):
-        g, alvo = gasto_cat.get(c["id"], 0.0), c["valor_alvo"]
-        if not g and not alvo:
-            continue
-        if c["fixo"] or not alvo:
-            dir_txt, pct, cor = formatar_brl(g), 0, c["cor"]
-        else:
-            pct = min(g / alvo, 1.0) * 100
-            cor = "#ef4444" if g > alvo else c["cor"]
-            dir_txt = f"{formatar_brl(g)} / {formatar_brl(alvo)}"
-        _barra = ("" if c["fixo"] or not alvo else
-                  f"<div style='height:4px;background:rgba(250,250,250,0.08);border-radius:2px;margin-top:3px'>"
-                  f"<div style='height:4px;width:{pct:.0f}%;background:{cor};border-radius:2px'></div></div>")
-        _cor_txt = "#ef4444" if alvo and not c["fixo"] and g > alvo else "inherit"
-        lin.append(f"<div style='margin:0.45rem 0'><div style='display:flex;justify-content:space-between;"
-                   f"font-size:0.85rem'><span>{c['nome']}</span><span style='color:{_cor_txt}'>{dir_txt}</span>"
-                   f"</div>{_barra}</div>")
-    # categorias que existem nos lançamentos mas não na aba categorias
-    _ids = {c["id"] for c in cats}
-    for cid, g in gasto_cat.items():
-        if cid not in _ids and g:
-            lin.append(f"<div style='display:flex;justify-content:space-between;font-size:0.85rem;margin:0.45rem 0'>"
-                       f"<span>{cid or 'sem categoria'}</span><span>{formatar_brl(g)}</span></div>")
-    return "".join(lin)
+def variacao_12m():
+    """{ativo: variação % do preço em 12 meses} dos ativos em carteira (ETFs, FIIs, BTC, Renda+)"""
+    ref, out = _ref_12m(), {}
+    b3 = tuple(sorted(a for a, c in _classe_de.items() if c in ("ETF", "FII")))
+    p0 = dict(sem_espera("ref12m_b3", _agora_sp().strftime("%Y%m%d"), _precos_ref_12m_b3, b3)) if b3 else {}
+    if "BTC" in _classe_de:
+        try:
+            h, _ = obter_historico_btc_brl()
+            if h is not None and len(h):
+                h.index = pd.to_datetime(h.index).tz_localize(None) if getattr(h.index, "tz", None) else h.index
+                p0["BTC"] = _preco_em(h, ref)
+        except Exception:
+            pass
+    if "Renda+ 2050" in _classe_de:
+        try:
+            _hist_r, _ = obter_historico_taxa_renda_mais()
+            p0["Renda+ 2050"] = pu_renda_fim_mes(_hist_r, ref)
+        except Exception:
+            pass
+    for a, v0 in p0.items():
+        v1 = precos.get(a)
+        if v0 and v1:
+            out[a] = (float(v1) / v0 - 1) * 100
+    return out
 
 def _alertas_banda():
     """ativos fora da banda min/máx (FIIs avaliados juntos, contra a banda da classe)"""
@@ -4885,12 +4886,14 @@ def _pagina_mes():
         .st-key-mes_layout > div > [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
             width: 100% !important; min-width: 100% !important; flex: 1 1 100% !important; }
         .st-key-mes_layout > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) { margin-top: 1.2rem !important; }
-        :is(.st-key-row_mes_fat, .st-key-row_mes_ap) [data-testid="stHorizontalBlock"] {
+        :is(.st-key-row_mes_ap, .st-key-row_mes_12m) [data-testid="stHorizontalBlock"] {
             flex-wrap: nowrap !important; gap: 0.3rem !important; }
-        :is(.st-key-row_mes_fat, .st-key-row_mes_ap) [data-testid="stColumn"] {
+        .st-key-row_mes_ap [data-testid="stColumn"] {
             min-width: 31% !important; width: 31% !important; flex: 1 1 31% !important; }
+        .st-key-row_mes_12m [data-testid="stColumn"] {
+            min-width: 48% !important; width: 48% !important; flex: 1 1 48% !important; }
     }
-    </style>""" + CSS_LANCADOR, unsafe_allow_html=True)
+    </style>""", unsafe_allow_html=True)
     col_fat, col_ap = st.container(key="mes_layout").columns([1, 1], gap="large")
 
     df_f, cats, erro_f = ler_fatura_detalhe()
@@ -4899,29 +4902,16 @@ def _pagina_mes():
     df_m = df_f[df_f["data"].dt.strftime("%Y-%m") == k] if not df_f.empty else df_f
     gasto = float(df_m["valor"].sum()) if not df_m.empty else 0.0
 
-    # ── lançador + fatura aberta (gastos do mês corrente, pagos no mês que vem) ──
+    # ── fatura aberta: mesmos painéis do Controle de Fatura ─────────────────
     with col_fat:
+        st.markdown(f"<p class='cfg-sec'>fatura de {mes_ext} · aberta</p>", unsafe_allow_html=True)
         if erro_f:
             st.warning(f"Controle de Fatura indisponível ({erro_f})")
         else:
-            with st.container(key="mes_lancador"):
-                form_lancamento(df_f, cats)
-        st.markdown(f"<p class='cfg-sec'>fatura de {mes_ext} · aberta</p>", unsafe_allow_html=True)
-        if not erro_f:
             lim = float(limite or 0.0)
-            dias = (hoje.normalize() + pd.offsets.MonthBegin(1) - hoje.normalize()).days
-            with st.container(border=True, key="mes_fat_box"):
-                c1, c2, c3 = st.container(key="row_mes_fat").columns(3)
-                card_html(c1, "gasto", formatar_brl(gasto))
-                card_html(c2, "disponível" if lim - gasto >= 0 else "excedido",
-                          formatar_brl(abs(lim - gasto)), None if lim - gasto >= 0 else "neg")
-                card_html(c3, "fecha em", f"{dias} dias")
-                if lim > 0:
-                    _pct = gasto / lim
-                    st.progress(min(_pct, 1.0), text=f"{fmt_pct(_pct * 100)} do limite de {formatar_brl(lim)}")
-                gasto_cat = df_m.groupby("categoria")["valor"].sum().to_dict() if not df_m.empty else {}
-                if gasto_cat or cats:
-                    st.markdown(_barras_categorias(gasto_cat, cats), unsafe_allow_html=True)
+            fx_render_cards_limite(df_m, lim)
+            fx_render_grafico_categorias(df_m, lim, cats, chave="mes", mes_ref=hoje)
+        if pix_k:
             _cap_pj(f"compras no PIX em {MESES3[hoje.month - 1]}: {formatar_brl(pix_k)}")
 
     # ── aporte do mês: receita do mês − FIES − fatura aberta − PIX + proventos dos FIIs ──
@@ -4960,11 +4950,25 @@ def _pagina_mes():
         st.markdown("<p class='cfg-sec'>carteira</p>", unsafe_allow_html=True)
         with st.container(border=True, key="mes_alerta_box"):
             card_html(st, "patrimônio", abreviar_rs(total_geral))
+            _v12 = sorted(variacao_12m().items(), key=lambda x: -x[1])
+            if _v12:
+                _altas = _v12[:3]
+                _quedas = [x for x in sorted(_v12, key=lambda x: x[1])[:3] if x not in _altas]
+                _lin = lambda lst: "".join(
+                    f"<tr><td>{a}</td><td style='color:{'#22c55e' if v >= 0 else '#ef4444'}'>"
+                    f"{'▲ +' if v >= 0 else '▼ '}{fmt_pct(v)}</td></tr>" for a, v in lst)
+                ca, cq = st.container(key="row_mes_12m").columns(2)
+                ca.markdown("<p class='card-label'>maiores altas · 12m</p><table class='pj-tab'>"
+                            + _lin(_altas) + "</table>", unsafe_allow_html=True)
+                if _quedas:
+                    cq.markdown("<p class='card-label'>maiores quedas · 12m</p><table class='pj-tab'>"
+                                + _lin(_quedas) + "</table>", unsafe_allow_html=True)
+                st.caption("variação do preço em 12 meses, sem proventos.")
             alertas = _alertas_banda()
             if not alertas:
                 st.caption("todos os ativos dentro da banda.")
             else:
-                st.markdown("<table class='pj-tab'>" + "".join(
+                st.markdown("<p class='card-label'>fora da banda</p><table class='pj-tab'>" + "".join(
                     f"<tr><td>{n}</td><td style='color:{'#ef4444' if 'abaixo' in s else '#f59e0b'}'>"
                     f"{fmt_pct(p)} · {s} {fmt_pct(lim_b)}</td></tr>"
                     for n, p, s, lim_b, _ in alertas) + "</table>", unsafe_allow_html=True)
