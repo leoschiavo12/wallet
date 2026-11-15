@@ -4610,12 +4610,13 @@ def fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano):
             return _fat_de(_comp[k]) + _extra_de(_comp[k])
         return _fat_de(_comp[k]) + _extra_de(k)
     # cada mês com os parâmetros vigentes nele (pró-labore, DAS, contador… mudam com o tempo)
-    # PIX (Controle de Fatura): entra/sai da conta no próprio mês
+    # PIX (Controle de Fatura): só as entradas somam no mês. as saídas são pagas pela
+    # conta-pulmão e ficam apenas registradas (relatórios), sem afetar sobra nem aporte
     _pix = pix_mensal()
     _px = lambda k, t: float(_pix.get(k, {}).get(t, 0.0))
     _calc = {k: calcular_pj_mes(_fat_de(_comp[k]) + _extra_de(k), par_vigente(_par, _hist_pj, k), k,
                                 _cart[k][0], _base_das(k), _reemb_extra.get(k, 0.0),
-                                _px(k, "saida"), _px(k, "entrada"))
+                                0.0, _px(k, "entrada"))
              for k in _meses}
     return {"pix": _pix, "meses": _meses, "comp": _comp, "calc": _calc, "cart": _cart, "das_seg": _das_seg,
             "cart_erro": _cart_erro, "fat_de": _fat_de, "extra_de": _extra_de}
@@ -4725,7 +4726,6 @@ def _pagina_pj():
                 ("", "(−) FIES / débito BB", formatar_brl(c["fies"])),
                 ("", f"(−) {r_cart}", formatar_brl(c["cartao"])),
                 ("", f"(+) entradas {r_pix}", formatar_brl(c["pix_in"])),
-                ("", f"(−) saídas {r_pix}", formatar_brl(c["pix"])),
                 ("pj-tot", "sobra para investir", _neg(c["sobra"]))]
         return "<table class='pj-tab'>" + "".join(
             f"<tr class='{cl}'><td>{x}</td><td>{y}</td></tr>" for cl, x, y in lin) + "</table>"
@@ -4982,7 +4982,7 @@ def _pagina_mes():
                 fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, hoje.year)
                 c = fx["calc"][k]
                 # a fatura considerada é a do próprio mês (aberta), não a do mês anterior
-                sobra = c["nubank"] - gasto - pix_k + pix_in_k
+                sobra = c["nubank"] - gasto + pix_in_k
             # proventos do mês em curso (data-com no mês, até hoje) — reinvestidos no próximo aporte
             try:
                 prov, _ = calcular_dividendos_mes(_df_lanc_raw.to_dict(orient="records"), hoje.month, hoje.year)
@@ -5000,8 +5000,8 @@ def _pagina_mes():
                 _s = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
                 _m = MESES3[hoje.month - 1]
                 _cap_pj(f"sobra = receita PF de {_m} ({_s(c['receita_pf'])}) − FIES ({formatar_brl(c['fies'])}) "
-                        f"− fatura de {_m}, em aberto ({formatar_brl(gasto)}) − saídas PIX "
-                        f"({formatar_brl(pix_k)}) + entradas PIX ({formatar_brl(pix_in_k)}).")
+                        f"− fatura de {_m}, em aberto ({formatar_brl(gasto)}) + entradas PIX "
+                        f"({formatar_brl(pix_in_k)}). saídas PIX saem da conta-pulmão e não entram na conta.")
             if aporte > 0 and st.button("distribuir no simulador", key="btn_distribuir",
                                         use_container_width=True):
                 st.session_state["_aporte_do_mes"] = fmt_num(aporte, 2)
