@@ -2811,7 +2811,7 @@ _PAGINAS = [
     st.Page(_pg_detalhe, title="detalhe", url_path="detalhe"),
     st.Page(_pg_lancamentos, title="lançamentos", url_path="lancamentos"),
     st.Page(_pg_simulador, title="simulador", url_path="simulador"),
-    st.Page(_pg_pjpf, title="cashflow", url_path="cashflow"),
+    st.Page(_pg_pjpf, title="fluxo", url_path="cashflow"),
     st.Page(_pg_configuracoes, title="configurações", url_path="configuracoes"),
 ]
 # menu próprio (links no estilo das abas): fica visível também no celular, sem menu lateral
@@ -2822,7 +2822,7 @@ _PG = dict(zip(["mes", "dashboard", "detalhe", "lancamentos", "simulador", "pjpf
 _url_atual = next((k for k, p in _PG.items() if p.title == _pagina), "mes")
 _CARTEIRA = ["dashboard", "detalhe", "lancamentos", "simulador"]
 _MES_GRUPO = ["mes", "pjpf"]
-_ROT_SUB = {"mes": "resumo", "pjpf": "cashflow"}
+_ROT_SUB = {"mes": "resumo", "pjpf": "fluxo"}
 _grupo = ("carteira" if _url_atual in _CARTEIRA else "mes" if _url_atual in _MES_GRUPO else _url_atual)
 st.markdown(f"""<style>
     div.st-key-nav_top[data-testid="stHorizontalBlock"], div.st-key-nav_sub[data-testid="stHorizontalBlock"],
@@ -2881,7 +2881,7 @@ if st.session_state.get("_janela_sessao") != _janela_sessao:
 prefetch_planilha()
 
 # a página PJ/PF não usa a carteira: pula a leitura de lançamentos, preços etc.
-if _pagina != "cashflow":
+if _pagina != "fluxo":
     # ── carregar dados principais (session_state cache) ──────────────────────────
     # relê do Sheets só na primeira renderização da sessão
     # ou após salvar/excluir lançamento (_lanc_versao muda)
@@ -4565,6 +4565,20 @@ def carregar_dados_pj():
     _fs, _re = resumo_notas(st.session_state["_pj_notas"])
     return (st.session_state["_pj_par"], st.session_state["_pj_hist"], _fs, _re)
 
+def investido_por_mes():
+    """{'2026-11': compras − vendas da carteira no mês} — lê os lançamentos (cache da sessão)"""
+    df_l = st.session_state.get("_df_lanc_raw_cached")
+    if df_l is None:
+        df_l = ler_lancamentos()
+        st.session_state["_df_lanc_raw_cached"] = df_l
+        st.session_state["_cache_versao"] = st.session_state.get("_lanc_versao", 0)
+    if df_l is None or df_l.empty:
+        return {}
+    d = pd.to_datetime(df_l["data"].astype(str), dayfirst=True, errors="coerce")
+    sinal = df_l["tipo"].astype(str).str.strip().str.lower().map({"compra": 1, "venda": -1}).fillna(0)
+    v = (pd.to_numeric(df_l["total"], errors="coerce").fillna(0) * sinal)
+    return v.groupby(d.dt.strftime("%Y-%m")).sum().round(2).to_dict()
+
 def fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano):
     """meses de caixa de um ano: composição PJ → PF de cada mês (mesma conta da página cashflow).
     usada pelo cashflow e pela página mês."""
@@ -4652,7 +4666,7 @@ def _pagina_pj():
     _MES3 = MESES3
     _hoje_pj = pd.Timestamp.today()
     if not _par.get("faturamento_minimo"):
-        st.info("configure os parâmetros PJ/PF em configurações › cashflow (ou na aba pj_parametros da planilha) "
+        st.info("configure os parâmetros PJ/PF em configurações › fluxo (ou na aba pj_parametros da planilha) "
                 "para ver a previsão.")
     # ano anterior sempre disponível: dez do ano passado vira a receita de jan deste ano
     _anos = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [int(k[:4]) for k in _fat_salvo])
@@ -4672,7 +4686,7 @@ def _pagina_pj():
         st.session_state["pj_ref"] = _prox_pj.strftime("%Y-%m")
 
     _lay_pj = st.container(key="pj_layout")
-    col_comp, col_fies = _lay_pj.columns([1, 1], gap="large")
+    col_comp, col_lado = _lay_pj.columns([1, 1], gap="large")
     with col_comp:
         # ‹ mês › no topo: as setas passam de um mês para o outro (e de um ano para o outro)
         def _pj_mover(delta):
@@ -4707,8 +4721,8 @@ def _pagina_pj():
     if _cart_erro:
         st.warning(f"Controle de Fatura indisponível ({_cart_erro}) — cartão considerado R$0.")
 
-    def _tabela_pj(c, fat, extra, r_fat, r_extra, r_das, r_cart, r_pix="PIX"):
-        """débitos e créditos da PJ, depois da PF"""
+    def _tabela_pj(c, fat, extra, r_fat, r_extra, r_das, r_cart, r_pix, pix_out, investido):
+        """PJ: débitos e créditos. PF: entradas e saídas, cada grupo do maior para o menor, e o saldo"""
         lin = [("pj-sec", "PJ", ""), ("", f"(+) {r_fat}", formatar_brl(fat))]
         if extra:
             lin.append(("", f"(+) {r_extra}", formatar_brl(extra)))
@@ -4718,17 +4732,23 @@ def _pagina_pj():
                 ("", "(−) pró-labore bruto", formatar_brl(c["pro_labore"])),
                 ("pj-tot", "lucros distribuídos", _neg(c["lucros"])),
                 ("pj-esp", "", ""),
-                ("pj-sec", "PF", ""),
-                ("", "(+) pró-labore líquido", formatar_brl(c["pl_liq"])),
-                ("", "(+) lucros distribuídos", _neg(c["lucros"])),
-                ("", "(+) reembolsos", formatar_brl(c["reembolso"])),
-                ("pj-tot", "saldo disponível / nubank", _neg(c["receita_pf"])),
-                ("", "(−) FIES / débito BB", formatar_brl(c["fies"])),
-                ("", f"(−) {r_cart}", formatar_brl(c["cartao"])),
-                ("", f"(+) entradas {r_pix}", formatar_brl(c["pix_in"])),
-                ("pj-tot", "sobra para investir", _neg(c["sobra"]))]
+                ("pj-sec", "PF", "")]
+        ent = sorted([("pró-labore líquido", c["pl_liq"]), ("lucros distribuídos", c["lucros"]),
+                      ("reembolsos", c["reembolso"]), (f"entradas {r_pix}", c["pix_in"])],
+                     key=lambda x: -x[1])
+        sai = sorted([("FIES / débito BB", c["fies"]), (r_cart, c["cartao"]),
+                      (f"saídas {r_pix}", pix_out), ("total investido", investido)],
+                     key=lambda x: -x[1])
+        lin += [("", f"(+) {r}", _neg(v)) for r, v in ent]
+        lin += [("", f"(−) {r}", _neg(v)) for r, v in sai]
+        lin.append(("pj-tot", "saldo do mês", _neg(sum(v for _, v in ent) - sum(v for _, v in sai))))
         return "<table class='pj-tab'>" + "".join(
             f"<tr class='{cl}'><td>{x}</td><td>{y}</td></tr>" for cl, x, y in lin) + "</table>"
+
+    # PIX (saídas só para registro) e total investido em cada mês de caixa
+    _pix_out = {k: float(_fx["pix"].get(k, {}).get("saida", 0.0)) for k in _meses}
+    _inv_mes = investido_por_mes()
+    _inv = {k: _inv_mes.get(k, 0.0) for k in _meses}
 
     # ── composição de um mês ─────────────────────────────────────────────────
     with col_comp:
@@ -4743,7 +4763,8 @@ def _pagina_pj():
                 c, _fat_de(_ca), _extra_de(_mes_sel),
                 f"faturamento de {_rot(_ca)}", f"extra de {_rot(_mes_sel)}",
                 f"DAS (notas de {_rot(_ca)})" if _das_seg else "DAS",
-                f"fatura de {_rot(_ca)} ({_cart[_mes_sel][1]})", f"PIX de {_rot(_mes_sel)}")
+                f"fatura de {_rot(_ca)} ({_cart[_mes_sel][1]})", f"PIX de {_rot(_mes_sel)}",
+                _pix_out[_mes_sel], _inv[_mes_sel])
         else:
             # ano inteiro: soma dos 12 meses de recebimento
             _tit = str(_ano)
@@ -4751,7 +4772,8 @@ def _pagina_pj():
                  ["das", "prev", "contador", "taxa", "fies", "pro_labore", "lucros",
                   "pl_liq", "reembolso", "receita_pf", "cartao", "pix", "pix_in", "sobra"]}
             _tab = _tabela_pj(c, sum(_fat_de(_comp[k]) for k in _meses), sum(_extra_de(k) for k in _meses),
-                              "faturamento recebido", "extras", "DAS", "cartão", "PIX")
+                              "faturamento recebido", "extras", "DAS", "cartão", "PIX",
+                              sum(_pix_out.values()), sum(_inv.values()))
         _ph_tit.markdown(f"<p class='cfg-sec pj-mes-lbl'>{_tit}</p>", unsafe_allow_html=True)
         with _ph_tab:
             with st.container(key="pj_comp_box", border=True):
@@ -4759,16 +4781,13 @@ def _pagina_pj():
             if _mes_num and c["lucros"] < 0:
                 st.warning("faturamento abaixo dos custos — não sobra lucro para distribuir neste mês.")
 
-    # ── dívida: FIES ─────────────────────────────────────────────────────────
-    with col_fies:
-        render_fies(_par, "pj_fies_box")
-
-    st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+    # ── lado: nova nota e seleção do ano ─────────────────────────────────────
+    col_lado.markdown("<div style='height:2.6rem'></div>", unsafe_allow_html=True)
     if st.session_state.get("_nn_msg"):
         st.toast(st.session_state.pop("_nn_msg"))
-    if st.button("+ nota fiscal / reembolso", type="primary", key="btn_nova_nota"):
+    if col_lado.button("+ nota fiscal / reembolso", type="primary", key="btn_nova_nota"):
         dialogo_nova_nota()
-    with st.expander("ano"):
+    with col_lado.expander("ano"):
         st.segmented_control("ano", _anos, label_visibility="collapsed", key="pj_ano_sel",
                              on_change=_pj_ano_mudou)
         _modo_ano = bool(st.session_state.get("pj_modo_ano"))
@@ -4776,7 +4795,7 @@ def _pagina_pj():
                   type="primary" if _modo_ano else "secondary")
 
 
-if _pagina == "cashflow":
+if _pagina == "fluxo":
     _pagina_pj()
 
 # ── Página mês: fatura aberta + aporte do mês + alertas da carteira ─────────
@@ -4855,53 +4874,13 @@ def fx_render_cards_limite(df_mes, limite_mensal):
     )
     st.markdown(html, unsafe_allow_html=True)
 
-# ── variação de preço em 12 meses por ativo (sem proventos) ──
-def _ref_12m():
-    return pd.Timestamp.today().normalize() - pd.DateOffset(years=1)
-
-def _preco_em(serie, ref):
-    """último preço da série até ref (no máx. 10 dias antes) ou None"""
-    if serie is None or len(serie) == 0:
-        return None
-    s = serie[serie.index <= ref]
-    if s.empty or (ref - s.index[-1]).days > 10:
-        return None
-    return float(s.iloc[-1])
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def _precos_ref_12m_b3(tickers, janela):
-    """preço de fechamento real (sem ajuste) de cada ticker da B3 há 12 meses"""
-    ref, out = _ref_12m(), {}
-    for t in tickers:
-        try:
-            out[t] = _preco_em(_fechamentos_historicos(f"{t}.SA"), ref)
-        except Exception:
-            out[t] = None
-    return out
-
-def variacao_12m():
-    """{ativo: variação % do preço em 12 meses} dos ativos em carteira (ETFs, FIIs, BTC, Renda+)"""
-    ref, out = _ref_12m(), {}
-    b3 = tuple(sorted(a for a, c in _classe_de.items() if c in ("ETF", "FII")))
-    p0 = dict(sem_espera("ref12m_b3", _agora_sp().strftime("%Y%m%d"), _precos_ref_12m_b3, b3)) if b3 else {}
-    if "BTC" in _classe_de:
-        try:
-            h, _ = obter_historico_btc_brl()
-            if h is not None and len(h):
-                h.index = pd.to_datetime(h.index).tz_localize(None) if getattr(h.index, "tz", None) else h.index
-                p0["BTC"] = _preco_em(h, ref)
-        except Exception:
-            pass
-    if "Renda+ 2050" in _classe_de:
-        try:
-            _hist_r, _ = obter_historico_taxa_renda_mais()
-            p0["Renda+ 2050"] = pu_renda_fim_mes(_hist_r, ref)
-        except Exception:
-            pass
-    for a, v0 in p0.items():
-        v1 = precos.get(a)
-        if v0 and v1:
-            out[a] = (float(v1) / v0 - 1) * 100
+def rendimento_na_carteira():
+    """{ativo: % que rendeu na carteira} = valor atual / custo das cotas em carteira − 1"""
+    out = {}
+    for _, r in df.iterrows():
+        custo = float(r.get("custo_total") or 0)
+        if custo > 0 and r["Total Atual"] > 0:
+            out[r["Ativo"]] = (float(r["Total Atual"]) / custo - 1) * 100
     return out
 
 def _alertas_banda():
@@ -4963,9 +4942,6 @@ def _pagina_mes():
         else:
             lim = float(limite or 0.0)
             fx_render_cards_limite(df_m, lim)
-        if pix_k or pix_in_k:
-            _cap_pj(f"PIX em {MESES3[hoje.month - 1]}: entradas {formatar_brl(pix_in_k)} · "
-                    f"saídas {formatar_brl(pix_k)}")
         st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
         render_fies(carregar_dados_pj()[0], "mes_fies_box")
 
@@ -4976,7 +4952,7 @@ def _pagina_mes():
         _par, _hist_pj, _fat_salvo, _reemb_extra = carregar_dados_pj()
         with st.container(border=True, key="mes_ap_box"):
             if not _par.get("faturamento_minimo"):
-                st.info("configure os parâmetros em configurações › cashflow para calcular a sobra do mês.")
+                st.info("configure os parâmetros em configurações › fluxo para calcular a sobra do mês.")
                 sobra = None
             else:
                 fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, hoje.year)
@@ -4996,12 +4972,6 @@ def _pagina_mes():
                       None if sobra is None or sobra >= 0 else "neg")
             card_html(c2, f"proventos · {MESES3[hoje.month - 1]} até hoje", formatar_brl(prov))
             card_html(c3, "aporte previsto", formatar_brl(aporte), "pos" if aporte > 0 else None)
-            if sobra is not None:
-                _s = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
-                _m = MESES3[hoje.month - 1]
-                _cap_pj(f"sobra = receita PF de {_m} ({_s(c['receita_pf'])}) − FIES ({formatar_brl(c['fies'])}) "
-                        f"− fatura de {_m}, em aberto ({formatar_brl(gasto)}) + entradas PIX "
-                        f"({formatar_brl(pix_in_k)}). saídas PIX saem da conta-pulmão e não entram na conta.")
             if aporte > 0 and st.button("distribuir no simulador", key="btn_distribuir",
                                         use_container_width=True):
                 st.session_state["_aporte_do_mes"] = fmt_num(aporte, 2)
@@ -5011,7 +4981,7 @@ def _pagina_mes():
         st.markdown("<p class='cfg-sec'>carteira</p>", unsafe_allow_html=True)
         with st.container(border=True, key="mes_alerta_box"):
             card_html(st, "patrimônio", abreviar_rs(total_geral))
-            _v12 = sorted(variacao_12m().items(), key=lambda x: -x[1])
+            _v12 = sorted(rendimento_na_carteira().items(), key=lambda x: -x[1])
             if _v12:
                 _altas = _v12[:3]
                 _quedas = [x for x in sorted(_v12, key=lambda x: x[1])[:3] if x not in _altas]
@@ -5019,12 +4989,12 @@ def _pagina_mes():
                     f"<tr><td>{a}</td><td style='color:{'#22c55e' if v >= 0 else '#ef4444'}'>"
                     f"{'▲ +' if v >= 0 else '▼ '}{fmt_pct(v)}</td></tr>" for a, v in lst)
                 ca, cq = st.container(key="row_mes_12m").columns(2)
-                ca.markdown("<p class='card-label'>maiores altas · 12m</p><table class='pj-tab'>"
+                ca.markdown("<p class='card-label'>maiores altas</p><table class='pj-tab'>"
                             + _lin(_altas) + "</table>", unsafe_allow_html=True)
                 if _quedas:
-                    cq.markdown("<p class='card-label'>maiores quedas · 12m</p><table class='pj-tab'>"
+                    cq.markdown("<p class='card-label'>maiores quedas</p><table class='pj-tab'>"
                                 + _lin(_quedas) + "</table>", unsafe_allow_html=True)
-                st.caption("variação do preço em 12 meses, sem proventos.")
+                st.caption("rendimento de cada ativo na carteira: valor atual sobre o custo.")
             alertas = _alertas_banda()
             if not alertas:
                 st.caption("todos os ativos dentro da banda.")
@@ -5045,7 +5015,7 @@ if _pagina == "configurações":
   _rot = lambda k: f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}"
   _fat_de = lambda a: fat_do_mes(a, _fat_salvo, _par, _hist_pj)
   _extra_de = lambda a: float(_fat_salvo[a].get("extra", 0.0)) if a in _fat_salvo else 0.0
-  _sub_cart, _sub_pj = st.tabs(["carteira", "cashflow"])
+  _sub_cart, _sub_pj = st.tabs(["carteira", "fluxo"])
   with _sub_cart:
     with st.container(key="cfg_area"):
       _ativos_cfg = sorted(_posicao['ativo'].tolist()) if not _posicao.empty else []
@@ -5202,7 +5172,7 @@ if _pagina == "configurações":
     # ── faturamento por mês (editável) ───────────────────────────────────────
     with _cpj_fat:
         st.markdown("<p class='cfg-sec'>notas fiscais e reembolsos</p>", unsafe_allow_html=True)
-        st.markdown("<p class='cfg-nota'>para lançar uma nova, use o botão na aba cashflow · aqui dá para "
+        st.markdown("<p class='cfg-nota'>para lançar uma nova, use o botão na aba fluxo · aqui dá para "
                     "corrigir ou apagar</p>", unsafe_allow_html=True)
         _notas_cfg = st.session_state.get("_pj_notas", [])
         _anos_c = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [n["data"].year for n in _notas_cfg])
@@ -5248,7 +5218,7 @@ if _pagina == "configurações":
     with _cpj_par:
         # ── parâmetros PJ ────────────────────────────────────────────────────────
         _md(st, "cfg-sec", "parâmetros PJ/PF")
-        _md(st, "cfg-nota", "usados na aba cashflow")
+        _md(st, "cfg-nota", "usados na aba fluxo")
         if "_pj_par" not in st.session_state:
             st.session_state["_pj_par"] = ler_pj_parametros()
         _par_atual = st.session_state["_pj_par"]
@@ -5357,7 +5327,7 @@ if _pagina == "configurações":
 # ── rodapé: quando cada dado foi consultado pela última vez ──────────────────
 _marcas = _marcas_atualizacao()
 _partes_rod = []
-if _pagina != "cashflow":
+if _pagina != "fluxo":
     _partes_rod.append(f"cotações B3 {st.session_state.get('_precos_momento', '—')}")
     for _f in ["BTC", "Renda+"]:
         if _f in _marcas:
