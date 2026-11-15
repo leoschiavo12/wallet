@@ -1646,6 +1646,67 @@ def ler_cartao_mensal():
     except Exception as e:
         return {}, None, str(e)[:80]
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def ler_fatura_detalhe():
+    """
+    Controle de Fatura: aba lancamentos (o mês corrente vive nela; meses antigos vão para
+    arquivo_AAAA) + aba categorias. retorna (df data/categoria/descricao/valor,
+    lista de categorias {id, nome, cor, valor_alvo, fixo}, erro ou None)
+    """
+    _vazio = pd.DataFrame(columns=["data", "categoria", "descricao", "valor"])
+    if not SHEET_ID_FATURA:
+        return _vazio, [], "fatura_spreadsheet_id não configurado nos secrets"
+    try:
+        res = get_sheets_service().values().batchGet(
+            spreadsheetId=SHEET_ID_FATURA, ranges=["'lancamentos'!A:D", "'categorias'!A:E"],
+            valueRenderOption="UNFORMATTED_VALUE", dateTimeRenderOption="FORMATTED_STRING").execute()
+        fx = res.get("valueRanges", [])
+        def _linhas(i):
+            vals = fx[i].get("values", []) if len(fx) > i else []
+            if not vals:
+                return [], []
+            return [str(c).strip().lower() for c in vals[0]], vals[1:]
+        cab, rows = _linhas(0)
+        df = _vazio
+        if {"data", "categoria", "valor"} <= set(cab):
+            ix = {c: cab.index(c) for c in ["data", "categoria", "descricao", "valor"] if c in cab}
+            reg = [{c: (r[i] if len(r) > i else "") for c, i in ix.items()} for r in rows]
+            df = pd.DataFrame(reg)
+            if "descricao" not in df:
+                df["descricao"] = ""
+            if not df.empty:
+                d = pd.to_datetime(df["data"].astype(str), format="%Y-%m-%d", errors="coerce")
+                df["data"] = d.fillna(pd.to_datetime(df["data"].astype(str), dayfirst=True, errors="coerce"))
+                df["valor"] = pd.to_numeric(df["valor"].apply(
+                    lambda x: x if isinstance(x, (int, float)) else (_num_br(x) if str(x).strip() else 0.0)),
+                    errors="coerce")
+                df = df.dropna(subset=["data", "valor"])
+        cab_c, rows_c = _linhas(1)
+        cats = []
+        if "id" in cab_c and "nome" in cab_c:
+            for r in rows_c:
+                g = lambda c, p=None: (r[cab_c.index(c)] if c in cab_c and len(r) > cab_c.index(c) else p)
+                try:
+                    alvo = float(g("valor_alvo", 0) or 0)
+                except (TypeError, ValueError):
+                    alvo = 0.0
+                cats.append({"id": str(g("id")), "nome": str(g("nome", "")).lower(),
+                             "cor": str(g("cor", "#888888") or "#888888"), "valor_alvo": alvo,
+                             "fixo": str(g("fixo", "")).strip().lower() == "true"})
+        return df, cats, None
+    except Exception as e:
+        return _vazio, [], str(e)[:80]
+
+def salvar_despesa_fatura(data_iso, categoria_id, descricao, valor):
+    """grava uma despesa na aba lancamentos do Controle de Fatura — mesmo formato do app de lá
+    (data aaaa-mm-dd, id da categoria, descrição, valor numérico)"""
+    get_sheets_service().values().append(
+        spreadsheetId=SHEET_ID_FATURA, range="'lancamentos'!A:D", valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [[data_iso, categoria_id, descricao, float(valor)]]}).execute()
+    ler_fatura_detalhe.clear()
+    ler_cartao_mensal.clear()
+
 def ler_pj_parametros():
     par = {k: d for k, _, d, _ in PJ_PARAMS}
     try:
@@ -2649,6 +2710,7 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
     return vals
 
 # ── navegação: uma página por vez (só a página aberta é calculada) ───────────
+def _pg_mes(): pass
 def _pg_dashboard(): pass
 def _pg_detalhe(): pass
 def _pg_lancamentos(): pass
@@ -2656,7 +2718,8 @@ def _pg_simulador(): pass
 def _pg_pjpf(): pass
 def _pg_configuracoes(): pass
 _PAGINAS = [
-    st.Page(_pg_dashboard, title="dashboard", url_path="dashboard", default=True),
+    st.Page(_pg_mes, title="mês", url_path="mes", default=True),
+    st.Page(_pg_dashboard, title="dashboard", url_path="dashboard"),
     st.Page(_pg_detalhe, title="detalhe", url_path="detalhe"),
     st.Page(_pg_lancamentos, title="lançamentos", url_path="lancamentos"),
     st.Page(_pg_simulador, title="simulador", url_path="simulador"),
@@ -2667,10 +2730,12 @@ _PAGINAS = [
 _nav = st.navigation(_PAGINAS, position="hidden")
 _nav.run()
 _pagina = _nav.title
-_PG = dict(zip(["dashboard", "detalhe", "lancamentos", "simulador", "pjpf", "configuracoes"], _PAGINAS))
-_url_atual = next((k for k, p in _PG.items() if p.title == _pagina), "dashboard")
+_PG = dict(zip(["mes", "dashboard", "detalhe", "lancamentos", "simulador", "pjpf", "configuracoes"], _PAGINAS))
+_url_atual = next((k for k, p in _PG.items() if p.title == _pagina), "mes")
 _CARTEIRA = ["dashboard", "detalhe", "lancamentos", "simulador"]
-_grupo = "carteira" if _url_atual in _CARTEIRA else _url_atual
+_MES_GRUPO = ["mes", "pjpf"]
+_ROT_SUB = {"mes": "resumo", "pjpf": "cashflow"}
+_grupo = ("carteira" if _url_atual in _CARTEIRA else "mes" if _url_atual in _MES_GRUPO else _url_atual)
 st.markdown(f"""<style>
     div.st-key-nav_top[data-testid="stHorizontalBlock"], div.st-key-nav_sub[data-testid="stHorizontalBlock"],
     .st-key-nav_top, .st-key-nav_sub {{ flex-wrap: nowrap !important; overflow-x: auto; gap: 0 !important;
@@ -2688,17 +2753,17 @@ st.markdown(f"""<style>
     @media (max-width: 640px) {{ :is(.st-key-nav_top, .st-key-nav_sub) > div {{ margin-right: 0.9rem !important; }} }}
     @media (min-width: 641px) {{ .main .block-container, [data-testid="stMainBlockContainer"] {{ padding-top: 2.5rem !important; }} }}
 </style>""", unsafe_allow_html=True)
-# 1ª linha: carteira · PJ/PF · configurações  ·  2ª linha (só na carteira): as páginas da carteira
+# 1ª linha: mês · carteira · configurações  ·  2ª linha: as páginas do grupo aberto
 with st.container(horizontal=True, key="nav_top"):
-    for _g, _dest, _rot_nav in [("carteira", "dashboard", "carteira"), ("pjpf", "pjpf", "cashflow"),
+    for _g, _dest, _rot_nav in [("mes", "mes", "mês"), ("carteira", "dashboard", "carteira"),
                                 ("configuracoes", "configuracoes", "configurações")]:
         with st.container(key=f"navt_{_g}", width="content"):
             st.page_link(_PG[_dest], label=_rot_nav)
-if _grupo == "carteira":
+if _grupo in ("carteira", "mes"):
     with st.container(horizontal=True, key="nav_sub"):
-        for _u in _CARTEIRA:
+        for _u in (_CARTEIRA if _grupo == "carteira" else _MES_GRUPO):
             with st.container(key=f"navs_{_u}", width="content"):
-                st.page_link(_PG[_u], label=_PG[_u].title)
+                st.page_link(_PG[_u], label=_ROT_SUB.get(_u, _PG[_u].title))
 # teclado numérico no celular: campos de número (digitados como texto, com vírgula) ganham inputmode=decimal
 _ROTULOS_NUM = (["quantidade", "preço unitário", "$ disponível", "valor (R$)", "mín", "alvo", "máx", "meta Renda+"]
                 + [r for k, r, _, cs in PJ_PARAMS if cs is not None])
@@ -4015,7 +4080,10 @@ if _pagina == "lançamentos":
 if _pagina == "simulador":
     # ── inputs ────────────────────────────────────────────────────────────────
     col_v1, _ = st.columns([1, 2])
-    _val_aporte_str = col_v1.text_input("$ disponível", value="1800,00", placeholder="ex: 1800,00")
+    if "_aporte_do_mes" in st.session_state:          # veio de "distribuir" na página mês
+        st.session_state["sim_aporte"] = st.session_state.pop("_aporte_do_mes")
+    st.session_state.setdefault("sim_aporte", "1800,00")
+    _val_aporte_str = col_v1.text_input("$ disponível", placeholder="ex: 1800,00", key="sim_aporte")
 
     def _pv(s):
         try: return float(str(s).replace('R$','').replace('.','').replace(',','.').strip())
@@ -4375,6 +4443,57 @@ def carregar_dados_pj():
     _fs, _re = resumo_notas(st.session_state["_pj_notas"])
     return (st.session_state["_pj_par"], st.session_state["_pj_hist"], _fs, _re)
 
+def fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano):
+    """meses de caixa de um ano: composição PJ → PF de cada mês (mesma conta da página cashflow).
+    usada pelo cashflow e pela página mês."""
+    _hoje_pj = pd.Timestamp.today()
+    # regime: a atividade de um mês (faturamento da PJ e gastos no cartão) se realiza no mês
+    # seguinte — o faturamento de fev entra em mar e a fatura de fev é paga em mar.
+    # _meses = meses de caixa (recebimento) do ano · _comp[k] = mês de atividade que cai em k
+    _meses = [f"{_ano}-{m:02d}" for m in range(1, 13)]
+    _ant   = lambda k: (pd.Timestamp(f"{k}-01") - pd.DateOffset(months=1)).strftime("%Y-%m")
+    _comp  = {k: _ant(k) for k in _meses}
+    _meses_ativ = [f"{_ano}-{m:02d}" for m in range(1, 13)]            # editor: meses de atividade
+    _fat_de   = lambda a: fat_do_mes(a, _fat_salvo, _par, _hist_pj)
+    _extra_de = lambda a: float(_fat_salvo[a].get("extra", 0.0)) if a in _fat_salvo else 0.0
+
+    # cartão por mês de atividade: antes do controle real = média estimada; do controle em
+    # diante = Controle de Fatura (mês atual parcial); meses futuros = limite mensal de lá
+    _cart_real, _cart_lim, _cart_erro = ler_cartao_mensal()
+    if "_pf_cartao" not in st.session_state:
+        st.session_state["_pf_cartao"] = ler_pf_cartao()
+    _cart_manual = st.session_state["_pf_cartao"]
+    _mes_atual_pj = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
+    _rd_ts = _mes_ano(_par.get("cartao_real_desde"))
+    _real_desde = _rd_ts.strftime("%Y-%m") if _rd_ts is not None else "0000-00"
+    def _cartao(a):
+        # valor informado em 'fatura do cartão' sempre prevalece nos meses já fechados
+        if a in _cart_manual and a < _mes_atual_pj:
+            return float(_cart_manual[a]), "informado"
+        if a < _real_desde:
+            return float(_par.get("cartao_estimado") or 0.0), "estimado"
+        if a < _mes_atual_pj:
+            return float(_cart_real.get(a, 0.0)), "real"
+        if a == _mes_atual_pj:
+            return float(_cart_real.get(a, 0.0)), "parcial"
+        return float(_cart_lim or 0.0), "previsto"
+    _cart = {k: _cartao(_comp[k]) for k in _meses}
+    # recebido no mês k = faturamento do mês anterior + extras do próprio mês
+    # DAS: hoje é pago no mês seguinte à emissão da nota → no mês k pagam-se as notas de k−1
+    # (faturamento normal de k−1 + extras emitidos em k−1). com split payment (das_mes_seguinte=0)
+    # o imposto sai no recebimento → incide sobre o que entra em k.
+    _das_seg = float(_par.get("das_mes_seguinte", 1.0) or 0.0) >= 0.5
+    def _base_das(k):
+        if _das_seg:
+            return _fat_de(_comp[k]) + _extra_de(_comp[k])
+        return _fat_de(_comp[k]) + _extra_de(k)
+    # cada mês com os parâmetros vigentes nele (pró-labore, DAS, contador… mudam com o tempo)
+    _calc = {k: calcular_pj_mes(_fat_de(_comp[k]) + _extra_de(k), par_vigente(_par, _hist_pj, k), k,
+                                _cart[k][0], _base_das(k), _reemb_extra.get(k, 0.0))
+             for k in _meses}
+    return {"meses": _meses, "comp": _comp, "calc": _calc, "cart": _cart, "das_seg": _das_seg,
+            "cart_erro": _cart_erro, "fat_de": _fat_de, "extra_de": _extra_de}
+
 def _cap_pj(t):
     """legenda com R$ literal (dois "$" na mesma linha viram fórmula no markdown)"""
     st.caption(str(t).replace("$", "\\$"))
@@ -4432,50 +4551,10 @@ def _pagina_pj():
     _ano = int(st.session_state["pj_ref"][:4])
     _mes_num = 0 if st.session_state.get("pj_modo_ano") else int(st.session_state["pj_ref"][5:])
 
-    # regime: a atividade de um mês (faturamento da PJ e gastos no cartão) se realiza no mês
-    # seguinte — o faturamento de fev entra em mar e a fatura de fev é paga em mar.
-    # _meses = meses de caixa (recebimento) do ano · _comp[k] = mês de atividade que cai em k
-    _meses = [f"{_ano}-{m:02d}" for m in range(1, 13)]
-    _ant   = lambda k: (pd.Timestamp(f"{k}-01") - pd.DateOffset(months=1)).strftime("%Y-%m")
-    _comp  = {k: _ant(k) for k in _meses}
-    _meses_ativ = [f"{_ano}-{m:02d}" for m in range(1, 13)]            # editor: meses de atividade
-    _fat_de   = lambda a: fat_do_mes(a, _fat_salvo, _par, _hist_pj)
-    _extra_de = lambda a: float(_fat_salvo[a].get("extra", 0.0)) if a in _fat_salvo else 0.0
-
-    # cartão por mês de atividade: antes do controle real = média estimada; do controle em
-    # diante = Controle de Fatura (mês atual parcial); meses futuros = limite mensal de lá
-    _cart_real, _cart_lim, _cart_erro = ler_cartao_mensal()
-    if "_pf_cartao" not in st.session_state:
-        st.session_state["_pf_cartao"] = ler_pf_cartao()
-    _cart_manual = st.session_state["_pf_cartao"]
-    _mes_atual_pj = f"{_hoje_pj.year}-{_hoje_pj.month:02d}"
-    _rd_ts = _mes_ano(_par.get("cartao_real_desde"))
-    _real_desde = _rd_ts.strftime("%Y-%m") if _rd_ts is not None else "0000-00"
-    def _cartao(a):
-        # valor informado em 'fatura do cartão' sempre prevalece nos meses já fechados
-        if a in _cart_manual and a < _mes_atual_pj:
-            return float(_cart_manual[a]), "informado"
-        if a < _real_desde:
-            return float(_par.get("cartao_estimado") or 0.0), "estimado"
-        if a < _mes_atual_pj:
-            return float(_cart_real.get(a, 0.0)), "real"
-        if a == _mes_atual_pj:
-            return float(_cart_real.get(a, 0.0)), "parcial"
-        return float(_cart_lim or 0.0), "previsto"
-    _cart = {k: _cartao(_comp[k]) for k in _meses}
-    # recebido no mês k = faturamento do mês anterior + extras do próprio mês
-    # DAS: hoje é pago no mês seguinte à emissão da nota → no mês k pagam-se as notas de k−1
-    # (faturamento normal de k−1 + extras emitidos em k−1). com split payment (das_mes_seguinte=0)
-    # o imposto sai no recebimento → incide sobre o que entra em k.
-    _das_seg = float(_par.get("das_mes_seguinte", 1.0) or 0.0) >= 0.5
-    def _base_das(k):
-        if _das_seg:
-            return _fat_de(_comp[k]) + _extra_de(_comp[k])
-        return _fat_de(_comp[k]) + _extra_de(k)
-    # cada mês com os parâmetros vigentes nele (pró-labore, DAS, contador… mudam com o tempo)
-    _calc = {k: calcular_pj_mes(_fat_de(_comp[k]) + _extra_de(k), par_vigente(_par, _hist_pj, k), k,
-                                _cart[k][0], _base_das(k), _reemb_extra.get(k, 0.0))
-             for k in _meses}
+    _fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano)
+    _meses, _comp, _calc, _cart = _fx["meses"], _fx["comp"], _fx["calc"], _fx["cart"]
+    _das_seg, _cart_erro = _fx["das_seg"], _fx["cart_erro"]
+    _fat_de, _extra_de = _fx["fat_de"], _fx["extra_de"]
     _rot  = lambda k: f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}"
     _neg  = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
     if _cart_erro:
@@ -4567,6 +4646,187 @@ def _pagina_pj():
 
 if _pagina == "cashflow":
     _pagina_pj()
+
+# ── Página mês: fatura aberta + aporte do mês + alertas da carteira ─────────
+MESES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
+             'setembro','outubro','novembro','dezembro']
+
+@st.dialog("nova despesa")
+def dialogo_despesa(cats):
+    """grava direto na planilha do Controle de Fatura (o app de lá continua lendo normalmente)"""
+    _ids = [c["id"] for c in sorted(cats, key=lambda c: c["nome"])]
+    _nomes = {c["id"]: c["nome"] for c in cats}
+    cat = st.pills("categoria", _ids, format_func=lambda i: _nomes.get(i, i), key="dp_cat")
+    c1, c2 = st.columns(2)
+    valor_txt = c1.text_input("valor (R$)", placeholder="ex.: 54,90", key="dp_valor")
+    data = c2.date_input("data", value="today", format="DD/MM/YYYY", key="dp_data")
+    desc = st.text_input("descrição (opcional)", key="dp_desc")
+    if st.button("registrar", type="primary", key="dp_ok", use_container_width=True):
+        if not cat:
+            st.error("escolha uma categoria")
+            return
+        try:
+            valor = _num_br(valor_txt)
+            if valor <= 0:
+                raise ValueError
+        except ValueError:
+            st.error("valor inválido — use o formato 54,90")
+            return
+        try:
+            salvar_despesa_fatura(pd.Timestamp(data).strftime("%Y-%m-%d"), cat, desc.strip(), valor)
+        except Exception as e:
+            st.error(f"não consegui gravar no Controle de Fatura ({str(e)[:80]})")
+            return
+        st.session_state["_dp_msg"] = f"{_nomes.get(cat, cat)} · {formatar_brl(valor)} registrado"
+        for _k in ["dp_valor", "dp_desc", "dp_cat"]:
+            st.session_state.pop(_k, None)
+        st.rerun()
+
+def _barras_categorias(gasto_cat, cats):
+    """uma linha por categoria: nome · gasto / orçamento · barra (vermelha se estourou)"""
+    lin = []
+    for c in sorted(cats, key=lambda c: -gasto_cat.get(c["id"], 0.0)):
+        g, alvo = gasto_cat.get(c["id"], 0.0), c["valor_alvo"]
+        if not g and not alvo:
+            continue
+        if c["fixo"] or not alvo:
+            dir_txt, pct, cor = formatar_brl(g), 0, c["cor"]
+        else:
+            pct = min(g / alvo, 1.0) * 100
+            cor = "#ef4444" if g > alvo else c["cor"]
+            dir_txt = f"{formatar_brl(g)} / {formatar_brl(alvo)}"
+        _barra = ("" if c["fixo"] or not alvo else
+                  f"<div style='height:4px;background:rgba(250,250,250,0.08);border-radius:2px;margin-top:3px'>"
+                  f"<div style='height:4px;width:{pct:.0f}%;background:{cor};border-radius:2px'></div></div>")
+        _cor_txt = "#ef4444" if alvo and not c["fixo"] and g > alvo else "inherit"
+        lin.append(f"<div style='margin:0.45rem 0'><div style='display:flex;justify-content:space-between;"
+                   f"font-size:0.85rem'><span>{c['nome']}</span><span style='color:{_cor_txt}'>{dir_txt}</span>"
+                   f"</div>{_barra}</div>")
+    # categorias que existem nos lançamentos mas não na aba categorias
+    _ids = {c["id"] for c in cats}
+    for cid, g in gasto_cat.items():
+        if cid not in _ids and g:
+            lin.append(f"<div style='display:flex;justify-content:space-between;font-size:0.85rem;margin:0.45rem 0'>"
+                       f"<span>{cid or 'sem categoria'}</span><span>{formatar_brl(g)}</span></div>")
+    return "".join(lin)
+
+def _alertas_banda():
+    """ativos fora da banda min/máx (FIIs avaliados juntos, contra a banda da classe)"""
+    if total_geral <= 0 or not _cfg_alvos:
+        return []
+    part = dict(zip(df['Ativo'], df['Part. %']))
+    itens = []
+    _fiis = [a for a, c in _classe_de.items() if c == 'FII']
+    if _fiis:
+        itens.append(("FIIs", sum(part.get(a, 0.0) for a in _fiis), _get_banda(_cfg_alvos, "__FIIs__")))
+    for a, c in _classe_de.items():
+        if c != 'FII':
+            itens.append((a, part.get(a, 0.0), _get_banda(_cfg_alvos, a)))
+    out = []
+    for nome, p, b in itens:
+        if not b or not b.get("alvo"):                     # sem alvo (ex.: Tesouro Selic, meta 0%)
+            continue
+        if b.get("min") is not None and p < b["min"]:
+            out.append((nome, p, "abaixo do mín", b["min"], b["alvo"]))
+        elif b.get("max") is not None and p > b["max"]:
+            out.append((nome, p, "acima do máx", b["max"], b["alvo"]))
+    return sorted(out, key=lambda x: -abs(x[1] - x[4]))
+
+def _pagina_mes():
+    hoje = pd.Timestamp.today()
+    k = hoje.strftime("%Y-%m")
+    mes_ext = MESES_EXT[hoje.month - 1]
+    if st.session_state.get("_dp_msg"):
+        st.toast(st.session_state.pop("_dp_msg"))
+
+    # celular: as duas colunas grandes empilham; as linhas de 3 cards ficam lado a lado
+    st.markdown("""<style>
+    @media (max-width: 768px) {
+        .st-key-mes_layout > div > [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            width: 100% !important; min-width: 100% !important; flex: 1 1 100% !important; }
+        .st-key-mes_layout > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) { margin-top: 1.2rem !important; }
+        :is(.st-key-row_mes_fat, .st-key-row_mes_ap) [data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important; gap: 0.3rem !important; }
+        :is(.st-key-row_mes_fat, .st-key-row_mes_ap) [data-testid="stColumn"] {
+            min-width: 31% !important; width: 31% !important; flex: 1 1 31% !important; }
+    }
+    </style>""", unsafe_allow_html=True)
+    col_fat, col_ap = st.container(key="mes_layout").columns([1, 1], gap="large")
+
+    # ── fatura aberta (gastos do mês corrente, pagos no mês que vem) ─────────
+    with col_fat:
+        st.markdown(f"<p class='cfg-sec'>fatura de {mes_ext} · aberta</p>", unsafe_allow_html=True)
+        df_f, cats, erro_f = ler_fatura_detalhe()
+        _, limite, _ = ler_cartao_mensal()
+        if erro_f:
+            st.warning(f"Controle de Fatura indisponível ({erro_f})")
+        else:
+            df_m = df_f[df_f["data"].dt.strftime("%Y-%m") == k] if not df_f.empty else df_f
+            gasto = float(df_m["valor"].sum()) if not df_m.empty else 0.0
+            lim = float(limite or 0.0)
+            dias = (hoje.normalize() + pd.offsets.MonthBegin(1) - hoje.normalize()).days
+            with st.container(border=True, key="mes_fat_box"):
+                c1, c2, c3 = st.container(key="row_mes_fat").columns(3)
+                card_html(c1, "gasto", formatar_brl(gasto))
+                card_html(c2, "disponível" if lim - gasto >= 0 else "excedido",
+                          formatar_brl(abs(lim - gasto)), None if lim - gasto >= 0 else "neg")
+                card_html(c3, "fecha em", f"{dias} dias")
+                if lim > 0:
+                    _pct = gasto / lim
+                    st.progress(min(_pct, 1.0), text=f"{fmt_pct(_pct * 100)} do limite de {formatar_brl(lim)}")
+                if st.button("+ despesa", type="primary", key="btn_despesa", use_container_width=True):
+                    dialogo_despesa(cats)
+                gasto_cat = df_m.groupby("categoria")["valor"].sum().to_dict() if not df_m.empty else {}
+                if gasto_cat or cats:
+                    st.markdown(_barras_categorias(gasto_cat, cats), unsafe_allow_html=True)
+
+    # ── aporte do mês: sobra do caixa + proventos dos FIIs ───────────────────
+    with col_ap:
+        st.markdown(f"<p class='cfg-sec'>aporte de {mes_ext}</p>", unsafe_allow_html=True)
+        _par, _hist_pj, _fat_salvo, _reemb_extra = carregar_dados_pj()
+        with st.container(border=True, key="mes_ap_box"):
+            if not _par.get("faturamento_minimo"):
+                st.info("configure os parâmetros em configurações › cashflow para calcular a sobra do mês.")
+                sobra = None
+            else:
+                fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, hoje.year)
+                c = fx["calc"][k]
+                sobra = c["sobra"]
+                _ca = fx["comp"][k]
+                _rot_ca = f"{MESES3[int(_ca[5:]) - 1]}/{_ca[2:4]}"
+            prov = float(_div_mes_total or 0.0)
+            aporte = max(sobra or 0.0, 0.0) + prov
+            c1, c2, c3 = st.container(key="row_mes_ap").columns(3)
+            card_html(c1, "sobra do mês", "—" if sobra is None else
+                      (formatar_brl(sobra) if sobra >= 0 else f"({formatar_brl(abs(sobra))})"),
+                      None if sobra is None or sobra >= 0 else "neg")
+            card_html(c2, f"proventos · {_label_div_dash}", formatar_brl(prov))
+            card_html(c3, "aporte possível", formatar_brl(aporte), "pos" if aporte > 0 else None)
+            if sobra is not None:
+                _s = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
+                _cap_pj(f"sobra = receita PF de {MESES3[hoje.month - 1]} ({_s(c['receita_pf'])}) − FIES "
+                        f"({formatar_brl(c['fies'])}) − fatura de {_rot_ca} ({fx['cart'][k][1]}, "
+                        f"{formatar_brl(c['cartao'])}). detalhe em mês › cashflow.")
+            if aporte > 0 and st.button("distribuir no simulador", key="btn_distribuir",
+                                        use_container_width=True):
+                st.session_state["_aporte_do_mes"] = fmt_num(aporte, 2)
+                st.switch_page(_PG["simulador"])
+
+        # ── alertas da carteira ──────────────────────────────────────────────
+        st.markdown("<p class='cfg-sec'>carteira</p>", unsafe_allow_html=True)
+        with st.container(border=True, key="mes_alerta_box"):
+            card_html(st, "patrimônio", abreviar_rs(total_geral))
+            alertas = _alertas_banda()
+            if not alertas:
+                st.caption("todos os ativos dentro da banda.")
+            else:
+                st.markdown("<table class='pj-tab'>" + "".join(
+                    f"<tr><td>{n}</td><td style='color:{'#ef4444' if 'abaixo' in s else '#f59e0b'}'>"
+                    f"{fmt_pct(p)} · {s} {fmt_pct(lim_b)}</td></tr>"
+                    for n, p, s, lim_b, _ in alertas) + "</table>", unsafe_allow_html=True)
+
+if _pagina == "mês":
+    _pagina_mes()
 
 # ── Aba configurações ─────────────────────────────────────────────────────────
 if _pagina == "configurações":
