@@ -4669,8 +4669,6 @@ MESES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agos
 
 # ── resumo da fatura: cópia dos painéis do app Controle de Fatura (aba lançar: limite;
 # aba dashboard: rosca + barras por categoria), com a mesma formatação de lá ──
-FATURA_FIXED_ID = "parcel"
-
 def _fx_brl(valor):
     """formatação do Controle de Fatura ('R$ 1234', sem centavos) — cifrão como entidade HTML"""
     return ("R$ " + f"{valor:.0f}").replace("$", "&#36;")
@@ -4740,68 +4738,6 @@ def fx_render_cards_limite(df_mes, limite_mensal):
         + "</div>"
     )
     st.markdown(html, unsafe_allow_html=True)
-
-def fx_render_grafico_categorias(df_mes, limite_mensal, cats, chave, mes_ref):
-    """rosca + barras de progresso por categoria (igual ao Controle de Fatura)"""
-    total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
-    gasto_parcel = df_mes[df_mes["categoria"] == FATURA_FIXED_ID]["valor"].sum() if not df_mes.empty else 0
-    gasto_outros = max(0, total_gasto - gasto_parcel)
-    disponivel = limite_mensal - total_gasto
-    nome_mes_atual = MESES_EXT[mes_ref.month - 1]
-    # ordem fixa das fatias: disponível, mês atual, parcelamentos (parcelamentos termina às 12h)
-    fatia_disp = max(0, disponivel)
-    labels, valores, cores = [], [], []
-    if fatia_disp > 0:
-        labels.append("disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
-    if gasto_outros > 0:
-        labels.append(nome_mes_atual); valores.append(gasto_outros); cores.append("#D85A30")
-    if gasto_parcel > 0:
-        labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
-    if valores:
-        soma_valores = sum(valores)
-        percentuais = [_fx_pct(v / soma_valores * 100) for v in valores]
-        valores_fmt = [f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") for v in valores]
-        fig = go.Figure(data=[go.Pie(
-            labels=labels, values=valores, hole=0.65, marker=dict(colors=cores),
-            sort=False, direction="clockwise", rotation=0,
-            text=percentuais, texttemplate="%{label}<br>%{text}", textposition="outside",
-            textfont=dict(size=13, color="#e8e8e6"),
-            customdata=valores_fmt,
-            hovertemplate="%{label}<br>R$ %{customdata}<br>%{text}<extra></extra>",
-            automargin=True,
-        )])
-        fig.update_layout(showlegend=False, margin=dict(t=50, b=50, l=70, r=70), height=380,
-                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"pie_{chave}")
-    else:
-        st.caption("sem lançamentos neste mês.")
-
-    gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict() if not df_mes.empty else {}
-    cats_ordenadas = sorted([c for c in cats if c["id"] != FATURA_FIXED_ID],
-                            key=lambda c: -gasto_por_cat.get(c["id"], 0.0))
-    if not cats_ordenadas:
-        st.caption("nenhuma categoria configurada.")
-    else:
-        for c in cats_ordenadas:
-            orcamento = c["valor_alvo"]
-            gasto = gasto_por_cat.get(c["id"], 0.0)
-            pct = min(gasto / orcamento, 1.0) if orcamento > 0 else 0
-            estourou = gasto > orcamento and orcamento > 0
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
-                f"<span>{c['nome'].lower()}</span>"
-                f"<span style='color:{'#e05252' if estourou else '#888'};'>"
-                f"{_fx_brl(gasto)} / {_fx_brl(orcamento)}</span></div>",
-                unsafe_allow_html=True,
-            )
-            st.progress(pct)
-        gasto_parcel_mes = gasto_por_cat.get(FATURA_FIXED_ID, 0)
-        if gasto_parcel_mes > 0:
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
-                f"<span>parcelamentos</span><span style='color:#888;'>{_fx_brl(gasto_parcel_mes)}</span></div>",
-                unsafe_allow_html=True,
-            )
 
 # ── variação de preço em 12 meses por ativo (sem proventos) ──
 def _ref_12m():
@@ -4910,13 +4846,13 @@ def _pagina_mes():
         else:
             lim = float(limite or 0.0)
             fx_render_cards_limite(df_m, lim)
-            fx_render_grafico_categorias(df_m, lim, cats, chave="mes", mes_ref=hoje)
         if pix_k:
             _cap_pj(f"compras no PIX em {MESES3[hoje.month - 1]}: {formatar_brl(pix_k)}")
 
     # ── aporte do mês: receita do mês − FIES − fatura aberta − PIX + proventos dos FIIs ──
     with col_ap:
-        st.markdown(f"<p class='cfg-sec'>aporte de {mes_ext}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p class='cfg-sec'>previsão do aporte de {MESES_EXT[hoje.month % 12]}</p>",
+                    unsafe_allow_html=True)
         _par, _hist_pj, _fat_salvo, _reemb_extra = carregar_dados_pj()
         with st.container(border=True, key="mes_ap_box"):
             if not _par.get("faturamento_minimo"):
@@ -4927,14 +4863,19 @@ def _pagina_mes():
                 c = fx["calc"][k]
                 # a fatura considerada é a do próprio mês (aberta), não a do mês anterior
                 sobra = c["nubank"] - gasto - pix_k
-            prov = float(_div_mes_total or 0.0)
+            # proventos do mês em curso (data-com no mês, até hoje) — reinvestidos no próximo aporte
+            try:
+                prov, _ = calcular_dividendos_mes(_df_lanc_raw.to_dict(orient="records"), hoje.month, hoje.year)
+                prov = float(prov or 0.0)
+            except Exception:
+                prov = 0.0
             aporte = max(sobra or 0.0, 0.0) + prov
             c1, c2, c3 = st.container(key="row_mes_ap").columns(3)
             card_html(c1, "sobra do mês", "—" if sobra is None else
                       (formatar_brl(sobra) if sobra >= 0 else f"({formatar_brl(abs(sobra))})"),
                       None if sobra is None or sobra >= 0 else "neg")
-            card_html(c2, f"proventos · {_label_div_dash}", formatar_brl(prov))
-            card_html(c3, "aporte possível", formatar_brl(aporte), "pos" if aporte > 0 else None)
+            card_html(c2, f"proventos · {MESES3[hoje.month - 1]} até hoje", formatar_brl(prov))
+            card_html(c3, "aporte previsto", formatar_brl(aporte), "pos" if aporte > 0 else None)
             if sobra is not None:
                 _s = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
                 _m = MESES3[hoje.month - 1]
