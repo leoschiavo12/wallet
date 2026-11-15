@@ -374,7 +374,38 @@ st.markdown("""
                 flex: 1 1 48% !important;
             }
         }
-    </style>
+    
+        /* ── estilo global: painéis no visual do Controle de Fatura ── */
+
+    :root {
+        --painel-borda: #202024; --painel-raio: 12px;
+        --card-label-size: 0.75rem !important; --card-label-color: rgba(250,250,250,0.55) !important;
+    }
+    /* painéis: containers com borda (chaves *_box) e as linhas de cards das abas da carteira */
+    [data-testid="stVerticalBlock"]:is([class*="_box "], [class$="_box"],
+        .st-key-row_geo, .st-key-row_indices, .st-key-row_fii_dividendos, .st-key-row_fii_tipo,
+        [class*="st-key-row_etf_"], [class*="st-key-row_fii_ativo_"], [class*="st-key-row_cripto_"],
+        [class*="st-key-row_tesouro_"], [class*="st-key-row_all_"]) {
+        border: 1px solid var(--painel-borda) !important; border-radius: var(--painel-raio) !important;
+        padding: 1rem 1.1rem !important; }
+    [class*="st-key-row_etf_"], [class*="st-key-row_fii_ativo_"], [class*="st-key-row_cripto_"],
+    [class*="st-key-row_tesouro_"], [class*="st-key-row_all_"] { margin-bottom: 0.6rem; }
+    /* números dos cards em peso 600, como no Controle de Fatura */
+    .card-value, [data-testid="stMetricValue"], [data-testid="stMetricValue"] div { font-weight: 600 !important; }
+    /* divisórias viram só espaço — a separação fica com os painéis */
+    hr { border: none !important; margin: 0.5rem 0 !important; height: 0 !important; }
+    /* st.progress: trilho escuro de 8px, cantos arredondados */
+    [data-testid="stProgressBarTrack"] { height: 8px !important; border-radius: 6px !important;
+        background: #202024 !important; overflow: hidden; }
+    [data-testid="stProgressBarTrack"] > div { border-radius: 6px !important; background: #6b7280 !important; }
+    [data-testid="stProgress"] p { font-size: 12px !important; color: #9a9a9a !important; }
+    /* títulos de seção */
+    .cfg-sec { font-size: 0.95rem; font-weight: 600; }
+    /* gráficos plotly dentro de painéis: sem fundo */
+    .stPlotlyChart { background: transparent !important; }
+    /* dashboard: linha de dividendos separada da composição */
+    .st-key-row_dash_lucro { margin-top: 0.4rem; padding-top: 0.8rem; border-top: 1px solid #202024; }
+</style>
     """, unsafe_allow_html=True)
 
 @st.cache_resource
@@ -2971,60 +3002,104 @@ if _pagina == "dashboard":
     # só o que realmente saiu do bolso (não o que já era lucro reaplicado)
     _valor_investido_proprio = max(_invest_liq - _total_divs_geral, 0)
 
-    with st.container(key="row_dash_resumo"):
-        c1, c2, c3 = st.columns([1, 1, 1])
-        c1.metric("patrimônio", formatar_brl(total_geral))
-        c2.metric("saiu do bolso", formatar_brl(_valor_investido_proprio))
-        card_valorizacao(c3, _var_val, _var_pct)
+    # painéis: resumo (patrimônio + composição) · alocação por classe vs alvo · evolução
+    st.markdown("""<style>
+    @media (max-width: 768px) {
+        .st-key-dash_layout > div > [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            width: 100% !important; min-width: 100% !important; flex: 1 1 100% !important; }
+        .st-key-dash_layout > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) { margin-top: 0.8rem !important; }
+    }</style>""", unsafe_allow_html=True)
+    _col_res, _col_aloc = st.container(key="dash_layout").columns([1, 1], gap="medium")
 
-    with st.container(key="row_dash_lucro"):
-        l1, l2, l3 = st.columns([1, 1, 1])
-        l1.metric(f"dividendos  ·  {_label_div_dash}", formatar_brl(_div_mes_total))
-        l2.metric("dividendos totais", formatar_brl(_total_divs_geral))
-        card_valorizacao(
-            l3, _lucro_total,
-            (_lucro_total / _valor_investido_proprio * 100) if _valor_investido_proprio > 0 else 0,
-            label="lucro total"
-        )
+    with _col_res:
+        st.markdown("<p class='cfg-sec'>resumo</p>", unsafe_allow_html=True)
+        with st.container(key="dash_resumo_box"):
+            _cor_var = "#22c55e" if _var_val >= 0 else "#e05252"
+            _bolso, _divs_r, _ganho = (max(_invest_liq - _total_divs_geral, 0.0),
+                                       min(max(_total_divs_geral, 0.0), max(_invest_liq, 0.0)), _var_val)
+            _base_bar = max(_bolso + _divs_r + max(_ganho, 0.0), 1.0)
+            _seg = lambda v, cor: (f"<div style='width:{max(v, 0) / _base_bar * 100:.2f}%;height:100%;"
+                                   f"background:{cor};'></div>")
+            _leg = lambda cor, txt, v: (f"<span style='display:inline-flex;align-items:center;gap:5px;"
+                                        f"margin-right:12px;'><span style='width:8px;height:8px;border-radius:2px;"
+                                        f"background:{cor};display:inline-block'></span>{txt} "
+                                        f"<span style='color:#e8e8e6'>{abreviar_rs(v)}</span></span>")
+            st.markdown(
+                "<div style='display:grid;grid-template-columns:1fr auto;align-items:end;column-gap:12px;'>"
+                "<div><div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>patrimônio</div>"
+                f"<div style='font-size:1.9rem;font-weight:600;line-height:1.15;'>{formatar_brl(total_geral)}</div></div>"
+                "<div style='text-align:right;'><div style='font-size:12px;color:rgba(250,250,250,0.55);"
+                f"margin-bottom:2px;'>variação · {abreviar_rs(abs(_var_val))}</div>"
+                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;color:{_cor_var};'>"
+                f"{'▲ +' if _var_val >= 0 else '▼ '}{fmt_pct(_var_pct)}</div></div></div>"
+                # composição: saiu do bolso + dividendos reinvestidos + ganho de capital
+                "<div style='margin-top:16px;display:flex;height:8px;border-radius:6px;overflow:hidden;"
+                "background:#202024;'>"
+                + _seg(_bolso, "#6b7280") + _seg(_divs_r, "#E5B800") + _seg(_ganho, "#22c55e") +
+                "</div><div style='margin-top:8px;font-size:12px;color:#9a9a9a;line-height:1.9;'>"
+                + _leg("#6b7280", "saiu do bolso", _bolso) + _leg("#E5B800", "dividendos", _divs_r)
+                + _leg("#22c55e" if _ganho >= 0 else "#e05252", "ganho de capital", _ganho) + "</div>",
+                unsafe_allow_html=True)
+            with st.container(key="row_dash_lucro"):
+                l1, l2, l3 = st.columns([1, 1, 1])
+                card_html(l1, f"dividendos · {_label_div_dash}", formatar_brl(_div_mes_total))
+                card_html(l2, "dividendos totais", abreviar_rs(_total_divs_geral))
+                card_valorizacao(
+                    l3, _lucro_total,
+                    (_lucro_total / _valor_investido_proprio * 100) if _valor_investido_proprio > 0 else 0,
+                    label="lucro total"
+                )
 
-
-    st.markdown('---')
+    with _col_aloc:
+        st.markdown("<p class='cfg-sec'>alocação por classe</p>", unsafe_allow_html=True)
+        with st.container(key="dash_aloc_box"):
+            _classes_alvo = {}
+            for _a, _c in _classe_de.items():
+                if _c == 'FII':
+                    continue
+                _b = _get_banda(_cfg_alvos, _a)
+                if _b and _b.get('alvo'):
+                    _d = _classes_alvo.setdefault(_c, {'alvo': 0.0, 'min': 0.0, 'max': 0.0, 'ok': True})
+                    _d['alvo'] += _b['alvo']
+                    if _b.get('min') is None or _b.get('max') is None:
+                        _d['ok'] = False
+                    else:
+                        _d['min'] += _b['min']; _d['max'] += _b['max']
+            _bf = _get_banda(_cfg_alvos, '__FIIs__')
+            if _bf and _bf.get('alvo'):
+                _classes_alvo['FII'] = {'alvo': _bf['alvo'], 'min': _bf.get('min'), 'max': _bf.get('max'),
+                                        'ok': _bf.get('min') is not None and _bf.get('max') is not None}
+            _linhas_al = []
+            for _, _r in df_resumo_classe.iterrows():
+                _cl = _r['Classe']
+                _pct = _r['Total Atual'] / total_geral * 100 if total_geral > 0 else 0
+                _al = _classes_alvo.get(_cl)
+                _fora = bool(_al and _al['ok'] and not (_al['min'] <= _pct <= _al['max']))
+                _cor = "#E5B800" if _fora else "#42A5F5"
+                _dir = (f"<span style='color:{'#E5B800' if _fora else '#9a9a9a'}'>{fmt_pct(_pct)}"
+                        + (f" · alvo {fmt_pct(_al['alvo'])}" if _al else "") + "</span>"
+                        f"<span style='color:#e8e8e6;margin-left:10px'>{abreviar_rs(_r['Total Atual'])}</span>")
+                _escala = 60.0                                            # barra cheia = 60% da carteira
+                _marca = (f"<div style='position:absolute;left:{min(_al['alvo'] / _escala, 1) * 100:.1f}%;"
+                          f"top:-3px;width:2px;height:14px;background:#e8e8e6;border-radius:1px;'></div>"
+                          if _al else "")
+                _linhas_al.append(
+                    "<div style='margin-top:14px;'>"
+                    "<div style='display:flex;justify-content:space-between;align-items:center;"
+                    f"font-size:13px;margin-bottom:6px;'><span>{_cl}</span><span>{_dir}</span></div>"
+                    "<div style='position:relative;height:8px;background:#202024;border-radius:6px;'>"
+                    f"<div style='width:{min(_pct / _escala, 1) * 100:.1f}%;height:100%;background:{_cor};"
+                    f"border-radius:6px;'></div>{_marca}</div></div>")
+            st.markdown("".join(_linhas_al) +
+                        "<div style='margin-top:12px;font-size:12px;color:#9a9a9a;'>"
+                        "traço branco = alvo · amarelo = fora da banda</div>", unsafe_allow_html=True)
 
     # ── linha 1: donut + gráfico mensal lado a lado (empilha no mobile) ───────
-    _ctx_dashboard_chart = st.container(key="row_dashboard_chart")
+    st.markdown("<div style='height:0.4rem'></div><p class='cfg-sec'>evolução do patrimônio</p>",
+                unsafe_allow_html=True)
+    _ctx_dashboard_chart = st.container(key="dash_evol_box")
     with _ctx_dashboard_chart:
-        col_donut, col_mensal = st.columns([1, 2], vertical_alignment="center")
-
-        with col_donut:
-            total_classe = df_resumo_classe['Total Atual'].sum()
-            labels_donut, hover_donut = [], []
-            for _, row in df_resumo_classe.iterrows():
-                pct    = row['Total Atual'] / total_classe * 100
-                labels_donut.append(f"{row['Classe']}<br>{fmt_pct(pct)}".replace('.', ','))
-                hover_donut.append(f"<b>{row['Classe']}</b><br>{fmt_pct(pct)}<br>{formatar_brl(row['Total Atual'])}")
-
-            fig_donut = go.Figure(go.Pie(
-                labels=labels_donut,
-                values=df_resumo_classe['Total Atual'].tolist(),
-                hole=0.75,
-                textinfo='label',
-                textposition='outside',
-                textfont=dict(size=10),
-                hovertemplate='%{customdata}<extra></extra>',
-                customdata=hover_donut,
-                marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)]),
-                domain=dict(x=[0.1, 0.9], y=[0.05, 0.95])
-            ))
-            fig_donut.update_layout(
-                dragmode=False,
-                margin=dict(t=30, b=30, l=60, r=60),
-                height=300, showlegend=False,       # mesma altura do gráfico de linha ao lado
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
-            )
-            st.plotly_chart(
-                fig_donut, width="stretch",
-                config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
-            )
+        col_mensal = st.container()
 
         with col_mensal:
             import calendar as _cal
@@ -3141,7 +3216,6 @@ if _pagina == "dashboard":
             else:
                 st.info("preços mensais históricos ainda não disponíveis. serão populados automaticamente no próximo carregamento.")
 
-    st.markdown('---')
 
 
 if _pagina == "detalhe":
