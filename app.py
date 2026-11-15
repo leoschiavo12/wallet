@@ -1078,6 +1078,42 @@ def tag_var(rs, pct):
     return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
             f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
+def barras_alvo(itens, chave):
+    """barras finas no padrão do app (fatura/FIES): uma linha por ativo — % atual · alvo · valor,
+    barra de 8px com a banda mín–máx sombreada e um traço no alvo.
+    itens: [(nome, pct, valor, alvo, mín, máx)] · cor: dentro da banda cinza, abaixo do mín vermelho,
+    acima do máx amarelo"""
+    if not itens:
+        return
+    itens = sorted(itens, key=lambda x: -x[1])
+    escala = max([x[1] for x in itens] + [x[5] or 0 for x in itens] + [x[3] or 0 for x in itens]) * 1.12 or 1
+    w = lambda v: f"{min(max(v or 0, 0) / escala, 1) * 100:.2f}%"
+    lin = []
+    for nome, pct, valor, alvo, mn, mx in itens:
+        if mn is not None and pct < mn:
+            cor = "#e05252"
+        elif mx is not None and mx > 0 and pct > mx:
+            cor = "#E5B800"
+        else:
+            cor = "#6b7280"
+        banda = (f"<div style='position:absolute;left:{w(mn)};width:calc({w(mx)} - {w(mn)});top:0;height:100%;"
+                 f"background:rgba(255,255,255,0.07);'></div>" if mn and mx else "")
+        traco = (f"<div style='position:absolute;left:{w(alvo)};top:-3px;width:2px;height:14px;"
+                 f"background:#e8e8e6;border-radius:1px;'></div>" if alvo else "")
+        _dir = (f"<span style='color:{cor if cor != '#6b7280' else '#e8e8e6'}'>{fmt_pct(pct)}</span>"
+                + (f"<span style='color:#9a9a9a'> · alvo {fmt_pct(alvo)}</span>" if alvo else "")
+                + f"<span style='color:#9a9a9a;margin-left:10px'>{abreviar_rs(valor)}</span>")
+        lin.append(
+            "<div style='margin-top:14px;'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;font-size:13px;"
+            f"margin-bottom:6px;'><span>{nome}</span><span>{_dir}</span></div>"
+            "<div style='position:relative;height:8px;background:#202024;border-radius:6px;'>"
+            f"{banda}<div style='position:relative;width:{w(pct)};height:100%;background:{cor};border-radius:6px;'>"
+            f"</div>{traco}</div></div>")
+    with st.container(key=chave):
+        st.markdown("".join(lin) + "<div style='margin-top:14px;font-size:12px;color:#9a9a9a;'>"
+                    "faixa clara = banda mín–máx · traço = alvo</div>", unsafe_allow_html=True)
+
 def card_html(col, label, valor, tom=None):
     """card HTML com a mesma tipografia do st.metric (tokens .card-label / .card-value no CSS).
     tom: None (cor padrão) · 'pos' (verde) · 'neg' (vermelho) · 'neutro' (cinza)"""
@@ -3415,67 +3451,13 @@ if _pagina == "detalhe":
 
         st.markdown("---")
 
-        # donut distribuição por ativo dentro dos FIIs
-        # ── gráfico de barras por FII com linha de meta e média ────────────
-        df_fii_bar = df_fii.copy()
-        df_fii_bar['pct'] = df_fii_bar['Total Atual'] / total_geral * 100
-        df_fii_bar = df_fii_bar.sort_values('pct', ascending=True)
-        _n_fiis    = len(df_fii_bar)
-        _media_fii = df_fii_bar['pct'].sum() / _n_fiis if _n_fiis > 0 else 0
-
-        hover_fii_bar = [
-            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['pct'])}<br>{formatar_brl(row['Total Atual'])}"
-            for _, row in df_fii_bar.iterrows()
-        ]
-        fig_fii_bar = go.Figure()
-        fig_fii_bar.add_trace(go.Bar(
-            x=df_fii_bar['pct'],
-            y=df_fii_bar['Ativo'],
-            orientation='h',
-            marker_color='#1E88E5',
-            text=df_fii_bar['pct'].apply(fmt_pct),
-            textposition='outside',
-            textfont=dict(size=10, color='white'),
-            hovertemplate='%{customdata}<extra></extra>',
-            customdata=hover_fii_bar,
-        ))
-        _max_pct_fii = df_fii_bar['pct'].max()
-        _step_fii    = 1
-        _x_max_fii   = max(_max_pct_fii * 1.25, _media_fii * 1.5)
-        _banda_fii_cfg = _get_banda(_cfg_alvos, "__FIIs__")
-        _alvo_fii_total = _banda_fii_cfg.get('alvo') or 0
-        _min_fii_total  = _banda_fii_cfg.get('min') or 0
-        _max_fii_total  = _banda_fii_cfg.get('max') or 0
-        _meta_fii  = _alvo_fii_total / _n_fiis if _n_fiis > 0 and _alvo_fii_total > 0 else None
-        _min_fii_i = _min_fii_total  / _n_fiis if _n_fiis > 0 and _min_fii_total  > 0 else None
-        _max_fii_i = _max_fii_total  / _n_fiis if _n_fiis > 0 and _max_fii_total  > 0 else None
-        if _min_fii_i and _max_fii_i:
-            fig_fii_bar.add_shape(
-                type='rect', x0=_min_fii_i, x1=_max_fii_i, y0=-0.5, y1=_n_fiis - 0.5,
-                fillcolor='rgba(255,255,255,0.04)', line=dict(color='rgba(255,255,255,0.15)', width=1)
-            )
-        if _meta_fii:
-            fig_fii_bar.add_shape(
-                type='line', x0=_meta_fii, x1=_meta_fii, y0=-0.5, y1=_n_fiis - 0.5,
-                line=dict(color='#ffffff', width=1.5, dash='dash')
-            )
-            fig_fii_bar.add_annotation(
-                x=_meta_fii, y=_n_fiis - 0.5,
-                text=f"alvo {fmt_pct(_meta_fii)}",
-                showarrow=False, xanchor='left', xshift=6,
-                font=dict(size=10, color='rgba(255,255,255,0.8)')
-            )
-        fig_fii_bar.update_layout(
-            height=max(300, _n_fiis * 28),
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False, dragmode=False,
-            xaxis=dict(showgrid=True, gridcolor='#333', range=[0, _x_max_fii],
-                       ticksuffix='%', fixedrange=True),
-            yaxis=dict(showgrid=False, tickfont=dict(size=11), fixedrange=True),
-            bargap=0.25, margin=dict(t=20, b=10, l=10, r=60)
-        )
-        st.plotly_chart(fig_fii_bar, width="stretch",
-                        config={"displayModeBar": False, "scrollZoom": False})
+        # ── barras por FII: alvo e banda da classe divididos pelo nº de FIIs ──
+        _n_fiis = len(df_fii)
+        _bf = _get_banda(_cfg_alvos, "__FIIs__")
+        _div = lambda v: (v / _n_fiis) if v and _n_fiis else None
+        barras_alvo([(r['Ativo'], r['Total Atual'] / total_geral * 100 if total_geral > 0 else 0,
+                      r['Total Atual'], _div(_bf.get('alvo')), _div(_bf.get('min')), _div(_bf.get('max')))
+                     for _, r in df_fii.iterrows()], "bar_fii_box")
 
         st.markdown("---")
 
@@ -3544,57 +3526,13 @@ if _pagina == "detalhe":
 
         st.markdown("---")
 
-        # ── gráfico de barras ETF com alvos por ativo ─────────────────────────
-        df_etf_bar = df_etf.copy()
-        df_etf_bar['pct'] = df_etf_bar['Total Atual'] / total_geral * 100
-        df_etf_bar = df_etf_bar.sort_values('pct', ascending=True)
-        _n_etfs = len(df_etf_bar)
-
-        hover_etf_bar = [
-            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['pct'])}<br>{formatar_brl(row['Total Atual'])}"
-            for _, row in df_etf_bar.iterrows()
-        ]
-        fig_etf_bar = go.Figure()
-        fig_etf_bar.add_trace(go.Bar(
-            x=df_etf_bar['pct'],
-            y=df_etf_bar['Ativo'],
-            orientation='h',
-            marker_color='#1E88E5',
-            text=df_etf_bar['pct'].apply(fmt_pct),
-            textposition='outside',
-            textfont=dict(size=10, color='white'),
-            hovertemplate='%{customdata}<extra></extra>',
-            customdata=hover_etf_bar,
-        ))
-        # banda + alvo por ativo
-        for i, row in df_etf_bar.reset_index(drop=True).iterrows():
-            _banda_etf = _get_banda(_cfg_alvos, row['Ativo'])
-            _alvo_e = _banda_etf.get('alvo')
-            _min_e  = _banda_etf.get('min')
-            _max_e  = _banda_etf.get('max')
-            if _min_e and _max_e:
-                fig_etf_bar.add_shape(
-                    type='rect', x0=_min_e, x1=_max_e, y0=i-0.4, y1=i+0.4,
-                    fillcolor='rgba(255,255,255,0.04)', line=dict(color='rgba(255,255,255,0.15)', width=1)
-                )
-            if _alvo_e:
-                fig_etf_bar.add_shape(
-                    type='line', x0=_alvo_e, x1=_alvo_e, y0=i-0.4, y1=i+0.4,
-                    line=dict(color='#ffffff', width=2, dash='dash')
-                )
-        _all_alvos_etf = [(_cfg_alvos.get(a,{}) or {}).get('max') or 0 for a in df_etf_bar['Ativo']]
-        _x_max_etf = max(df_etf_bar['pct'].max(), max(_all_alvos_etf, default=0)) * 1.25
-        fig_etf_bar.update_layout(
-            height=max(200, _n_etfs * 50),
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False, dragmode=False,
-            xaxis=dict(showgrid=True, gridcolor='#333', range=[0, _x_max_etf],
-                       ticksuffix='%', fixedrange=True),
-            yaxis=dict(showgrid=False, tickfont=dict(size=11), fixedrange=True),
-            bargap=0.3, margin=dict(t=10, b=10, l=10, r=60)
-        )
-        st.plotly_chart(fig_etf_bar, width="stretch",
-                        config={"displayModeBar": False, "scrollZoom": False})
+        # ── barras por ETF com alvo e banda de cada ativo ─────────────────────
+        _itens_etf = []
+        for _, r in df_etf.iterrows():
+            _b = _get_banda(_cfg_alvos, r['Ativo'])
+            _itens_etf.append((r['Ativo'], r['Total Atual'] / total_geral * 100 if total_geral > 0 else 0,
+                               r['Total Atual'], _b.get('alvo'), _b.get('min'), _b.get('max')))
+        barras_alvo(_itens_etf, "bar_etf_box")
 
         st.markdown("---")
 
@@ -3897,66 +3835,19 @@ if _pagina == "detalhe":
 
         st.markdown("---")
 
-        # ── distribuição por ativo ────────────────────────────────────────────
-        df_ativo_sorted = df_ativo.sort_values('Part. %', ascending=True)
-        hover_barras = [
-            f"<b>{row['Ativo']}</b><br>{fmt_pct(row['Part. %'])}<br>{formatar_brl(row['Total Atual'])}"
-            for _, row in df_ativo_sorted.iterrows()
-        ]
-        fig_ativo = go.Figure()
-        fig_ativo.add_trace(go.Bar(
-            x=df_ativo_sorted['Part. %'],
-            y=df_ativo_sorted['Ativo'],
-            orientation='h',
-            marker_color='#1E88E5',
-            text=df_ativo_sorted['Part. %'].apply(fmt_pct),
-            textposition='outside',
-            textfont=dict(size=10, color='white'),
-            hovertemplate='%{customdata}<extra></extra>',
-            customdata=hover_barras,
-        ))
-        # alvos por ativo: banda + linha
-        for i, row in df_ativo_sorted.reset_index(drop=True).iterrows():
-            _ativo_n = row['Ativo']
-            # FIIs usam alvo da classe dividido
-            if _classe_de.get(_ativo_n) == 'FII':
-                _banda_c = _get_banda(_cfg_alvos, '__FIIs__')
-                _n_f = len([a for a, c in _classe_de.items() if c == 'FII'])
-                _alvo_i = (_banda_c.get('alvo') or 0) / _n_f if _n_f > 0 else None
-                _min_i  = (_banda_c.get('min')  or 0) / _n_f if _n_f > 0 else None
-                _max_i  = (_banda_c.get('max')  or 0) / _n_f if _n_f > 0 else None
+        # ── distribuição por ativo: barras com alvo e banda (FIIs: banda da classe ÷ nº de FIIs) ──
+        _n_f = len([a for a, c in _classe_de.items() if c == 'FII'])
+        _bfc = _get_banda(_cfg_alvos, '__FIIs__')
+        _itens_at = []
+        for _, r in df_ativo.iterrows():
+            if _classe_de.get(r['Ativo']) == 'FII':
+                _d = lambda v: (v / _n_f) if v and _n_f else None
+                _al, _mn, _mx = _d(_bfc.get('alvo')), _d(_bfc.get('min')), _d(_bfc.get('max'))
             else:
-                _banda_c = _get_banda(_cfg_alvos, _ativo_n)
-                _alvo_i  = _banda_c.get('alvo')
-                _min_i   = _banda_c.get('min')
-                _max_i   = _banda_c.get('max')
-            if _min_i and _max_i:
-                fig_ativo.add_shape(
-                    type='rect', x0=_min_i, x1=_max_i, y0=i-0.4, y1=i+0.4,
-                    fillcolor='rgba(255,255,255,0.04)', line=dict(color='rgba(255,255,255,0.15)', width=1)
-                )
-            if _alvo_i:
-                fig_ativo.add_shape(
-                    type='line', x0=_alvo_i, x1=_alvo_i, y0=i-0.4, y1=i+0.4,
-                    line=dict(color='#ffffff', width=2, dash='dash')
-                )
-        _all_max = [(_get_banda(_cfg_alvos, r['Ativo']).get('max') or 0) for _, r in df_ativo_sorted.iterrows()]
-        _max_pct   = df_ativo_sorted['Part. %'].max()
-        _step      = 5
-        _ult_tick  = (int(_max_pct // _step)) * _step
-        _x_max     = max((_ult_tick + _step) if _max_pct >= _ult_tick * 0.9 else _ult_tick,
-                         max(_all_max, default=0) * 1.1)
-        fig_ativo.update_layout(
-            height=max(300, len(df_ativo_sorted) * 28),
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False, dragmode=False,
-            xaxis=dict(showgrid=True, gridcolor='#333', range=[0, _x_max * 1.15],
-                       ticksuffix='%', dtick=_step, fixedrange=True),
-            yaxis=dict(showgrid=False, tickfont=dict(size=11), fixedrange=True),
-            bargap=0.25, margin=dict(t=10, b=10, l=10, r=60)
-        )
-        st.plotly_chart(fig_ativo, width="stretch",
-                        config={"displayModeBar": False, "scrollZoom": False})
+                _b = _get_banda(_cfg_alvos, r['Ativo'])
+                _al, _mn, _mx = _b.get('alvo'), _b.get('min'), _b.get('max')
+            _itens_at.append((r['Ativo'], r['Part. %'], r['Total Atual'], _al, _mn, _mx))
+        barras_alvo(_itens_at, "bar_ativo_box")
 
         st.markdown("---")
 
