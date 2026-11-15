@@ -3011,7 +3011,6 @@ if _pagina == "dashboard":
     _col_res, _col_aloc = st.container(key="dash_layout").columns([1, 1], gap="medium")
 
     with _col_res:
-        st.markdown("<p class='cfg-sec'>resumo</p>", unsafe_allow_html=True)
         with st.container(key="dash_resumo_box"):
             # patrimônio = saiu do bolso + dividendos reinvestidos + ganho de capital
             _bolso  = max(_invest_liq - _total_divs_geral, 0.0)
@@ -3021,6 +3020,10 @@ if _pagina == "dashboard":
             _cor_l = "#22c55e" if _lucro_total >= 0 else "#e05252"
             _cor_g = "#22c55e" if _ganho >= 0 else "#e05252"
             _base_bar = max(_bolso + _divs_r + max(_ganho, 0.0), 1.0)
+            # ganho negativo: a barra vale o que foi investido e a perda aparece em vermelho no fim
+            _perda = (f"<div style='position:absolute;right:0;top:0;height:100%;"
+                      f"width:{min(abs(_ganho) / _base_bar, 1) * 100:.2f}%;background:#e05252;'></div>"
+                      if _ganho < 0 else "")
             _seg = lambda v, cor: (f"<div style='width:{max(v, 0) / _base_bar * 100:.2f}%;height:100%;"
                                    f"background:{cor};'></div>")
             _neg = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
@@ -3039,9 +3042,9 @@ if _pagina == "dashboard":
                 f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;color:{_cor_l};'>"
                 f"{'▲ +' if _lucro_total >= 0 else '▼ '}{fmt_pct(_pct_lucro)}</div></div></div>"
                 # barra da composição
-                "<div style='margin:16px 0 10px;display:flex;height:8px;border-radius:6px;overflow:hidden;"
-                "background:#202024;'>"
-                + _seg(_bolso, "#6b7280") + _seg(_divs_r, "#E5B800") + _seg(_ganho, "#22c55e") + "</div>"
+                "<div style='position:relative;margin:16px 0 10px;display:flex;height:8px;border-radius:6px;"
+                "overflow:hidden;background:#202024;'>"
+                + _seg(_bolso, "#6b7280") + _seg(_divs_r, "#E5B800") + _seg(_ganho, "#22c55e") + _perda + "</div>"
                 # composição (cores = barra) e proventos do mês
                 "<table class='pj-tab'>"
                 + _linha(_ponto("#6b7280") + "saiu do bolso", formatar_brl(_bolso))
@@ -3054,7 +3057,6 @@ if _pagina == "dashboard":
                 unsafe_allow_html=True)
 
     with _col_aloc:
-        st.markdown("<p class='cfg-sec'>alocação por classe</p>", unsafe_allow_html=True)
         with st.container(key="dash_aloc_box"):
             total_classe = df_resumo_classe['Total Atual'].sum()
             labels_donut, hover_donut = [], []
@@ -3087,8 +3089,7 @@ if _pagina == "dashboard":
             )
 
 
-    st.markdown("<div style='height:0.4rem'></div><p class='cfg-sec'>evolução do patrimônio</p>",
-                unsafe_allow_html=True)
+    st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
     _ctx_dashboard_chart = st.container(key="dash_evol_box")
     with _ctx_dashboard_chart:
         col_mensal = st.container()
