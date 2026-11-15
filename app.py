@@ -35,7 +35,7 @@ st.markdown("""
                 margin-top: 1.2rem !important;
             }
         }
-        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box, .st-key-pj_ano_box, .st-key-sim_box) {
+        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box, .st-key-mes_fies_box, .st-key-pj_ano_box, .st-key-sim_box) {
             padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
         }
         :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
@@ -4509,6 +4509,26 @@ def fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano):
     return {"pix": _pix, "meses": _meses, "comp": _comp, "calc": _calc, "cart": _cart, "das_seg": _das_seg,
             "cart_erro": _cart_erro, "fat_de": _fat_de, "extra_de": _extra_de}
 
+def render_fies(_par, chave):
+    """card do FIES: progresso (% · faltam N, à direita), saldo devedor, parcela (n/total), última parcela"""
+    _fs = fies_status(_par)
+    if not (_fs and _fs["total"]):
+        return
+    st.markdown(f"<style>.st-key-{chave} [data-testid='stProgress'] p {{ text-align: right; width: 100%; }}"
+                f".st-key-{chave} [data-testid='stProgress'] [data-testid='stMarkdownContainer'] "
+                f"{{ width: 100%; }}</style><p class='cfg-sec'>FIES</p>", unsafe_allow_html=True)
+    with st.container(key=chave, border=True):
+        _pct_fies = _fs["pagas"] / _fs["total"]
+        st.progress(_pct_fies, text=f"{fmt_pct(_pct_fies * 100)} · faltam {_fs['restantes']}")
+        _fl = [
+            ("saldo devedor nominal", formatar_brl(_fs["saldo"])),
+            ("parcela", f"{formatar_brl(_par['fies'])} - ({_fs['pagas']}/{_fs['total']})"),
+            ("última parcela", f"{MESES3[_fs['fim'].month - 1]}/{_fs['fim'].year}"),
+        ]
+        st.markdown("<table class='pj-tab'>" + "".join(
+            f"<tr><td>{x}</td><td>{y}</td></tr>" for x, y in _fl) + "</table>",
+            unsafe_allow_html=True)
+
 def _cap_pj(t):
     """legenda com R$ literal (dois "$" na mesma linha viram fórmula no markdown)"""
     st.caption(str(t).replace("$", "\\$"))
@@ -4629,23 +4649,7 @@ def _pagina_pj():
 
     # ── dívida: FIES ─────────────────────────────────────────────────────────
     with col_fies:
-        _fs = fies_status(_par)
-        if _fs and _fs["total"]:
-            st.markdown("<p class='cfg-sec'>FIES</p>", unsafe_allow_html=True)
-            with st.container(key="pj_fies_box", border=True):
-                _pct_fies = _fs["pagas"] / _fs["total"]
-                st.progress(_pct_fies,
-                            text=f"{_fs['pagas']} de {_fs['total']} parcelas pagas · "
-                                 f"{fmt_pct(_pct_fies * 100)} · faltam {_fs['restantes']}")
-                _fl = [
-                    ("saldo devedor (nominal)", formatar_brl(_fs["saldo"])),
-                    ("parcela", formatar_brl(_par["fies"])),
-                    ("próximo débito", _fs["prox"].strftime("%d/%m/%Y") if _fs["prox"] is not None else "—"),
-                    ("última parcela", f"{_MES3[_fs['fim'].month - 1]}/{_fs['fim'].year}"),
-                ]
-                st.markdown("<table class='pj-tab'>" + "".join(
-                    f"<tr><td>{x}</td><td>{y}</td></tr>" for x, y in _fl) + "</table>",
-                    unsafe_allow_html=True)
+        render_fies(_par, "pj_fies_box")
 
     st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
     if st.session_state.get("_nn_msg"):
@@ -4848,6 +4852,8 @@ def _pagina_mes():
             fx_render_cards_limite(df_m, lim)
         if pix_k:
             _cap_pj(f"compras no PIX em {MESES3[hoje.month - 1]}: {formatar_brl(pix_k)}")
+        st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+        render_fies(carregar_dados_pj()[0], "mes_fies_box")
 
     # ── aporte do mês: receita do mês − FIES − fatura aberta − PIX + proventos dos FIIs ──
     with col_ap:
