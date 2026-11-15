@@ -1707,6 +1707,43 @@ def salvar_despesa_fatura(data_iso, categoria_id, descricao, valor):
     ler_fatura_detalhe.clear()
     ler_cartao_mensal.clear()
 
+SHEET_PF_PIX_TAB = "pf_pix"
+PIX_HEADERS = ["data", "categoria", "descricao", "valor"]
+
+def ler_pf_pix():
+    """compras no PIX (saem da conta na hora): DataFrame data/categoria/descricao/valor"""
+    if "_pf_pix" not in st.session_state:
+        df = pd.DataFrame(columns=PIX_HEADERS)
+        try:
+            rows = _ler_valores(f"{SHEET_PF_PIX_TAB}!A:D").get("values", [])
+            if len(rows) > 1:
+                df = pd.DataFrame([(list(r) + [""] * 4)[:4] for r in rows[1:]], columns=PIX_HEADERS)
+                d = pd.to_datetime(df["data"].astype(str), format="%Y-%m-%d", errors="coerce")
+                df["data"] = d.fillna(pd.to_datetime(df["data"].astype(str), dayfirst=True, errors="coerce"))
+                df["valor"] = pd.to_numeric(df["valor"].apply(
+                    lambda x: x if isinstance(x, (int, float)) else (_num_br(x) if str(x).strip() else None)),
+                    errors="coerce")
+                df = df.dropna(subset=["data", "valor"])
+        except Exception as _e_leit:
+            _falha_leitura("compras PIX", _e_leit)
+        st.session_state["_pf_pix"] = df
+    return st.session_state["_pf_pix"]
+
+def pix_mensal():
+    """{'2026-11': total no PIX no mês}"""
+    df = ler_pf_pix()
+    if df.empty:
+        return {}
+    return df.groupby(df["data"].dt.strftime("%Y-%m"))["valor"].sum().round(2).to_dict()
+
+def salvar_pix(data_iso, categoria_id, descricao, valor):
+    svc = get_sheets_service()
+    _garantir_aba_existe(svc, SHEET_PF_PIX_TAB, PIX_HEADERS)
+    svc.values().append(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_PIX_TAB}!A:D", valueInputOption="RAW",
+                        insertDataOption="INSERT_ROWS",
+                        body={"values": [[data_iso, categoria_id, descricao, float(valor)]]}).execute()
+    st.session_state.pop("_pf_pix", None)
+
 def ler_pj_parametros():
     par = {k: d for k, _, d, _ in PJ_PARAMS}
     try:
@@ -1893,8 +1930,7 @@ def ler_pj_notas():
             continue
         tipo = "reembolso" if str(r[0]).strip().lower().startswith("reemb") else "nota fiscal"
         out.append({"tipo": tipo, "data": d.normalize(), "valor": float(v),
-                    "recebimento": ("" if tipo == "reembolso" else
-                                    "mesmo mês" if "mesmo" in str(r[3]).lower() else "mês seguinte"),
+                    "recebimento": "" if tipo == "reembolso" else "mês seguinte",
                     "descricao": str(r[4]).strip()})
     return sorted(out, key=lambda n: n["data"])
 
@@ -1942,11 +1978,9 @@ def resumo_notas(notas):
         if n["tipo"] == "reembolso":
             reemb[k] = reemb.get(k, 0.0) + n["valor"]
             continue
+        # toda nota é recebida no mês seguinte e paga DAS no mês seguinte (como o faturamento base)
         d = fat.setdefault(k, {"fat": None, "extra": 0.0})
-        if n["recebimento"] == "mesmo mês":
-            d["extra"] += n["valor"]
-        else:
-            d["fat"] = (d["fat"] or 0.0) + n["valor"]
+        d["fat"] = (d["fat"] or 0.0) + n["valor"]
     return fat, reemb
 
 def fat_do_mes(a, fat_salvo, par, hist):
@@ -1971,7 +2005,7 @@ def salvar_pj_faturamento(novos):
                         valueInputOption="RAW", body={"values": corpo}).execute()
     st.session_state.pop("_pj_fat", None)
 
-def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.0):
+def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.0, pix=0.0):
     """
     fluxo de um mês: faturamento da PJ → custos → pró-labore + lucros → receita da PF.
     previdência = % do faturamento BASE (revisto a cada 18 meses), mesmo quando o faturamento
@@ -1999,7 +2033,7 @@ def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.
         "lucros": lucros, "fies": fies, "lucros_nubank": lucros - fies,
         "reembolso": reemb,
         "receita_pf": pl_liq + lucros + reemb, "nubank": pl_liq + lucros + reemb - fies,
-        "cartao": cartao, "sobra": pl_liq + lucros + reemb - fies - cartao,
+        "cartao": cartao, "pix": pix, "sobra": pl_liq + lucros + reemb - fies - cartao - pix,
     }
 
 def salvar_meta(chave, valor, descricao=""):
@@ -2786,7 +2820,7 @@ _ph_avisos = st.container()          # avisos de leitura da planilha (preenchido
 _janela_sessao = janela_mercado(30)
 if st.session_state.get("_janela_sessao") != _janela_sessao:
     for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
-               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao", "_pj_hist", "_pf_reemb", "_pj_notas",
+               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao", "_pf_pix", "_pj_hist", "_pf_reemb", "_pj_notas",
                "_sheet_lote", "_sheet_abas"]:
         st.session_state.pop(_k, None)
     st.session_state["_janela_sessao"] = _janela_sessao
@@ -4404,10 +4438,7 @@ def dialogo_nova_nota():
     data = c1.date_input("data de emissão" if tipo == "nota fiscal" else "data do recebimento",
                          value="today", format="DD/MM/YYYY", key="nn_data")
     valor_txt = c2.text_input("valor (R$)", placeholder="ex.: 12.520,00", key="nn_valor")
-    receb = ""
-    if tipo == "nota fiscal":
-        receb = st.segmented_control("recebimento", NOTA_RECEB, default="mês seguinte",
-                                     key="nn_receb") or "mês seguinte"
+    receb = "mês seguinte" if tipo == "nota fiscal" else ""
     desc = st.text_input("descrição (opcional)", key="nn_desc")
     if st.button("lançar", type="primary", key="nn_ok"):
         try:
@@ -4488,10 +4519,12 @@ def fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano):
             return _fat_de(_comp[k]) + _extra_de(_comp[k])
         return _fat_de(_comp[k]) + _extra_de(k)
     # cada mês com os parâmetros vigentes nele (pró-labore, DAS, contador… mudam com o tempo)
+    # PIX: sai da conta no próprio mês da compra
+    _pix = pix_mensal()
     _calc = {k: calcular_pj_mes(_fat_de(_comp[k]) + _extra_de(k), par_vigente(_par, _hist_pj, k), k,
-                                _cart[k][0], _base_das(k), _reemb_extra.get(k, 0.0))
+                                _cart[k][0], _base_das(k), _reemb_extra.get(k, 0.0), _pix.get(k, 0.0))
              for k in _meses}
-    return {"meses": _meses, "comp": _comp, "calc": _calc, "cart": _cart, "das_seg": _das_seg,
+    return {"pix": _pix, "meses": _meses, "comp": _comp, "calc": _calc, "cart": _cart, "das_seg": _das_seg,
             "cart_erro": _cart_erro, "fat_de": _fat_de, "extra_de": _extra_de}
 
 def _cap_pj(t):
@@ -4560,7 +4593,7 @@ def _pagina_pj():
     if _cart_erro:
         st.warning(f"Controle de Fatura indisponível ({_cart_erro}) — cartão considerado R$0.")
 
-    def _tabela_pj(c, fat, extra, r_fat, r_extra, r_das, r_cart):
+    def _tabela_pj(c, fat, extra, r_fat, r_extra, r_das, r_cart, r_pix="compras PIX"):
         """débitos e créditos da PJ, depois da PF"""
         lin = [("pj-sec", "PJ", ""), ("", f"(+) {r_fat}", formatar_brl(fat))]
         if extra:
@@ -4578,6 +4611,7 @@ def _pagina_pj():
                 ("pj-tot", "saldo disponível / nubank", _neg(c["receita_pf"])),
                 ("", "(−) FIES / débito BB", formatar_brl(c["fies"])),
                 ("", f"(−) {r_cart}", formatar_brl(c["cartao"])),
+                ("", f"(−) {r_pix}", formatar_brl(c["pix"])),
                 ("pj-tot", "sobra para investir", _neg(c["sobra"]))]
         return "<table class='pj-tab'>" + "".join(
             f"<tr class='{cl}'><td>{x}</td><td>{y}</td></tr>" for cl, x, y in lin) + "</table>"
@@ -4595,15 +4629,15 @@ def _pagina_pj():
                 c, _fat_de(_ca), _extra_de(_mes_sel),
                 f"faturamento de {_rot(_ca)}", f"extra de {_rot(_mes_sel)}",
                 f"DAS (notas de {_rot(_ca)})" if _das_seg else "DAS",
-                f"fatura de {_rot(_ca)} ({_cart[_mes_sel][1]})")
+                f"fatura de {_rot(_ca)} ({_cart[_mes_sel][1]})", f"PIX de {_rot(_mes_sel)}")
         else:
             # ano inteiro: soma dos 12 meses de recebimento
             _tit = str(_ano)
             c = {f: sum(v[f] for v in _calc.values()) for f in
                  ["das", "prev", "contador", "taxa", "fies", "pro_labore", "lucros",
-                  "pl_liq", "reembolso", "receita_pf", "cartao", "sobra"]}
+                  "pl_liq", "reembolso", "receita_pf", "cartao", "pix", "sobra"]}
             _tab = _tabela_pj(c, sum(_fat_de(_comp[k]) for k in _meses), sum(_extra_de(k) for k in _meses),
-                              "faturamento recebido", "extras", "DAS", "cartão")
+                              "faturamento recebido", "extras", "DAS", "cartão", "PIX")
         _ph_tit.markdown(f"<p class='cfg-sec pj-mes-lbl'>{_tit}</p>", unsafe_allow_html=True)
         with _ph_tab:
             with st.container(key="pj_comp_box", border=True):
@@ -4651,36 +4685,143 @@ if _pagina == "cashflow":
 MESES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
              'setembro','outubro','novembro','dezembro']
 
-@st.dialog("nova despesa")
-def dialogo_despesa(cats):
-    """grava direto na planilha do Controle de Fatura (o app de lá continua lendo normalmente)"""
-    _ids = [c["id"] for c in sorted(cats, key=lambda c: c["nome"])]
-    _nomes = {c["id"]: c["nome"] for c in cats}
-    cat = st.pills("categoria", _ids, format_func=lambda i: _nomes.get(i, i), key="dp_cat")
-    c1, c2 = st.columns(2)
-    valor_txt = c1.text_input("valor (R$)", placeholder="ex.: 54,90", key="dp_valor")
-    data = c2.date_input("data", value="today", format="DD/MM/YYYY", key="dp_data")
-    desc = st.text_input("descrição (opcional)", key="dp_desc")
-    if st.button("registrar", type="primary", key="dp_ok", use_container_width=True):
-        if not cat:
-            st.error("escolha uma categoria")
-            return
-        try:
-            valor = _num_br(valor_txt)
+# lançador de despesas: cópia do formulário do app Controle de Fatura (mesmos campos, estilo e
+# máscara de centavos), com a escolha cartão / pix. cartão → planilha do Controle de Fatura;
+# pix → aba pf_pix desta planilha (fica fora da fatura, sai do caixa no próprio mês)
+CSS_LANCADOR = """<style>
+.st-key-mes_lancador { --altura-campo: 2.5rem; }
+.st-key-mes_lancador div[data-testid="stFormSubmitButton"] button {
+    min-height: var(--altura-campo) !important; height: var(--altura-campo) !important;
+    font-size: 0.9rem !important; line-height: 1 !important; border-radius: 8px !important; }
+.st-key-mes_lancador div[data-baseweb="input"] {
+    min-height: var(--altura-campo) !important; height: var(--altura-campo) !important;
+    border: 1px solid #2c2c33 !important; border-radius: 8px !important; box-sizing: border-box !important; }
+.st-key-mes_lancador div[data-baseweb="base-input"] {
+    min-height: 0 !important; height: 100% !important; border: none !important; background: transparent !important; }
+.st-key-mes_lancador div[data-baseweb="input"] input {
+    height: 100% !important; min-height: 0 !important; border: none !important; background: transparent !important;
+    padding: 0 0.7rem !important; font-size: 0.9rem !important; }
+.st-key-mes_lancador :is(div[data-testid="stTextInput"], div[data-testid="stDateInput"],
+    div[data-testid="stSelectbox"], div[data-testid="stElementContainer"]) { margin-bottom: 0 !important; }
+.st-key-mes_lancador [data-testid="stWidgetLabel"] p {
+    font-size: 0.68rem !important; text-transform: uppercase !important; letter-spacing: 0.04em !important;
+    color: rgba(230,230,230,0.55) !important; font-weight: 500 !important; }
+.st-key-mes_lancador [data-testid="stWidgetLabel"] { margin-bottom: 0.2rem !important; }
+.st-key-mes_lancador :is(div[data-testid="stSelectbox"] div[role="group"], div[data-baseweb="select"] > div) {
+    min-height: var(--altura-campo) !important; height: var(--altura-campo) !important;
+    border: 1px solid #2c2c33 !important; border-radius: 8px !important; box-sizing: border-box !important;
+    cursor: pointer !important; }
+.st-key-mes_lancador div[data-testid="stSelectbox"] input {
+    height: 100% !important; min-height: 0 !important; border: none !important; background: transparent !important;
+    padding: 0 0.7rem !important; font-size: 0.9rem !important; caret-color: transparent !important;
+    cursor: pointer !important; }
+.st-key-mes_lancador div[data-testid="stForm"] {
+    padding: 1rem 1.1rem !important; border: 1px solid #202024 !important; border-radius: 12px !important; }
+.st-key-mes_lancador div[data-testid="stForm"] div[data-testid="stVerticalBlock"] { gap: 0.9rem !important; }
+@media (max-width: 640px) {
+    .st-key-mes_lancador div[data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+    .st-key-mes_lancador div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] { min-width: 0 !important; }
+}
+</style>"""
+
+def ativar_campos_formulario(aria_label_valor):
+    """igual ao Controle de Fatura: seletor de categoria não abre o teclado do celular;
+    campo de valor com teclado numérico e máscara de centavos (1 → 0,01 · 1250 → 12,50)"""
+    import streamlit.components.v1 as components
+    components.html(f"""
+    <script>
+    const doc = window.parent.document;
+    function formatarCentavos(txt) {{
+        const dig = txt.replace(/\\D/g, '');
+        if (!dig) return '';
+        const c = parseInt(dig, 10);
+        return Math.floor(c / 100) + ',' + String(c % 100).padStart(2, '0');
+    }}
+    function ajustar() {{
+        doc.querySelectorAll('.st-key-mes_lancador div[data-testid="stSelectbox"] input').forEach(el => {{
+            el.setAttribute('inputmode', 'none');
+        }});
+        doc.querySelectorAll('.st-key-mes_lancador input[aria-label="{aria_label_valor}"]').forEach(el => {{
+            el.setAttribute('inputmode', 'numeric');
+            if (el.dataset.mascara) return;
+            el.dataset.mascara = '1';
+            el.addEventListener('input', () => {{
+                const novo = formatarCentavos(el.value);
+                if (novo === el.value) return;
+                const setter = Object.getOwnPropertyDescriptor(
+                    window.parent.HTMLInputElement.prototype, 'value').set;
+                setter.call(el, novo);
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }});
+        }});
+    }}
+    ajustar();
+    new MutationObserver(ajustar).observe(doc.body, {{ childList: true, subtree: true }});
+    </script>
+    """, height=0)
+
+def _parse_valor_fatura(txt):
+    """igual ao Controle de Fatura: '1.234,56' · '1234,56' · '1234.56' → float (inválido → 0)"""
+    if not txt:
+        return 0.0
+    txt = str(txt).strip().replace(".", "").replace(",", ".") if "," in str(txt) else str(txt).strip()
+    try:
+        return float(txt)
+    except ValueError:
+        return 0.0
+
+@st.fragment
+def form_lancamento(df_f, cats):
+    hoje = pd.Timestamp.today()
+    mes_ant = (hoje.replace(day=1) - pd.Timedelta(days=1)).strftime("%Y-%m")
+    df_ant = df_f[df_f["data"].dt.strftime("%Y-%m") == mes_ant] if not df_f.empty else df_f
+    gasto_mes_ant = df_ant.groupby("categoria")["valor"].sum().to_dict() if not df_ant.empty else {}
+
+    todas = sorted(cats, key=lambda c: c["nome"].lower())
+    opcoes_ids = [c["id"] for c in todas]
+    opcoes_labels = {c["id"]: c["nome"].lower() for c in todas}
+    if gasto_mes_ant:
+        categoria_default = max(gasto_mes_ant, key=gasto_mes_ant.get)
+        index_default = opcoes_ids.index(categoria_default) if categoria_default in opcoes_ids else 0
+    else:
+        index_default = 0
+
+    with st.form("form_lancar", clear_on_submit=True):
+        categoria_id = st.selectbox(
+            "categoria", options=opcoes_ids, index=index_default,
+            format_func=lambda x: opcoes_labels[x],
+        )
+        pagamento = st.segmented_control("pagamento", ["cartão", "pix"], default="cartão",
+                                         key="lanc_pagamento")
+
+        col_data, col_val = st.columns([1, 1])
+        with col_data:
+            data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
+        with col_val:
+            valor_txt = st.text_input("valor (R$)", placeholder="0,00")
+
+        descricao = st.text_input("descrição")
+
+        ativar_campos_formulario("valor (R$)")
+
+        enviado = st.form_submit_button("registrar despesa", use_container_width=True)
+
+        if enviado:
+            valor = _parse_valor_fatura(valor_txt)
             if valor <= 0:
-                raise ValueError
-        except ValueError:
-            st.error("valor inválido — use o formato 54,90")
-            return
-        try:
-            salvar_despesa_fatura(pd.Timestamp(data).strftime("%Y-%m-%d"), cat, desc.strip(), valor)
-        except Exception as e:
-            st.error(f"não consegui gravar no Controle de Fatura ({str(e)[:80]})")
-            return
-        st.session_state["_dp_msg"] = f"{_nomes.get(cat, cat)} · {formatar_brl(valor)} registrado"
-        for _k in ["dp_valor", "dp_desc", "dp_cat"]:
-            st.session_state.pop(_k, None)
-        st.rerun()
+                st.error("informe um valor válido.")
+            else:
+                try:
+                    if pagamento == "pix":
+                        salvar_pix(data_lanc.isoformat(), categoria_id, descricao, valor)
+                    else:
+                        salvar_despesa_fatura(data_lanc.isoformat(), categoria_id, descricao, valor)
+                except Exception as e:
+                    st.error(f"não consegui gravar ({str(e)[:80]})")
+                    return
+                st.session_state["_dp_msg"] = (f"{opcoes_labels.get(categoria_id, categoria_id)} · "
+                                               f"{formatar_brl(valor)} no {pagamento or 'cartão'} · registrado!")
+                st.rerun(scope="app")
 
 def _barras_categorias(gasto_cat, cats):
     """uma linha por categoria: nome · gasto / orçamento · barra (vermelha se estourou)"""
@@ -4738,7 +4879,6 @@ def _pagina_mes():
     mes_ext = MESES_EXT[hoje.month - 1]
     if st.session_state.get("_dp_msg"):
         st.toast(st.session_state.pop("_dp_msg"))
-
     # celular: as duas colunas grandes empilham; as linhas de 3 cards ficam lado a lado
     st.markdown("""<style>
     @media (max-width: 768px) {
@@ -4750,19 +4890,24 @@ def _pagina_mes():
         :is(.st-key-row_mes_fat, .st-key-row_mes_ap) [data-testid="stColumn"] {
             min-width: 31% !important; width: 31% !important; flex: 1 1 31% !important; }
     }
-    </style>""", unsafe_allow_html=True)
+    </style>""" + CSS_LANCADOR, unsafe_allow_html=True)
     col_fat, col_ap = st.container(key="mes_layout").columns([1, 1], gap="large")
 
-    # ── fatura aberta (gastos do mês corrente, pagos no mês que vem) ─────────
+    df_f, cats, erro_f = ler_fatura_detalhe()
+    _, limite, _ = ler_cartao_mensal()
+    pix_k = float(pix_mensal().get(k, 0.0))
+    df_m = df_f[df_f["data"].dt.strftime("%Y-%m") == k] if not df_f.empty else df_f
+    gasto = float(df_m["valor"].sum()) if not df_m.empty else 0.0
+
+    # ── lançador + fatura aberta (gastos do mês corrente, pagos no mês que vem) ──
     with col_fat:
-        st.markdown(f"<p class='cfg-sec'>fatura de {mes_ext} · aberta</p>", unsafe_allow_html=True)
-        df_f, cats, erro_f = ler_fatura_detalhe()
-        _, limite, _ = ler_cartao_mensal()
         if erro_f:
             st.warning(f"Controle de Fatura indisponível ({erro_f})")
         else:
-            df_m = df_f[df_f["data"].dt.strftime("%Y-%m") == k] if not df_f.empty else df_f
-            gasto = float(df_m["valor"].sum()) if not df_m.empty else 0.0
+            with st.container(key="mes_lancador"):
+                form_lancamento(df_f, cats)
+        st.markdown(f"<p class='cfg-sec'>fatura de {mes_ext} · aberta</p>", unsafe_allow_html=True)
+        if not erro_f:
             lim = float(limite or 0.0)
             dias = (hoje.normalize() + pd.offsets.MonthBegin(1) - hoje.normalize()).days
             with st.container(border=True, key="mes_fat_box"):
@@ -4774,13 +4919,12 @@ def _pagina_mes():
                 if lim > 0:
                     _pct = gasto / lim
                     st.progress(min(_pct, 1.0), text=f"{fmt_pct(_pct * 100)} do limite de {formatar_brl(lim)}")
-                if st.button("+ despesa", type="primary", key="btn_despesa", use_container_width=True):
-                    dialogo_despesa(cats)
                 gasto_cat = df_m.groupby("categoria")["valor"].sum().to_dict() if not df_m.empty else {}
                 if gasto_cat or cats:
                     st.markdown(_barras_categorias(gasto_cat, cats), unsafe_allow_html=True)
+            _cap_pj(f"compras no PIX em {MESES3[hoje.month - 1]}: {formatar_brl(pix_k)}")
 
-    # ── aporte do mês: sobra do caixa + proventos dos FIIs ───────────────────
+    # ── aporte do mês: receita do mês − FIES − fatura aberta − PIX + proventos dos FIIs ──
     with col_ap:
         st.markdown(f"<p class='cfg-sec'>aporte de {mes_ext}</p>", unsafe_allow_html=True)
         _par, _hist_pj, _fat_salvo, _reemb_extra = carregar_dados_pj()
@@ -4791,9 +4935,8 @@ def _pagina_mes():
             else:
                 fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, hoje.year)
                 c = fx["calc"][k]
-                sobra = c["sobra"]
-                _ca = fx["comp"][k]
-                _rot_ca = f"{MESES3[int(_ca[5:]) - 1]}/{_ca[2:4]}"
+                # a fatura considerada é a do próprio mês (aberta), não a do mês anterior
+                sobra = c["nubank"] - gasto - pix_k
             prov = float(_div_mes_total or 0.0)
             aporte = max(sobra or 0.0, 0.0) + prov
             c1, c2, c3 = st.container(key="row_mes_ap").columns(3)
@@ -4804,9 +4947,10 @@ def _pagina_mes():
             card_html(c3, "aporte possível", formatar_brl(aporte), "pos" if aporte > 0 else None)
             if sobra is not None:
                 _s = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
-                _cap_pj(f"sobra = receita PF de {MESES3[hoje.month - 1]} ({_s(c['receita_pf'])}) − FIES "
-                        f"({formatar_brl(c['fies'])}) − fatura de {_rot_ca} ({fx['cart'][k][1]}, "
-                        f"{formatar_brl(c['cartao'])}). detalhe em mês › cashflow.")
+                _m = MESES3[hoje.month - 1]
+                _cap_pj(f"sobra = receita PF de {_m} ({_s(c['receita_pf'])}) − FIES ({formatar_brl(c['fies'])}) "
+                        f"− fatura de {_m}, em aberto ({formatar_brl(gasto)}) − PIX de {_m} "
+                        f"({formatar_brl(pix_k)}).")
             if aporte > 0 and st.button("distribuir no simulador", key="btn_distribuir",
                                         use_container_width=True):
                 st.session_state["_aporte_do_mes"] = fmt_num(aporte, 2)
@@ -5007,7 +5151,6 @@ if _pagina == "configurações":
                 "tipo":        pd.Series([n["tipo"] for n in _do_ano], dtype="object"),
                 "data":        pd.Series([n["data"].date() for n in _do_ano], dtype="object"),
                 "valor":       pd.Series([n["valor"] for n in _do_ano], dtype="float64"),
-                "recebimento": pd.Series([n["recebimento"] or "—" for n in _do_ano], dtype="object"),
                 "descrição":   pd.Series([n.get("descricao", "") for n in _do_ano], dtype="object"),
             })
             _df_n_ret = st.data_editor(
@@ -5020,9 +5163,6 @@ if _pagina == "configurações":
                                                         required=True),
                     "valor": st.column_config.NumberColumn("valor", min_value=0.0, step=0.01,
                                                            format="localized", required=True),
-                    "recebimento": st.column_config.SelectboxColumn(
-                        "recebimento", options=NOTA_RECEB + ["—"], default="mês seguinte",
-                        help="nota fiscal: recebida no mês seguinte ou no mesmo mês da emissão"),
                     "descrição": st.column_config.TextColumn("descrição"),
                 })
             if st.form_submit_button("salvar", type="primary"):
@@ -5033,9 +5173,7 @@ if _pagina == "configurações":
                     _tp = r["tipo"] if r["tipo"] in NOTA_TIPOS else "nota fiscal"
                     _novas.append({"tipo": _tp, "data": pd.Timestamp(r["data"]).normalize(),
                                    "valor": float(r["valor"]),
-                                   "recebimento": ("" if _tp == "reembolso" else
-                                                   (r["recebimento"] if r["recebimento"] in NOTA_RECEB
-                                                    else "mês seguinte")),
+                                   "recebimento": "" if _tp == "reembolso" else "mês seguinte",
                                    "descricao": "" if pd.isna(r["descrição"]) else str(r["descrição"])})
                 _outras = [n for n in _notas_cfg if n["data"].year != _ano_c]
                 salvar_pj_notas(_outras + _novas)
