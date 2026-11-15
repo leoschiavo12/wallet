@@ -404,7 +404,6 @@ st.markdown("""
     /* gráficos plotly dentro de painéis: sem fundo */
     .stPlotlyChart { background: transparent !important; }
     /* dashboard: linha de dividendos separada da composição */
-    .st-key-row_dash_lucro { margin-top: 0.4rem; padding-top: 0.8rem; border-top: 1px solid #202024; }
 </style>
     """, unsafe_allow_html=True)
 
@@ -3014,87 +3013,80 @@ if _pagina == "dashboard":
     with _col_res:
         st.markdown("<p class='cfg-sec'>resumo</p>", unsafe_allow_html=True)
         with st.container(key="dash_resumo_box"):
-            _cor_var = "#22c55e" if _var_val >= 0 else "#e05252"
-            _bolso, _divs_r, _ganho = (max(_invest_liq - _total_divs_geral, 0.0),
-                                       min(max(_total_divs_geral, 0.0), max(_invest_liq, 0.0)), _var_val)
+            # patrimônio = saiu do bolso + dividendos reinvestidos + ganho de capital
+            _bolso  = max(_invest_liq - _total_divs_geral, 0.0)
+            _divs_r = min(max(_total_divs_geral, 0.0), max(_invest_liq, 0.0))
+            _ganho  = _var_val
+            _pct_lucro = (_lucro_total / _valor_investido_proprio * 100) if _valor_investido_proprio > 0 else 0
+            _cor_l = "#22c55e" if _lucro_total >= 0 else "#e05252"
+            _cor_g = "#22c55e" if _ganho >= 0 else "#e05252"
             _base_bar = max(_bolso + _divs_r + max(_ganho, 0.0), 1.0)
             _seg = lambda v, cor: (f"<div style='width:{max(v, 0) / _base_bar * 100:.2f}%;height:100%;"
                                    f"background:{cor};'></div>")
-            _leg = lambda cor, txt, v: (f"<span style='display:inline-flex;align-items:center;gap:5px;"
-                                        f"margin-right:12px;'><span style='width:8px;height:8px;border-radius:2px;"
-                                        f"background:{cor};display:inline-block'></span>{txt} "
-                                        f"<span style='color:#e8e8e6'>{abreviar_rs(v)}</span></span>")
+            _neg = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
+            _ponto = lambda cor: (f"<span style='width:8px;height:8px;border-radius:2px;background:{cor};"
+                                  f"display:inline-block;margin-right:8px;'></span>")
+            def _linha(rot, val, extra="", cor_val="inherit"):
+                _ex = f"<span style='color:#9a9a9a;margin-left:8px'>{extra}</span>" if extra else ""
+                return f"<tr><td>{rot}</td><td><span style='color:{cor_val}'>{val}</span>{_ex}</td></tr>"
             st.markdown(
+                # topo: patrimônio · lucro total (valorização + dividendos)
                 "<div style='display:grid;grid-template-columns:1fr auto;align-items:end;column-gap:12px;'>"
                 "<div><div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>patrimônio</div>"
                 f"<div style='font-size:1.9rem;font-weight:600;line-height:1.15;'>{formatar_brl(total_geral)}</div></div>"
                 "<div style='text-align:right;'><div style='font-size:12px;color:rgba(250,250,250,0.55);"
-                f"margin-bottom:2px;'>variação · {abreviar_rs(abs(_var_val))}</div>"
-                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;color:{_cor_var};'>"
-                f"{'▲ +' if _var_val >= 0 else '▼ '}{fmt_pct(_var_pct)}</div></div></div>"
-                # composição: saiu do bolso + dividendos reinvestidos + ganho de capital
-                "<div style='margin-top:16px;display:flex;height:8px;border-radius:6px;overflow:hidden;"
+                f"margin-bottom:2px;'>lucro total · {abreviar_rs(abs(_lucro_total))}</div>"
+                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;color:{_cor_l};'>"
+                f"{'▲ +' if _lucro_total >= 0 else '▼ '}{fmt_pct(_pct_lucro)}</div></div></div>"
+                # barra da composição
+                "<div style='margin:16px 0 10px;display:flex;height:8px;border-radius:6px;overflow:hidden;"
                 "background:#202024;'>"
-                + _seg(_bolso, "#6b7280") + _seg(_divs_r, "#E5B800") + _seg(_ganho, "#22c55e") +
-                "</div><div style='margin-top:8px;font-size:12px;color:#9a9a9a;line-height:1.9;'>"
-                + _leg("#6b7280", "saiu do bolso", _bolso) + _leg("#E5B800", "dividendos", _divs_r)
-                + _leg("#22c55e" if _ganho >= 0 else "#e05252", "ganho de capital", _ganho) + "</div>",
+                + _seg(_bolso, "#6b7280") + _seg(_divs_r, "#E5B800") + _seg(_ganho, "#22c55e") + "</div>"
+                # composição (cores = barra) e proventos do mês
+                "<table class='pj-tab'>"
+                + _linha(_ponto("#6b7280") + "saiu do bolso", formatar_brl(_bolso))
+                + _linha(_ponto("#E5B800") + "dividendos reinvestidos", formatar_brl(_divs_r))
+                + _linha(_ponto(_cor_g) + "ganho de capital", _neg(_ganho),
+                         f"{'▲ +' if _ganho >= 0 else '▼ '}{fmt_pct(_var_pct)}", _cor_g)
+                + _linha(f"<span style='display:inline-block;width:16px'></span>dividendos de {_label_div_dash}",
+                         formatar_brl(_div_mes_total))
+                + "</table>",
                 unsafe_allow_html=True)
-            with st.container(key="row_dash_lucro"):
-                l1, l2, l3 = st.columns([1, 1, 1])
-                card_html(l1, f"dividendos · {_label_div_dash}", formatar_brl(_div_mes_total))
-                card_html(l2, "dividendos totais", abreviar_rs(_total_divs_geral))
-                card_valorizacao(
-                    l3, _lucro_total,
-                    (_lucro_total / _valor_investido_proprio * 100) if _valor_investido_proprio > 0 else 0,
-                    label="lucro total"
-                )
 
     with _col_aloc:
         st.markdown("<p class='cfg-sec'>alocação por classe</p>", unsafe_allow_html=True)
         with st.container(key="dash_aloc_box"):
-            _classes_alvo = {}
-            for _a, _c in _classe_de.items():
-                if _c == 'FII':
-                    continue
-                _b = _get_banda(_cfg_alvos, _a)
-                if _b and _b.get('alvo'):
-                    _d = _classes_alvo.setdefault(_c, {'alvo': 0.0, 'min': 0.0, 'max': 0.0, 'ok': True})
-                    _d['alvo'] += _b['alvo']
-                    if _b.get('min') is None or _b.get('max') is None:
-                        _d['ok'] = False
-                    else:
-                        _d['min'] += _b['min']; _d['max'] += _b['max']
-            _bf = _get_banda(_cfg_alvos, '__FIIs__')
-            if _bf and _bf.get('alvo'):
-                _classes_alvo['FII'] = {'alvo': _bf['alvo'], 'min': _bf.get('min'), 'max': _bf.get('max'),
-                                        'ok': _bf.get('min') is not None and _bf.get('max') is not None}
-            _linhas_al = []
-            for _, _r in df_resumo_classe.iterrows():
-                _cl = _r['Classe']
-                _pct = _r['Total Atual'] / total_geral * 100 if total_geral > 0 else 0
-                _al = _classes_alvo.get(_cl)
-                _fora = bool(_al and _al['ok'] and not (_al['min'] <= _pct <= _al['max']))
-                _cor = "#E5B800" if _fora else "#42A5F5"
-                _dir = (f"<span style='color:{'#E5B800' if _fora else '#9a9a9a'}'>{fmt_pct(_pct)}"
-                        + (f" · alvo {fmt_pct(_al['alvo'])}" if _al else "") + "</span>"
-                        f"<span style='color:#e8e8e6;margin-left:10px'>{abreviar_rs(_r['Total Atual'])}</span>")
-                _escala = 60.0                                            # barra cheia = 60% da carteira
-                _marca = (f"<div style='position:absolute;left:{min(_al['alvo'] / _escala, 1) * 100:.1f}%;"
-                          f"top:-3px;width:2px;height:14px;background:#e8e8e6;border-radius:1px;'></div>"
-                          if _al else "")
-                _linhas_al.append(
-                    "<div style='margin-top:14px;'>"
-                    "<div style='display:flex;justify-content:space-between;align-items:center;"
-                    f"font-size:13px;margin-bottom:6px;'><span>{_cl}</span><span>{_dir}</span></div>"
-                    "<div style='position:relative;height:8px;background:#202024;border-radius:6px;'>"
-                    f"<div style='width:{min(_pct / _escala, 1) * 100:.1f}%;height:100%;background:{_cor};"
-                    f"border-radius:6px;'></div>{_marca}</div></div>")
-            st.markdown("".join(_linhas_al) +
-                        "<div style='margin-top:12px;font-size:12px;color:#9a9a9a;'>"
-                        "traço branco = alvo · amarelo = fora da banda</div>", unsafe_allow_html=True)
+            total_classe = df_resumo_classe['Total Atual'].sum()
+            labels_donut, hover_donut = [], []
+            for _, row in df_resumo_classe.iterrows():
+                pct    = row['Total Atual'] / total_classe * 100
+                labels_donut.append(f"{row['Classe']}<br>{fmt_pct(pct)}".replace('.', ','))
+                hover_donut.append(f"<b>{row['Classe']}</b><br>{fmt_pct(pct)}<br>{formatar_brl(row['Total Atual'])}")
 
-    # ── linha 1: donut + gráfico mensal lado a lado (empilha no mobile) ───────
+            fig_donut = go.Figure(go.Pie(
+                labels=labels_donut,
+                values=df_resumo_classe['Total Atual'].tolist(),
+                hole=0.75,
+                textinfo='label',
+                textposition='outside',
+                textfont=dict(size=10),
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=hover_donut,
+                marker=dict(colors=px.colors.sequential.Blues_r[:len(df_resumo_classe)]),
+                domain=dict(x=[0.1, 0.9], y=[0.05, 0.95])
+            ))
+            fig_donut.update_layout(
+                dragmode=False,
+                margin=dict(t=30, b=30, l=60, r=60),
+                height=280, showlegend=False,       # mesma altura do gráfico de linha ao lado
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+            )
+            st.plotly_chart(
+                fig_donut, width="stretch",
+                config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+            )
+
+
     st.markdown("<div style='height:0.4rem'></div><p class='cfg-sec'>evolução do patrimônio</p>",
                 unsafe_allow_html=True)
     _ctx_dashboard_chart = st.container(key="dash_evol_box")
