@@ -2606,30 +2606,6 @@ def ler_lancamentos(_versao=0):
         _falha_leitura("lançamentos", _e_leit)
         return pd.DataFrame(columns=HEADERS)
 
-def salvar_lancamento(row: list):
-    def fmt_num(v):
-        return str(v).replace('.', ',')
-    row_fmt = [row[0], row[1], row[2], row[3],
-               fmt_num(row[4]), fmt_num(row[5]), fmt_num(row[6])]
-    svc = get_sheets_service()
-    svc.values().append(
-        spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G",
-        valueInputOption="USER_ENTERED", body={"values": [row_fmt]}
-    ).execute()
-    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
-
-def salvar_lancamentos_lote(rows: list):
-    """salva vários lançamentos de uma vez — rows: lista de [data, tipo, ativo, classe, quantidade, preco_unitario, total]"""
-    def fmt_num(v):
-        return str(v).replace('.', ',')
-    rows_fmt = [[r[0], r[1], r[2], r[3], fmt_num(r[4]), fmt_num(r[5]), fmt_num(r[6])] for r in rows]
-    svc = get_sheets_service()
-    svc.values().append(
-        spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G",
-        valueInputOption="USER_ENTERED", body={"values": rows_fmt}
-    ).execute()
-    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
-
 def _get_sheet_id(svc, nome_aba):
     """retorna o sheetId numérico real da aba pelo nome"""
     meta = svc.get(spreadsheetId=SHEET_ID, fields="sheets.properties").execute()
@@ -2638,17 +2614,6 @@ def _get_sheet_id(svc, nome_aba):
         if p.get("title") == nome_aba:
             return p["sheetId"]
     raise ValueError(f"aba '{nome_aba}' não encontrada no spreadsheet")
-
-def deletar_lancamento(idx_linha_sheet: int):
-    svc = get_sheets_service()
-    sheet_id_real = _get_sheet_id(svc, SHEET_TAB)
-    start = idx_linha_sheet - 1
-    body = {"requests": [{"deleteDimension": {"range": {
-        "sheetId": sheet_id_real, "dimension": "ROWS",
-        "startIndex": start, "endIndex": start + 1
-    }}}]}
-    svc.batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
-    st.session_state["_lanc_versao"] = st.session_state.get("_lanc_versao", 0) + 1
 
 def garantir_cabecalho():
     try:
@@ -2837,7 +2802,6 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
 def _pg_mes(): pass
 def _pg_dashboard(): pass
 def _pg_detalhe(): pass
-def _pg_lancamentos(): pass
 def _pg_simulador(): pass
 def _pg_pjpf(): pass
 def _pg_configuracoes(): pass
@@ -2845,7 +2809,6 @@ _PAGINAS = [
     st.Page(_pg_mes, title="mês", url_path="mes", default=True),
     st.Page(_pg_dashboard, title="dashboard", url_path="dashboard"),
     st.Page(_pg_detalhe, title="detalhe", url_path="detalhe"),
-    st.Page(_pg_lancamentos, title="lançamentos", url_path="lancamentos"),
     st.Page(_pg_simulador, title="simulador", url_path="simulador"),
     st.Page(_pg_pjpf, title="fluxo", url_path="cashflow"),
     st.Page(_pg_configuracoes, title="configurações", url_path="configuracoes"),
@@ -2854,9 +2817,9 @@ _PAGINAS = [
 _nav = st.navigation(_PAGINAS, position="hidden")
 _nav.run()
 _pagina = _nav.title
-_PG = dict(zip(["mes", "dashboard", "detalhe", "lancamentos", "simulador", "pjpf", "configuracoes"], _PAGINAS))
+_PG = dict(zip(["mes", "dashboard", "detalhe", "simulador", "pjpf", "configuracoes"], _PAGINAS))
 _url_atual = next((k for k, p in _PG.items() if p.title == _pagina), "mes")
-_CARTEIRA = ["dashboard", "detalhe", "lancamentos", "simulador"]
+_CARTEIRA = ["dashboard", "detalhe", "simulador"]
 _MES_GRUPO = ["mes", "pjpf"]
 _ROT_SUB = {"mes": "resumo", "pjpf": "fluxo"}
 _grupo = ("carteira" if _url_atual in _CARTEIRA else "mes" if _url_atual in _MES_GRUPO else _url_atual)
@@ -2915,6 +2878,17 @@ if st.session_state.get("_janela_sessao") != _janela_sessao:
         st.session_state.pop(_k, None)
     st.session_state["_janela_sessao"] = _janela_sessao
 prefetch_planilha()
+
+# compras, vendas e ativos novos são lançados no app de despesas (aba investimentos):
+# relê lançamentos e classificação da planilha a cada 2 minutos
+if _time.time() - st.session_state.get("_lanc_ts", 0) > 120:
+    for _k in ["_df_lanc_raw_cached", "_cache_versao", "_ativos_info", "_sheet_abas"]:
+        st.session_state.pop(_k, None)
+    st.session_state["_lanc_ts"] = _time.time()
+    try:
+        _abas_existentes()            # lista de abas atualizada (ativos_info pode ter sido criada lá)
+    except Exception:
+        pass
 
 # a página PJ/PF não usa a carteira: pula a leitura de lançamentos, preços etc.
 if _pagina != "fluxo":
@@ -2996,14 +2970,6 @@ if _pagina != "fluxo":
     df_resumo_classe = df.groupby('Classe')['Total Atual'].sum().reset_index()
     df_resumo_classe = df_resumo_classe.sort_values('Total Atual', ascending=False).reset_index(drop=True)
     df_ativo = df.sort_values(by='Total Atual', ascending=False)
-
-    # MINHA_CARTEIRA para formulário de lançamento
-    MINHA_CARTEIRA = {
-        'ETF': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='ETF'].iterrows()},
-        'FII': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='FII'].iterrows()},
-        'Cripto': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='Cripto'].iterrows()},
-        'Tesouro Direto': {r['ativo']: r['qtd_atual'] for _, r in _posicao[_posicao['classe']=='Tesouro Direto'].iterrows()},
-    }
 
     # popular preços mensais — session_state cache para não rodar a cada render
     if "_df_pm" not in st.session_state:
@@ -3881,217 +3847,6 @@ if _pagina == "detalhe":
 
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
-if _pagina == "lançamentos":
-
-    _opcoes = []
-    for t in sorted(MINHA_CARTEIRA.get('ETF', {}).keys()):
-        _opcoes.append((t, 'ETF'))
-    for t in sorted(MINHA_CARTEIRA.get('FII', {}).keys()):
-        _opcoes.append((t, 'FII'))
-    _opcoes.append(('BTC', 'Cripto'))
-    _opcoes.append(('Renda+ 2050', 'Tesouro Direto'))
-    _opcoes.append(('__novo__', None))
-    _nomes = ['novo ativo…' if t == '__novo__' else t for t, _ in _opcoes]
-
-    @st.fragment
-    def aba_lancamentos_fragment():
-        from datetime import date as _date
-
-        # ── lê dados frescos sempre que o fragment reroda ─────────────────────
-        _versao = st.session_state.get("_lanc_versao", 0)
-        df_lanc = ler_lancamentos(_versao=_versao)
-        if not df_lanc.empty:
-            df_lanc["data_dt"] = pd.to_datetime(df_lanc["data"], format="%d/%m/%Y", errors="coerce")
-            df_lanc["sinal"]   = df_lanc["tipo"].map({"compra": 1, "venda": -1}).fillna(0).astype(float)
-            df_lanc["valor"]   = df_lanc["total"] * df_lanc["sinal"]
-
-        meses_pt = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
-                    7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
-        hoje      = pd.Timestamp.today()
-        mes_atual = hoje.month
-        ano_atual = hoje.year
-
-        # calcular métricas
-        if not df_lanc.empty:
-            df_mes = df_lanc[
-                (df_lanc["data_dt"].dt.month == mes_atual) &
-                (df_lanc["data_dt"].dt.year  == ano_atual)
-            ].copy()
-            df_mes["sinal_m"] = df_mes["tipo"].map({"compra": 1, "venda": -1}).fillna(0).astype(float)
-            aporte_mes = (df_mes["total"] * df_mes["sinal_m"]).sum()
-
-            _meses = []
-            for i in range(1, 7):
-                ref = hoje - pd.DateOffset(months=i)
-                df_ref = df_lanc[
-                    (df_lanc["data_dt"].dt.month == ref.month) &
-                    (df_lanc["data_dt"].dt.year  == ref.year)
-                ].copy()
-                df_ref["sinal_r"] = df_ref["tipo"].map({"compra": 1, "venda": -1}).fillna(0).astype(float)
-                _meses.append((df_ref["total"] * df_ref["sinal_r"]).sum())
-            media_6m = sum(_meses) / 6
-        else:
-            aporte_mes, media_6m = 0.0, 0.0
-
-        # ── novo aporte: formulário numa janela por cima da página ───────────
-        @st.dialog("novo aporte")
-        def _dialogo_aporte():
-            c1, c2, c3 = st.columns([1.1, 0.7, 1.5])
-            with c1:
-                f_data = st.date_input("data", value=_date.today(),
-                                       format="DD/MM/YYYY", max_value=_date.today())
-            with c2:
-                f_tipo = st.selectbox("tipo", ["compra", "venda"], filter_mode=None)
-            with c3:
-                idx = st.selectbox("ativo", range(len(_nomes)),
-                                   format_func=lambda i: _nomes[i], filter_mode=None)
-                f_ativo  = _opcoes[idx][0]
-                f_classe = _opcoes[idx][1]
-
-            # ── ativo novo: ticker + classe + classificação ────────────────
-            _novo = f_ativo == '__novo__'
-            n_tipo = n_idx = n_pais = None
-            if _novo:
-                n1, n2, n3 = st.columns([1.1, 0.8, 1.2])
-                with n1:
-                    f_ativo = st.text_input("ticker", placeholder="ticker (ex.: HGLG11)",
-                                            ).strip().upper()
-                with n2:
-                    f_classe = st.selectbox("classe", ["FII", "ETF"], filter_mode=None)
-                with n3:
-                    if f_classe == "FII":
-                        n_tipo = st.selectbox("tipo FII", ["tijolo", "papel"], filter_mode=None)
-                    else:
-                        n_pais = st.selectbox("país", PAISES_ETF, filter_mode=None)
-                if f_classe == "FII" and n_tipo == "papel":
-                    n_idx = st.selectbox("indexador", ["CDI", "IPCA"], filter_mode=None)
-            c4, c5 = st.columns(2)
-            with c4:
-                f_qtd_str = st.text_input("quantidade", placeholder="ex.: 10")
-            with c5:
-                f_preco_str = st.text_input("preço unitário", placeholder="ex.: 98,50")
-            try:
-                f_qtd   = float(f_qtd_str.replace(',','.')) if f_qtd_str else 0.0
-                f_preco = float(f_preco_str.replace(',','.')) if f_preco_str else 0.0
-            except:
-                f_qtd, f_preco = 0.0, 0.0
-            f_total = f_qtd * f_preco
-            st.caption(f"total: {formatar_brl(f_total)}")
-
-            ca, cb = st.columns([1, 5])
-            with ca:
-                if st.button("salvar", type="primary", width="stretch"):
-                    _erro_novo = None
-                    if _novo:
-                        import re as _re
-                        if not _re.fullmatch(r"[A-Z]{4}\d{1,2}", f_ativo or ""):
-                            _erro_novo = "ticker inválido — use o formato da B3 (ex.: HGLG11)."
-                        elif f_ativo in _classe_de:
-                            _erro_novo = f"{f_ativo} já está na carteira — selecione na lista."
-                        elif f_tipo != "compra":
-                            _erro_novo = "o primeiro lançamento de um ativo novo precisa ser compra."
-                        elif validar_ticker_b3(f_ativo) <= 0:
-                            _erro_novo = f"não encontrei cotação para {f_ativo} na B3."
-                    if _erro_novo:
-                        st.warning(_erro_novo)
-                    elif f_qtd > 0 and f_preco > 0:
-                        if _novo:
-                            salvar_ativo_info(f_ativo, f_classe, tipo=n_tipo,
-                                              indexador=n_idx, pais=n_pais)
-                        salvar_lancamento([
-                            f_data.strftime("%d/%m/%Y"),
-                            f_tipo, f_ativo, f_classe,
-                            float(f_qtd), float(f_preco), float(round(f_total, 2))
-                        ])
-                        st.rerun(scope="app")
-                    else:
-                        st.warning("preencha quantidade e preço.")
-            with cb:
-                if st.button("✕ cancelar"):
-                    st.rerun(scope="app")
-
-
-        # ── cabeçalho: métricas + botão ──────────────────────────────────────
-        c1, c2, c3 = st.columns([1.4, 1, 0.7])
-        c1.metric(f"total aportado em {meses_pt[mes_atual]}", formatar_brl(aporte_mes))
-        c2.metric("média mensal (6m)", formatar_brl(media_6m))
-        with c3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("+ novo aporte", type="primary", width="stretch"):
-                _dialogo_aporte()
-
-        st.markdown("---")
-
-        if df_lanc.empty:
-            st.info("nenhum lançamento registrado ainda.")
-            return
-
-        # ── histórico ────────────────────────────────────────────────────────
-        # guardar índice original (posição no Sheets = índice + 2)
-        df_hist = df_lanc.copy().reset_index(drop=True)
-        df_hist["_sheet_row"] = df_hist.index + 2  # linha real no Sheets (1-based, +1 header)
-        df_hist = df_hist.sort_values("data_dt", ascending=False).reset_index(drop=True)
-        n = len(df_hist)
-        df_hist.insert(0, "#", range(n, 0, -1))
-
-        df_hist_fmt = df_hist.copy()
-        df_hist_fmt["preco_unitario"] = df_hist_fmt["preco_unitario"].apply(
-            lambda x: formatar_brl(x) if pd.notna(x) else "")
-        df_hist_fmt["total"] = df_hist_fmt["total"].apply(
-            lambda x: formatar_brl(x) if pd.notna(x) else "")
-        df_hist_fmt["quantidade"] = df_hist_fmt["quantidade"].apply(
-            lambda x: f"{x:.8f}".rstrip('0').rstrip('.').replace('.', ',')
-            if pd.notna(x) and x < 1 else (f"{x:g}".replace('.', ',') if pd.notna(x) else ""))
-        df_hist_fmt["valor"] = df_hist_fmt["valor"].apply(
-            lambda x: formatar_brl(x) if pd.notna(x) else "")
-
-        with st.expander("histórico", expanded=False):
-            cols_show = ["#", "data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
-            cfg_hist  = {c: st.column_config.TextColumn(c, alignment="center") for c in cols_show}
-            st.dataframe(df_hist_fmt[cols_show], width="stretch",
-                         hide_index=True, column_config=cfg_hist)
-
-            st.markdown("---")
-
-            # ── excluir lançamento (aqui, junto com o histórico que ele referencia) ──
-            st.caption("excluir lançamento")
-            idx_del = st.number_input(
-                "número # do lançamento (conforme tabela acima)",
-                min_value=1, max_value=n, step=1, value=1,
-                key="idx_del_input"
-            )
-            sel = df_hist[df_hist["#"] == int(idx_del)]
-            if not sel.empty:
-                row_prev = sel.iloc[0]
-                st.caption(f"selecionado: {row_prev['data']} · {row_prev['ativo']} · {row_prev['tipo']} · qtd {row_prev['quantidade']}")
-                if st.button("excluir", type="secondary"):
-                    try:
-                        # buscar linha real no Sheets pelo conteúdo (data + ativo + tipo)
-                        svc_del = get_sheets_service()
-                        res_del = svc_del.values().get(
-                            spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A:G"
-                        ).execute()
-                        rows_del = res_del.get("values", [])
-                        linha_real = None
-                        for i, r in enumerate(rows_del):
-                            if (len(r) >= 4 and
-                                r[0] == row_prev['data'] and
-                                r[2] == row_prev['ativo'] and
-                                r[1] == row_prev['tipo']):
-                                linha_real = i  # 0-based para deleteDimension
-                                break
-                        if linha_real is not None:
-                            deletar_lancamento(linha_real + 1)  # +1 para converter para 1-based
-                            st.success("excluído!")
-                        else:
-                            st.error("linha não encontrada no Sheets — verifique os dados.")
-                    except Exception as e:
-                        st.error(f"erro: {e}")
-                    st.rerun(scope="fragment")
-
-    aba_lancamentos_fragment()
-
-
 # ── Aba simular novos aportes ─────────────────────────────────────────────────
 if _pagina == "simulador":
     # ── inputs ────────────────────────────────────────────────────────────────
