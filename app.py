@@ -526,10 +526,13 @@ def obter_precos_b3(tickers_lista):
     st.session_state['_precos_momento'] = momento
     return dict(precos)
 
-# FIIs que mudaram de ticker na B3 — lançamentos antigos guardam o nome antigo,
-# mas o yfinance só reconhece o ticker atual. Usado por toda função que busca
-# dividendos via yfinance a partir do ticker salvo em lançamentos.
-ALIAS_FII_TICKERS = {'GALG11': 'GARE11'}
+# ativos que mudaram de ticker na B3: os lançamentos antigos guardam o nome antigo, mas o
+# yfinance só reconhece o atual. O de-para fica na aba ativos_info (coluna ticker_atual).
+def aliases_b3():
+    """{ticker antigo: ticker atual}, lido da aba ativos_info"""
+    if "_ativos_info" not in st.session_state:
+        st.session_state["_ativos_info"] = ler_ativos_info()
+    return {a: v["ticker_atual"] for a, v in st.session_state["_ativos_info"].items() if v.get("ticker_atual")}
 
 @st.cache_data(ttl=12 * 3600)      # mês fechado: os proventos não mudam; a chave já inclui o mês
 def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
@@ -555,7 +558,7 @@ def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
     fiis = list(df_lanc[df_lanc['Classe'].str.upper() == 'FII']['Ativo'].unique())
 
     for fii in fiis:
-        fii_norm = ALIAS_FII_TICKERS.get(fii, fii)
+        fii_norm = aliases_b3().get(fii, fii)
         try:
             tk = yf.Ticker(f"{fii_norm}.SA")
             divs = tk.dividends
@@ -673,7 +676,7 @@ def calcular_dividendos_historicos(df_lanc_json):
 
     for ativo in fiis:
         try:
-            ativo_norm = ALIAS_FII_TICKERS.get(ativo, ativo)
+            ativo_norm = aliases_b3().get(ativo, ativo)
             tk   = yf.Ticker(f"{ativo_norm}.SA")
             divs = tk.dividends
             if divs is None or divs.empty:
@@ -730,7 +733,7 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
 
     for t in tickers_tupla:
         try:
-            t_norm = ALIAS_FII_TICKERS.get(t, t)
+            t_norm = aliases_b3().get(t, t)
             divs = yf.Ticker(f"{t_norm}.SA").dividends
             if divs is None or divs.empty:
                 resultado[t] = 0.0
@@ -740,7 +743,7 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
             _w = divs[divs.index >= janela_ini]
             _w = _w[_w > 0]
             _soma = float(_w.sum())
-            # o yfinance às vezes "pula" meses de FIIs da B3 (ex.: GARE11 vinha com 10 dos 12
+            # o yfinance às vezes "pula" meses de FIIs da B3 (um deles vinha com 10 dos 12
             # pagamentos). Se o padrão é mensal (≥6 pagamentos, intervalo mediano ~1 mês) e
             # faltam meses na janela, anualiza pela média dos pagamentos encontrados.
             if 6 <= len(_w) < 12:
@@ -1189,6 +1192,30 @@ def obter_variacao_90d(tickers_tupla):
             continue
     return var_90d
 
+def _dd_vol(serie):
+    """(distância da máxima de 12 meses, volatilidade anual) de uma série diária de preços, ou None"""
+    if serie is None or len(serie) == 0:
+        return None
+    s = pd.Series(serie).dropna().astype(float)
+    s = s[s.index >= s.index[-1] - pd.DateOffset(years=1)]
+    if len(s) < 60 or s.max() <= 0:
+        return None
+    ret = s.pct_change().dropna()
+    return max(1 - float(s.iloc[-1]) / float(s.max()), 0.0), float(ret.std() * len(ret) ** 0.5)
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def obter_dd_vol_b3(tickers_tupla):
+    """{ticker: (distância da máxima 12m, volatilidade)} para ativos da B3 — um download por ticker, cache de 6h"""
+    out = {}
+    for t in tickers_tupla:
+        try:
+            r = _dd_vol(_fechamentos_historicos(f"{aliases_b3().get(t, t)}.SA"))
+            if r:
+                out[t] = r
+        except Exception:
+            continue
+    return out
+
 def render_variacoes(key, variacoes, nota=None):
     """grade 3×2 de variação por janela (mesmo visual da aba cripto)"""
     with st.container(key=key):
@@ -1404,7 +1431,7 @@ def migrar_precos_mensais_sem_ajuste(df_pm):
         return df_pm
     import calendar
     nao_b3 = {'BTC', 'Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro SELIC 2031', 'Tesouro Prefixado 2032'}
-    alias  = {'GALG11': 'GARE11'}
+    alias  = aliases_b3()
     df = df_pm.copy()
     for i, r in df.iterrows():
         a = str(r['ativo']).strip()
@@ -1490,7 +1517,7 @@ SHEET_ID   = st.secrets["google_sheets"]["spreadsheet_id"]
 # a sua parte uma única vez — depois de salvar, a releitura vai direto à API (dado fresco)
 def _abas_lote():
     return [f"{SHEET_TAB}!A:G", f"{SHEET_CFG}!A:D", f"{SHEET_PM_TAB}!A:C", f"{SHEET_METAS_TAB}!A:C",
-            f"{SHEET_ATIVOS_INFO_TAB}!A:E", f"{SHEET_RENDA_TAB}!A:C", f"{SHEET_RENDA_MERCADO_TAB}!A:C",
+            f"{SHEET_ATIVOS_INFO_TAB}!A:F", f"{SHEET_RENDA_TAB}!A:C", f"{SHEET_RENDA_MERCADO_TAB}!A:C",
             f"{SHEET_DIV_MENSAL_TAB}!A:C", f"{SHEET_PJ_PAR_TAB}!A:B", f"{SHEET_PJ_FAT_TAB}!A:C",
             f"{SHEET_PJ_HIST_TAB}!A:C", f"{SHEET_PF_CARTAO_TAB}!A:B", f"{SHEET_PF_REEMB_TAB}!A:B",
             f"{SHEET_PJ_NOTAS_TAB}!A:E"]
@@ -1541,7 +1568,11 @@ SHEET_RENDA_TAB = "renda_mais_taxas"
 # metas de longo prazo (chave → valor), editáveis em configurações
 SHEET_METAS_TAB = "metas"
 METAS_HEADERS   = ["chave", "valor", "descricao"]
-METAS_PADRAO    = {"renda_2050_titulos_dez2045": (450.0, "títulos de Renda+ 2050 a acumular até dez/2045")}
+METAS_PADRAO    = {"renda_2050_titulos_dez2045": (450.0, "títulos de Renda+ 2050 a acumular até dez/2045"),
+                   "sim_peso_desvio": (40.0, "simulador: peso do desvio do alvo (%)"),
+                   "sim_peso_preco":  (45.0, "simulador: peso do preço baixo — distância da máxima de 12m ÷ volatilidade (%)"),
+                   "sim_peso_pm":     (15.0, "simulador: peso do desconto sobre o preço médio (%)")}
+SIM_TETO_APORTE = 0.60      # nenhum ativo leva mais que isso do aporte (exceto para voltar ao mínimo)
 
 def _num_br(s):
     """'450' · '450,5' · '1.200' · '1.200,50' · 450.0 → float"""
@@ -2103,7 +2134,7 @@ def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.
     lucros = faturamento − previdência − DAS − contador − taxa prefeitura (fev) − pró-labore bruto
     receita PF = pró-labore líquido (bruto − INSS) + lucros distribuídos + reembolsos
     (reembolsos = base mensal + extras do mês; entram direto na PF, fora da PJ)
-    saldo no nubank = receita PF − FIES (débito no BB)
+    saldo PF = receita PF − FIES (débito em conta)
     """
     mes    = int(str(ano_mes)[5:7])
     prev   = par["faturamento_minimo"] * par["prev_pct"] / 100
@@ -2119,9 +2150,9 @@ def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.
     return {
         "faturamento": fat, "prev": prev, "das": das, "contador": par["contador"], "taxa": taxa,
         "pro_labore": par["pro_labore"], "inss": inss, "pl_liq": pl_liq,
-        "lucros": lucros, "fies": fies, "lucros_nubank": lucros - fies,
+        "lucros": lucros, "fies": fies, "lucros_liq": lucros - fies,
         "reembolso": reemb,
-        "receita_pf": pl_liq + lucros + reemb, "nubank": pl_liq + lucros + reemb - fies,
+        "receita_pf": pl_liq + lucros + reemb, "saldo_pf": pl_liq + lucros + reemb - fies,
         "cartao": cartao, "pix": pix, "pix_in": pix_in,
         "sobra": pl_liq + lucros + reemb - fies - cartao - pix + pix_in,
     }
@@ -2147,73 +2178,29 @@ def salvar_meta(chave, valor, descricao=""):
 
 # classificação dos ativos (tipo/indexador dos FIIs, país dos ETFs) — editável pelo app
 SHEET_ATIVOS_INFO_TAB = "ativos_info"
-ATIVOS_INFO_HEADERS   = ["ativo", "classe", "tipo", "indexador", "pais"]
+ATIVOS_INFO_HEADERS   = ["ativo", "classe", "tipo", "indexador", "pais", "ticker_atual"]
 
-# valores de partida (os ativos que já existiam antes da aba); a aba prevalece sobre eles
-FII_INFO_PADRAO = {
-    'TRXF11': {'tipo': 'tijolo',  'indexador': None},
-    'XPML11': {'tipo': 'tijolo',  'indexador': None},
-    'XPLG11': {'tipo': 'tijolo',  'indexador': None},
-    'KNRI11': {'tipo': 'tijolo',  'indexador': None},
-    'BTLG11': {'tipo': 'tijolo',  'indexador': None},
-    'GARE11': {'tipo': 'tijolo',  'indexador': None},
-    'RZTR11': {'tipo': 'tijolo',  'indexador': None},
-    'BTCI11': {'tipo': 'papel',   'indexador': 'IPCA'},
-    'VGIR11': {'tipo': 'papel',   'indexador': 'CDI'},
-    'MCCI11': {'tipo': 'papel',   'indexador': 'IPCA'},
-    'KNCR11': {'tipo': 'papel',   'indexador': 'CDI'},
-}
-GEO_ETF_PADRAO = {'IVVB11': 'EUA', 'DIVO11': 'Brasil', 'PKIN11': 'China', 'LFTB11': 'Brasil'}
 PAISES_ETF     = ['Brasil', 'EUA', 'China', 'Europa', 'Emergentes', 'Global']
 
 def ler_ativos_info():
-    """lê a aba ativos_info → dict {ativo: {classe, tipo, indexador, pais}} (vazio se não existir)"""
+    """lê a aba ativos_info → {ativo: {classe, tipo, indexador, pais, ticker_atual}} (vazio se não existir).
+    é a única fonte de classificação: nenhum ticker fica no código. se um ativo aparecer em duas
+    linhas, vale a primeira."""
     try:
-        rows = _ler_valores(f"{SHEET_ATIVOS_INFO_TAB}!A:E").get("values", [])
+        rows = _ler_valores(f"{SHEET_ATIVOS_INFO_TAB}!A:F").get("values", [])
     except Exception as _e_leit:
         _falha_leitura("ativos_info", _e_leit)
         return {}
     info = {}
     for r in rows[1:]:
-        r = (r + [''] * 5)[:5]
+        r = (r + [''] * 6)[:6]
         a = r[0].strip().upper()
-        if a:
-            info[a] = {'classe': r[1].strip(), 'tipo': r[2].strip() or None,
-                       'indexador': r[3].strip() or None, 'pais': r[4].strip() or None}
+        if a and a not in info:
+            info[a] = {'classe': r[1].strip(), 'tipo': r[2].strip().lower() or None,
+                       'indexador': r[3].strip() or None, 'pais': r[4].strip() or None,
+                       'ticker_atual': r[5].strip().upper() or None}
     return info
 
-def salvar_ativo_info(ativo, classe, tipo=None, indexador=None, pais=None):
-    """grava/atualiza a classificação de um ativo na aba ativos_info (cria a aba se precisar)"""
-    svc = get_sheets_service()
-    _garantir_aba_existe(svc, SHEET_ATIVOS_INFO_TAB, ATIVOS_INFO_HEADERS)
-    rows = svc.values().get(spreadsheetId=SHEET_ID,
-                            range=f"{SHEET_ATIVOS_INFO_TAB}!A:E").execute().get("values", [])
-    nova = [ativo.upper(), classe, tipo or '', indexador or '', pais or '']
-    for i, r in enumerate(rows[1:], start=2):
-        if r and r[0].strip().upper() == ativo.upper():
-            svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_ATIVOS_INFO_TAB}!A{i}:E{i}",
-                                valueInputOption="RAW", body={"values": [nova]}).execute()
-            break
-    else:
-        svc.values().append(spreadsheetId=SHEET_ID, range=f"{SHEET_ATIVOS_INFO_TAB}!A:E",
-                            valueInputOption="RAW", body={"values": [nova]}).execute()
-    st.session_state.pop("_ativos_info", None)
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def validar_ticker_b3(ticker):
-    """último fechamento do ticker na B3 (0 se não existir) — valida ativo novo antes de salvar"""
-    try:
-        h = yf.download(f"{ticker.upper()}.SA", period="5d", progress=False,
-                        auto_adjust=True, threads=False)
-        if h is None or h.empty:
-            return 0.0
-        c = h['Close']
-        if isinstance(c, pd.DataFrame):
-            c = c.iloc[:, 0]
-        c = c.dropna()
-        return float(c.iloc[-1]) if not c.empty else 0.0
-    except Exception:
-        return 0.0
 RENDA_HEADERS   = ["data", "valor_investido", "taxa_contratada_pct"]
 
 @st.cache_data(ttl=3600)
@@ -2656,7 +2643,7 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
         m += 1
         if m > 12: m, a = 1, a + 1
 
-    ALIAS_B3 = {'GALG11': 'GARE11'}
+    ALIAS_B3 = aliases_b3()
     TESOURO  = ['Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro SELIC 2031', 'Tesouro Prefixado 2032']
     try:
         _hist_renda_pm, _ = obter_historico_taxa_renda_mais()
@@ -3004,16 +2991,20 @@ if _pagina != "fluxo":
         st.session_state["_ativos_info"] = ler_ativos_info()
     _ativos_info = st.session_state["_ativos_info"]
 
-    FII_INFO = {a: dict(v) for a, v in FII_INFO_PADRAO.items()}
-    GEO_ETF  = dict(GEO_ETF_PADRAO)
+    FII_INFO, GEO_ETF, ETF_RF = {}, {}, {}
     for _a, _v in _ativos_info.items():
         if _v.get('classe') == 'FII':
             FII_INFO[_a] = {'tipo': _v.get('tipo') or 'tijolo', 'indexador': _v.get('indexador')}
-        elif _v.get('classe') == 'ETF' and _v.get('pais'):
-            GEO_ETF[_a] = _v['pais']
+        elif _v.get('classe') == 'ETF':
+            if _v.get('pais'):
+                GEO_ETF[_a] = _v['pais']
+            if _v.get('tipo') == 'renda fixa':          # ETF de renda fixa: conta como RF
+                ETF_RF[_a] = _v.get('indexador')
 
     # classe de cada ativo em carteira (base das listas do simulador e das configurações)
     _classe_de = dict(zip(_posicao['ativo'], _posicao['classe'])) if not _posicao.empty else {}
+    # FIIs e ETFs em carteira ainda sem linha na aba ativos_info (ficam sem tipo/país nos resumos)
+    _sem_classif = sorted(a for a, c in _classe_de.items() if c in ('FII', 'ETF') and a not in _ativos_info)
 
     # dividendos do mês de referência — lidos do histórico mensal persistido (calculado e
     # gravado uma vez por mês fechado; não recalcula via yfinance a cada carregamento)
@@ -3256,6 +3247,9 @@ if _pagina == "dashboard":
 
 
 if _pagina == "detalhe":
+    if _sem_classif:
+        st.warning("sem classificação (tipo/país): " + ", ".join(_sem_classif) +
+                   " — cadastre em + novo ativo, no app de despesas.")
     # resumo primeiro; as classes em ordem decrescente de montante na carteira
     _tot_cls = df.groupby('Classe')['Total Atual'].sum().to_dict() if not df.empty else {}
     _ordem_cls = sorted([("FIIs", "FII"), ("ETFs", "ETF"), ("cripto", "Cripto"), ("tesouro", "Tesouro Direto")],
@@ -3772,22 +3766,23 @@ if _pagina == "detalhe":
         st.markdown("---")
 
         # ── linha 2: renda fixa/variável + CDI/IPCA, tudo junto ────────────────
-        # LFTB11 é ETF de renda fixa (replica Tesouro Selic) — vai para RF
-        _etfs_rf = ['LFTB11']
+        # ETFs de renda fixa (tipo "renda fixa" na aba ativos_info) vão para RF
+        _etfs_rf = list(ETF_RF)
         total_rf = df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum() + \
                    df[df['Ativo'].isin(_etfs_rf)]['Total Atual'].sum()
         total_rv = df[(df['Classe'].isin(['ETF','FII','Cripto'])) & (~df['Ativo'].isin(_etfs_rf))]['Total Atual'].sum()
         pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
         pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
 
-        # CDI = LFTB11 + FIIs papel CDI · IPCA = Renda+ 2050 + FIIs papel IPCA
+        # CDI = ETFs de RF em CDI + FIIs papel CDI · IPCA = Renda+ 2050 + ETFs de RF em IPCA + FIIs papel IPCA
         _df_fii_idx = df[df['Classe'] == 'FII'].copy()
         _df_fii_idx['indexador'] = _df_fii_idx['Ativo'].map(
             lambda t: FII_INFO.get(t, {}).get('indexador'))
 
-        total_cdi  = df[df['Ativo'] == 'LFTB11']['Total Atual'].sum() + \
+        total_cdi  = df[df['Ativo'].isin([a for a, i in ETF_RF.items() if i != 'IPCA'])]['Total Atual'].sum() + \
                      _df_fii_idx[_df_fii_idx['indexador'] == 'CDI']['Total Atual'].sum()
         total_ipca = df[df['Ativo'] == 'Renda+ 2050']['Total Atual'].sum() + \
+                     df[df['Ativo'].isin([a for a, i in ETF_RF.items() if i == 'IPCA'])]['Total Atual'].sum() + \
                      _df_fii_idx[_df_fii_idx['indexador'] == 'IPCA']['Total Atual'].sum()
         pct_cdi    = total_cdi  / total_geral * 100 if total_geral > 0 else 0
         pct_ipca   = total_ipca / total_geral * 100 if total_geral > 0 else 0
@@ -3853,7 +3848,7 @@ if _pagina == "simulador":
     col_v1, _ = st.columns([1, 2])
     if "_aporte_do_mes" in st.session_state:          # veio de "distribuir" na página mês
         st.session_state["sim_aporte"] = st.session_state.pop("_aporte_do_mes")
-    st.session_state.setdefault("sim_aporte", "1800,00")
+    st.session_state.setdefault("sim_aporte", "")
     _val_aporte_str = col_v1.text_input("$ disponível", placeholder="ex: 1800,00", key="sim_aporte")
 
     def _pv(s):
@@ -3923,112 +3918,123 @@ if _pagina == "simulador":
             })
 
         df_sim = pd.DataFrame(linhas_sim)
-        # score combinado: desvio + bônus por desconto vs PM
-        _fator_pm_val = float(st.session_state.get("cfg_fator_pm", 0.3))
-        def _score(row):
-            base = row['prioridade']  # -desvio_rs (positivo = abaixo do alvo)
-            if base <= 0:
-                return base  # acima do alvo — não altera
-            pm_row = row.get('pm', 0)
-            preco_row_val = _precos_sim.get(row['ativo'], pm_row) if '_precos_sim' in dir() else pm_row
-            desconto = (pm_row - preco_row_val) / pm_row if pm_row > 0 else 0
-            bonus = base * desconto * _fator_pm_val
-            return base + bonus
-        # _precos_sim ainda não existe aqui — será usado na parte de sugestão
-        # ordenar por desvio apenas; ajuste de score acontece dentro do bloco com preços
         df_sim = df_sim.sort_values('prioridade', ascending=False)
 
-        # ── alocação sugerida com restrição de inteiro de cotas ─────────────
+        # ── alocação sugerida ───────────────────────────────────────────────
+        # 1) quem está abaixo do mínimo recebe primeiro, até voltar ao mínimo
+        # 2) o resto é dividido pela nota entre quem está abaixo do alvo:
+        #    desvio relativo ao alvo · preço baixo (distância da máxima de 12m ÷ volatilidade) · desconto vs PM
+        #    sem passar do alvo e com teto de SIM_TETO_APORTE do aporte por ativo
         _FRACIONADOS = {'Renda+ 2050', 'BTC'}  # permitem compra fracionada
-        _com_desvio_neg = df_sim[df_sim['desvio_rs'] < 0].copy()
+        _precos_sim = {row['Ativo']: row['preco_unit'] for _, row in df.iterrows()}
+        if "_metas" not in st.session_state:
+            st.session_state["_metas"] = ler_metas()
+        _mt = st.session_state["_metas"]
+        _w_desv, _w_preco, _w_pm = (max(float(_mt.get(k, d)), 0.0) for k, d in
+                                    [("sim_peso_desvio", 40), ("sim_peso_preco", 45), ("sim_peso_pm", 15)])
+        _w_tot = (_w_desv + _w_preco + _w_pm) or 1.0
 
-        if _com_desvio_neg.empty:
+        # preço baixo: todos os ativos (B3, BTC e Renda+)
+        _ddv = dict(obter_dd_vol_b3(tuple(sorted(a for a in df_sim['ativo'] if a not in _FRACIONADOS))))
+        try:
+            _h_btc, _ = obter_historico_btc_brl()
+            _r = _dd_vol(pd.Series(_h_btc.values, index=pd.to_datetime(_h_btc.index).tz_localize(None))
+                         if getattr(_h_btc.index, "tz", None) is not None else _h_btc)
+            if _r: _ddv['BTC'] = _r
+        except Exception:
+            pass
+        try:
+            _h_r, _ = obter_historico_taxa_renda_mais()
+            _h_r = _h_r.dropna(subset=['pu'])
+            _r = _dd_vol(pd.Series(_h_r['pu'].values, index=pd.to_datetime(_h_r['data_dt'])).sort_index())
+            if _r: _ddv['Renda+ 2050'] = _r
+        except Exception:
+            pass
+
+        _c = df_sim.copy()
+        _c['preco']   = _c['ativo'].map(lambda a: float(_precos_sim.get(a, 0) or 0))
+        _c['alvo_rs'] = _c['alvo_pct'] / 100 * _total_futuro
+        _c['min_rs']  = _c['ativo'].map(_min_sim) / 100 * _total_futuro
+        _c['dd']      = _c['ativo'].map(lambda a: _ddv.get(a, (None, None))[0])
+        _c = _c[_c['preco'] > 0]
+        _sugestao, _restante = {}, _total_disponivel
+
+        def _comprar(ativo, preco, valor, teto):
+            """compra até `valor` (cotas inteiras, exceto fracionados), limitada por teto e pelo caixa"""
+            global _restante
+            valor = min(valor, teto, _restante)
+            if ativo not in _FRACIONADOS:
+                valor = int(valor / preco + 1e-9) * preco
+            if valor > 0.005:
+                _sugestao[ativo] = _sugestao.get(ativo, 0.0) + valor
+                _restante -= valor
+            return valor
+
+        # 1) mínimo primeiro — maior falta relativa antes; arredonda a cota para cima para chegar ao mínimo
+        _abx = _c[_c['atual_rs'] < _c['min_rs'] - 0.005].copy()
+        _abx['falta'] = _abx['min_rs'] - _abx['atual_rs']
+        _fator_min = min(1.0, _total_disponivel / _abx['falta'].sum()) if not _abx.empty else 1.0
+        for _, row in _abx.sort_values('falta', ascending=False).iterrows():
+            _v = row['falta'] * _fator_min
+            if row['ativo'] not in _FRACIONADOS:
+                _v = -(-_v // row['preco']) * row['preco']
+            _comprar(row['ativo'], row['preco'], _v, _restante)
+
+        # 2) nota entre quem ainda está abaixo do alvo
+        _c['gap'] = _c['alvo_rs'] - _c['atual_rs'] - _c['ativo'].map(lambda a: _sugestao.get(a, 0.0))
+        _neg = _c[(_c['gap'] > 0.5) & (_c['alvo_rs'] > 0)].copy()
+        if _neg.empty and not _sugestao:
             st.success("✅ carteira equilibrada — nenhum ativo com desvio negativo.")
-            _sugestao = {}
-        else:
-            # buscar preços atuais e PM
-            _precos_sim = {row['Ativo']: row['preco_unit'] for _, row in df.iterrows()}
-            _pm_sim     = {row['Ativo']: row['preco_medio'] for _, row in df.iterrows()}
-            _fator_pm   = float(st.session_state.get("cfg_fator_pm", 0.3))
-            _fator_perf = float(st.session_state.get("cfg_fator_perf", 0.2))
-
-            # variação 90 dias via yfinance (cacheado — evita repetir a cada rerun)
-            _tickers_90 = tuple(sorted(a for a in _precos_sim if a not in ('BTC', 'Renda+ 2050')))
-            _var_90d = obter_variacao_90d(_tickers_90)
-
-            # score normalizado: cada componente compete no range 0-1
-            # peso: 60% desvio alocação · fator_pm% desconto PM · fator_perf% queda 90d
-            _neg = _com_desvio_neg.copy()
-
-            # componente 1: desvio normalizado (já é prioridade = -desvio_rs, positivo)
-            _max_desv = _neg['prioridade'].max()
-            _neg['_c_desv'] = _neg['prioridade'] / _max_desv if _max_desv > 0 else 0
-
-            # componente 2: desconto vs PM normalizado
-            def _desc_pm(row):
-                pm_r = row.get('pm', 0)
-                pr   = _precos_sim.get(row['ativo'], pm_r)
-                return max((pm_r - pr) / pm_r, 0) if pm_r > 0 else 0
-            _neg['_c_pm'] = _neg.apply(_desc_pm, axis=1)
-            _max_pm = _neg['_c_pm'].max()
-            _neg['_c_pm'] = _neg['_c_pm'] / _max_pm if _max_pm > 0 else 0
-
-            # componente 3: queda 90d normalizada
-            _neg['_c_perf'] = _neg['ativo'].map(lambda a: max(-_var_90d.get(a, 0), 0))
-            _max_perf = _neg['_c_perf'].max()
-            _neg['_c_perf'] = _neg['_c_perf'] / _max_perf if _max_perf > 0 else 0
-
-            # peso total: 60% desvio + fator_pm * 20% + fator_perf * 20%
-            # (fator_pm e fator_perf escalam de 0 a 1 sua contribuição nos 40% restantes)
-            _w_desv  = 0.6
-            _w_pm    = _fator_pm   * 0.2
-            _w_perf  = _fator_perf * 0.2
-            _neg['score'] = (_neg['_c_desv'] * _w_desv +
-                             _neg['_c_pm']   * _w_pm   +
-                             _neg['_c_perf'] * _w_perf)
-            _com_desvio_neg = _neg.sort_values('score', ascending=False)
-
-            _soma_desvios = _com_desvio_neg['score'].sum()
-            _sugestao = {}
-            _restante = _total_disponivel
-
-            # 1ª passagem: distribuir proporcionalmente ao score, arredondando para inteiro
-            for _, row in _com_desvio_neg.iterrows():
-                ativo = row['ativo']
-                _prop = row['score'] / _soma_desvios if _soma_desvios > 0 else 0
-                _valor_ideal = _total_disponivel * _prop
-                _preco = _precos_sim.get(ativo, 0)
-                if _preco <= 0:
-                    continue
-                if ativo in _FRACIONADOS:
-                    _valor_compra = min(_valor_ideal, _restante)
-                else:
-                    _cotas = int(_valor_ideal / _preco)
-                    _valor_compra = min(_cotas * _preco, _restante)
-                if _valor_compra > 0:
-                    _sugestao[ativo] = _sugestao.get(ativo, 0) + _valor_compra
-                    _restante -= _valor_compra
-
-            # 2ª passagem: redistribuir saldo restante por prioridade até não caber mais nenhuma cota
+        _com_desvio_neg = _neg
+        if not _neg.empty:
+            _norm = lambda col: (col / col.max()) if col.max() > 0 else col * 0
+            _neg['_c_desv']  = _norm(_neg['gap'] / _neg['alvo_rs'])
+            _neg['_c_preco'] = _norm(_neg['ativo'].map(
+                lambda a: (_ddv[a][0] / max(_ddv[a][1], 0.05)) if a in _ddv else 0.0))
+            _neg['_c_pm']    = _norm(_neg.apply(
+                lambda r: max((r['pm'] - r['preco']) / r['pm'], 0) if r['pm'] > 0 else 0.0, axis=1))
+            _neg['score'] = (_neg['_c_desv'] * _w_desv + _neg['_c_preco'] * _w_preco
+                             + _neg['_c_pm'] * _w_pm) / _w_tot
+            _neg = _neg.sort_values('score', ascending=False)
+            _com_desvio_neg = _neg
+            _teto = {r['ativo']: max(min(r['gap'], SIM_TETO_APORTE * _total_disponivel), 0.0)
+                     for _, r in _neg.iterrows()}
+            _dado = {a: 0.0 for a in _teto}                     # quanto cada um já recebeu nesta etapa
+            # divisão proporcional à nota, respeitando os tetos (o que sobra de um vai para os outros)
+            _ideal, _livre, _caixa = {a: 0.0 for a in _teto}, set(_teto), _restante
+            while _livre and _caixa > 0.01:
+                _soma = sum(float(_neg.loc[_neg['ativo'] == a, 'score'].iloc[0]) for a in _livre)
+                if _soma <= 0:
+                    break
+                _novo_livre, _usado = set(), 0.0
+                for a in _livre:
+                    _sc = float(_neg.loc[_neg['ativo'] == a, 'score'].iloc[0])
+                    _add = min(_caixa * _sc / _soma, _teto[a] - _ideal[a])
+                    _ideal[a] += _add
+                    _usado += _add
+                    if _teto[a] - _ideal[a] > 0.01:
+                        _novo_livre.add(a)
+                _caixa -= _usado
+                if _novo_livre == _livre or _usado < 0.01:
+                    break
+                _livre = _novo_livre
+            for _, row in _neg.iterrows():
+                _dado[row['ativo']] += _comprar(row['ativo'], row['preco'], _ideal[row['ativo']], _teto[row['ativo']])
+            # sobra do arredondamento: mais uma cota por vez, em ordem de nota (tolerância de 1 cota sobre o teto)
             _mudou = True
             while _mudou and _restante > 0.5:
                 _mudou = False
-                for _, row in _com_desvio_neg.iterrows():
-                    ativo = row['ativo']
-                    _preco = _precos_sim.get(ativo, 0)
-                    if _preco <= 0:
-                        continue
-                    if ativo in _FRACIONADOS:
-                        if _restante > 0.01:
-                            _add = min(_restante, _preco * 0.1)  # adiciona fração mínima
-                            _sugestao[ativo] = _sugestao.get(ativo, 0) + _add
-                            _restante -= _add
-                            _mudou = True
+                for _, row in _neg.iterrows():
+                    a, _preco = row['ativo'], row['preco']
+                    if a in _FRACIONADOS:
+                        _v = _comprar(a, _preco, _restante, _teto[a] - _dado[a])
+                    elif _restante >= _preco and _dado[a] < _teto[a]:
+                        _v = _comprar(a, _preco, _preco, _preco)
                     else:
-                        if _restante >= _preco:
-                            _sugestao[ativo] = _sugestao.get(ativo, 0) + _preco
-                            _restante -= _preco
-                            _mudou = True
+                        _v = 0.0
+                    if _v > 0.005:
+                        _dado[a] += _v
+                        _mudou = True
                     if _restante < 0.5:
                         break
 
@@ -4134,9 +4140,9 @@ if _pagina == "simulador":
         # denominador = soma atual dos ativos simulados + o que foi alocado
         _total_sim_atual   = df_sim['atual_rs'].sum()
         _total_futuro_real = _total_sim_atual + _total_alocado
-        _cab_sim = ["", "ativo", "atual", "alvo", "desvio", "sugestão", "após aporte"]
+        _cab_sim = ["", "ativo", "atual", "alvo", "desvio", "vs máx 12m", "sugestão", "após aporte"]
         _linhas_sim = []
-        for _, row in df_sim[df_sim['desvio_rs'] < 0].iterrows():
+        for _, row in df_sim[(df_sim['desvio_rs'] < 0) | df_sim['ativo'].isin(list(_sugestao))].iterrows():
             _sug = _sugestao.get(row['ativo'], 0.0)
             _novo_total = row['atual_rs'] + _sug
             _novo_pct   = _novo_total / _total_futuro_real * 100 if _total_futuro_real > 0 else 0
@@ -4153,7 +4159,9 @@ if _pagina == "simulador":
             _linhas_sim.append([
                 "🔴" if row['abaixo_min'] else "🟡",
                 row['ativo'], fmt_pct(row['atual_pct']), fmt_pct(row['alvo_pct']),
-                f"({formatar_brl(abs(row['desvio_rs']))})", _cotas_str, fmt_pct(_novo_pct),
+                (f"({formatar_brl(abs(row['desvio_rs']))})" if row['desvio_rs'] < 0 else formatar_brl(row['desvio_rs'])),
+                (f"−{fmt_pct(_ddv[row['ativo']][0] * 100)}" if row['ativo'] in _ddv else "—"),
+                _cotas_str, fmt_pct(_novo_pct),
             ])
         if _linhas_sim:
             with st.container(key="sim_box", border=True):
@@ -4327,7 +4335,7 @@ def _pagina_pj():
                       ("reembolsos", c["reembolso"]), (f"entradas {r_pix}", c["pix_in"]),
                       ("dividendos recebidos", divs)],
                      key=lambda x: -x[1])
-        sai = sorted([("FIES / débito BB", c["fies"]), (r_cart, c["cartao"]),
+        sai = sorted([("FIES", c["fies"]), (r_cart, c["cartao"]),
                       (f"saídas {r_pix}", pix_out), ("total investido", investido)],
                      key=lambda x: -x[1])
         lin += [("", f"(+) {r}", _neg(v)) for r, v in ent]
@@ -4584,7 +4592,7 @@ def _pagina_mes():
                 fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, hoje.year)
                 c = fx["calc"][k]
                 # a fatura considerada é a do próprio mês (aberta), não a do mês anterior
-                sobra = c["nubank"] - gasto + pix_in_k
+                sobra = c["saldo_pf"] - gasto + pix_in_k
             # proventos do mês em curso (data-com no mês, até hoje) — reinvestidos no próximo aporte
             try:
                 prov, _ = calcular_dividendos_mes(_df_lanc_raw.to_dict(orient="records"), hoje.month, hoje.year)
@@ -4791,6 +4799,32 @@ if _pagina == "configurações":
               st.rerun(scope="app")
           except ValueError:
               st.error("valor inválido — use um número, ex.: 450")
+
+      # pesos da nota do simulador
+      _md(st, "cfg-sec", "simulador")
+      _md(st, "cfg-nota", "pesos da nota que divide o aporte (%). abaixo do mínimo recebe antes da nota.")
+      _pesos_sim = [("sim_peso_desvio", "desvio do alvo", 40), ("sim_peso_preco", "preço baixo · máx 12m", 45),
+                    ("sim_peso_pm", "desconto vs preço médio", 15)]
+      with st.container(key="cfg_sim_box", border=True):
+          _pesos_txt = {}
+          for _k, _rot_p, _pad in _pesos_sim:
+              with st.container(key=f"cfgrow_{_k}"):
+                  p0, p1 = st.columns([2, 1], vertical_alignment="center")
+                  _md(p0, "cfg-ativo-quebra", _rot_p)
+                  _pesos_txt[_k] = p1.text_input(_rot_p, label_visibility="collapsed", key=f"in_{_k}",
+                                                 value=fmt_num(st.session_state["_metas"].get(_k, _pad), 0))
+          _salvar_pesos = st.button("salvar pesos", key="btn_salvar_pesos", type="primary")
+      if _salvar_pesos:
+          try:
+              _vals = {k: float(str(v).replace(',', '.')) for k, v in _pesos_txt.items()}
+              if min(_vals.values()) < 0 or sum(_vals.values()) <= 0:
+                  raise ValueError
+              for k, v in _vals.items():
+                  salvar_meta(k, v)
+              st.success("pesos salvos.")
+              st.rerun(scope="app")
+          except ValueError:
+              st.error("use números de 0 a 100 (a soma não precisa dar 100 — os pesos são proporcionais).")
 
 
   with _sub_pj, st.container(key="cfg_pj_area"):
