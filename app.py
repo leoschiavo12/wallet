@@ -2,11 +2,8 @@ import streamlit as st
 import yfinance as yf
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import pandas as pd
-import math
 import requests
-import openpyxl
 import threading
 import time as _time
 from google.oauth2 import service_account
@@ -407,10 +404,6 @@ st.markdown("""
 </style>
     """, unsafe_allow_html=True)
 
-@st.cache_resource
-def _yf_session():
-    """sessão yfinance reutilizada — evita reconexão a cada chamada"""
-    return yf
 
 # ── agenda de atualização ─────────────────────────────────────────────────────
 # pregão: dias úteis (seg–sex) das 10h às 19h, horário de Brasília. Fora disso os dados
@@ -419,6 +412,15 @@ def _yf_session():
 # atualiza de hora em hora, sempre.
 def _agora_sp():
     return pd.Timestamp.now(tz="America/Sao_Paulo")
+
+# o Streamlit Cloud roda em UTC: "hoje" é sempre o de Brasília (senão vira o dia às 21h)
+def hoje_br():
+    """agora no horário de Brasília, sem fuso (Timestamp)"""
+    return _agora_sp().tz_localize(None)
+
+def _hoje_data():
+    """data de hoje no horário de Brasília (date)"""
+    return _agora_sp().date()
 
 @st.cache_resource
 def _marcas_atualizacao():
@@ -614,7 +616,7 @@ def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
 def obter_dividendos_mes_anterior(df_lancamentos_json):
     """dividendos do mês anterior ao atual — mantido por compatibilidade com quem já chama assim"""
     from datetime import date
-    hoje = date.today()
+    hoje = _hoje_data()
     if hoje.month == 1:
         mes_ref, ano_ref = 12, hoje.year - 1
     else:
@@ -659,65 +661,6 @@ def _consultar_preco_btc_brl():
         pass
     return 0.0
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def calcular_dividendos_historicos(df_lanc_json):
-    """calcula total de dividendos recebidos por FII desde a primeira compra"""
-    import pandas as pd
-    df = pd.DataFrame(df_lanc_json)
-    if df.empty: return {}, 0.0
-
-    df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
-    df['sinal']   = df['tipo'].str.strip().str.lower().map({'compra': 1, 'venda': -1}).fillna(0).astype(float)
-
-    resultado = {}
-    total_geral_divs = 0.0
-
-    fiis = df[df['classe'] == 'FII']['ativo'].unique()
-
-    for ativo in fiis:
-        try:
-            ativo_norm = aliases_b3().get(ativo, ativo)
-            tk   = yf.Ticker(f"{ativo_norm}.SA")
-            divs = tk.dividends
-            if divs is None or divs.empty:
-                continue
-
-            # normalizar timezone
-            if divs.index.tz is not None:
-                divs.index = divs.index.tz_localize(None)
-
-            # compras e vendas deste ativo
-            g = df[df['ativo'] == ativo].sort_values('data_dt')
-            primeira_compra = g[g['tipo'].str.lower() == 'compra']['data_dt'].min()
-            if pd.isna(primeira_compra): continue
-
-            # filtrar dividendos após primeira compra
-            divs_filtrados = divs[divs.index >= primeira_compra]
-            if divs_filtrados.empty: continue
-
-            total_ativo = 0.0
-            for data_div, valor_div in divs_filtrados.items():
-                # qtd de cotas na véspera da data-ex (quem compra na data-ex não recebe)
-                g_ate = g[g['data_dt'].dt.normalize() < pd.Timestamp(data_div).normalize()]
-                qtd = (g_ate['quantidade'] * g_ate['sinal']).sum()
-                if qtd > 0:
-                    total_ativo += qtd * valor_div
-
-            resultado[ativo] = round(total_ativo, 2)
-            total_geral_divs += total_ativo
-        except:
-            continue
-
-    # lançamentos manuais de tipo 'dividendo' — cobre fundos sem histórico no yfinance
-    # (ex: encerrados/incorporados, onde tk.dividends vem vazio e o ativo é pulado acima)
-    _manuais_hist = df[df['tipo'].str.strip().str.lower() == 'dividendo']
-    for ativo in _manuais_hist['ativo'].unique():
-        _soma_manual_ativo = _manuais_hist[_manuais_hist['ativo'] == ativo]['total'].sum()
-        if _soma_manual_ativo > 0:
-            resultado[ativo] = resultado.get(ativo, 0.0) + _soma_manual_ativo
-            total_geral_divs += _soma_manual_ativo
-
-    return resultado, round(total_geral_divs, 2)
 
 @st.cache_data(ttl=86400)
 def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
@@ -728,7 +671,7 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
     Yield on Cost = proventos_12m_por_cota ÷ preço médio.
     """
     import datetime as _dt
-    janela_ini = pd.Timestamp(_dt.date.today() - _dt.timedelta(days=365))
+    janela_ini = pd.Timestamp(_hoje_data() - _dt.timedelta(days=365))
     resultado = {}
 
     for t in tickers_tupla:
@@ -1016,23 +959,8 @@ def _baixar_fatia_taxa_renda_mais(fatia_bytes):
     except Exception as e:
         return pd.DataFrame(columns=['data_dt', 'taxa']), str(e)
 
-def arredondar_teto(valor, multiplo):
-    return math.ceil(valor / multiplo) * multiplo
 
-def gerar_ticks_rs(y_max_rs, n_ticks=5):
-    bruto = y_max_rs / (n_ticks - 1)
-    magnitude = 10 ** math.floor(math.log10(bruto))
-    candidatos = [magnitude, 2*magnitude, 5*magnitude, 10*magnitude]
-    step = next(c for c in candidatos if c >= bruto)
-    teto = arredondar_teto(y_max_rs, step)
-    vals = [round(step * i) for i in range(n_ticks) if step * i <= teto + 1]
-    return teto, vals
 
-def gerar_ticks_pct(max_pct_ativo, step=5):
-    teto = arredondar_teto(max_pct_ativo * 1.1, step)
-    teto = max(teto, step)
-    vals = list(range(0, teto + 1, step))
-    return teto, vals
 
 def abreviar_rs(valor):
     if valor >= 1_000_000:
@@ -1074,12 +1002,6 @@ def fmt_holding(meses):
     s = fmt_num(meses / 12, 1)
     return f"{s} ano" if s == "1" else f"{s} anos"
 
-def tag_var(rs, pct):
-    """tag colorida de valorização ▲/▼ %  ·  R$"""
-    sinal = "▲" if rs >= 0 else "▼"
-    cor   = "#22c55e" if rs >= 0 else "#ef4444"
-    return (f"<span style='color:{cor};font-weight:600;font-family:inherit'>"
-            f"{sinal} {'+' if pct>=0 else ''}{fmt_pct(pct)}  ·  {abreviar_rs(abs(rs))}</span>")
 
 def barras_alvo(itens, chave):
     """barras finas no padrão do app (fatura/FIES): uma linha por ativo — % atual · alvo · valor,
@@ -1134,17 +1056,12 @@ def card_valorizacao(col, rs, pct, label="variação"):
     _rs_str  = f"({abreviar_rs(abs(rs))})" if rs < 0 else abreviar_rs(rs)   # negativo entre parênteses
     card_html(col, f"{label}  ·  {_rs_str}", f"{sinal} {_pct_str}", "pos" if rs >= 0 else "neg")
 
-def metric_tag(col, label, valor, rs, pct):
-    """st.metric nativo — col já é a coluna certa"""
-    col.metric(label, valor)
 
-def metric_tag_simples(col, label, valor):
-    col.metric(label, valor)
 
 def holding_ponderado_meses(ativo, df_lanc):
     """holding médio ponderado pelo valor de cada compra, em meses — usado em ETFs, tesouro, cripto e FIIs"""
     import datetime
-    hoje = datetime.date.today()
+    hoje = _hoje_data()
     compras = df_lanc[(df_lanc['ativo'] == ativo) & (df_lanc['tipo'].str.lower() == 'compra')].copy()
     if compras.empty: return None
     compras['data_dt'] = pd.to_datetime(compras['data'], format='%d/%m/%Y', errors='coerce')
@@ -1167,17 +1084,12 @@ def preco_td_de_secrets(nome, fallback):
     except:
         return fallback
 
-def data_td_de_secrets(nome):
-    try:
-        return st.secrets["tesouro_direto_data"][nome]
-    except:
-        return "nao definida"
 
 @st.cache_data(ttl=21600)  # 6h — evita repetir ~10-14 downloads sequenciais a cada rerun do app
 def obter_variacao_90d(tickers_tupla):
     """retorna dict {ticker: variação_90d} via yfinance, um ticker por vez (threads=False evita segfault)"""
     import datetime as _dt
-    data_90d = _dt.date.today() - _dt.timedelta(days=90)
+    data_90d = _hoje_data() - _dt.timedelta(days=90)
     var_90d = {}
     for ativo in tickers_tupla:
         try:
@@ -1243,80 +1155,7 @@ def obter_preco_renda_mais_cached():
     """preço/taxa do Renda+: a cada 1h no pregão, congelado fora dele"""
     return sem_espera("renda", janela_mercado(60), _preco_renda_mais_janela)
 
-def calcular_projecao_renda_mais(saldo_atual, taxa_real_aa, aporte_mensal, ano_conversao=2050,
-                                  anos_pagamento=20, mes_atual=None, ano_atual=None):
-    """
-    Projeta o saldo acumulado do Renda+ na data de conversão e a parcela mensal
-    real (poder de compra de hoje) resultante da anuidade de 240 pagamentos.
 
-    Aproximação: usa uma única taxa real (IPCA+X% a.a.) para todo o saldo —
-    inclusive o que já foi acumulado a taxas diferentes no passado — porque o
-    app não guarda a taxa contratada em cada compra individual. Não considera
-    IR (tabela regressiva) nem taxa de custódia sobre o excedente de 6 SM.
-    """
-    import datetime as _dt
-    hoje = _dt.date.today()
-    ano_atual  = ano_atual  or hoje.year
-    mes_atual  = mes_atual  or hoje.month
-    meses_ate_conversao = max((ano_conversao - ano_atual) * 12 - (mes_atual - 1), 0)
-
-    taxa_m = (1 + taxa_real_aa) ** (1/12) - 1
-
-    fv_saldo = saldo_atual * (1 + taxa_m) ** meses_ate_conversao
-    if taxa_m > 0:
-        fv_aportes = aporte_mensal * (((1 + taxa_m) ** meses_ate_conversao - 1) / taxa_m)
-    else:
-        fv_aportes = aporte_mensal * meses_ate_conversao
-
-    saldo_conversao = fv_saldo + fv_aportes
-
-    n_pag = anos_pagamento * 12
-    if taxa_m > 0:
-        parcela_mensal = saldo_conversao * taxa_m / (1 - (1 + taxa_m) ** -n_pag)
-    else:
-        parcela_mensal = saldo_conversao / n_pag
-
-    return {
-        'meses_ate_conversao': meses_ate_conversao,
-        'saldo_conversao': saldo_conversao,
-        'parcela_mensal': parcela_mensal,
-        'total_recebido_20anos': parcela_mensal * n_pag,
-    }
-
-def calcular_trajetoria_renda_mais(saldo_atual, taxa_real_aa, aporte_mensal, ano_conversao=2050,
-                                    anos_pagamento=20, mes_atual=None, ano_atual=None):
-    """
-    Série anual do saldo do Renda+: acumulação (hoje até a conversão) + consumo
-    da anuidade (conversão até o fim dos 20 anos de pagamento). Usada só para o gráfico
-    (a projeção "oficial" de saldo/parcela vem de calcular_projecao_renda_mais).
-    """
-    import datetime as _dt
-    hoje = _dt.date.today()
-    ano_atual = ano_atual or hoje.year
-    mes_atual = mes_atual or hoje.month
-    taxa_m = (1 + taxa_real_aa) ** (1/12) - 1
-    meses_ate_conversao = max((ano_conversao - ano_atual) * 12 - (mes_atual - 1), 0)
-
-    pontos = []
-    saldo = saldo_atual
-    for m in range(0, meses_ate_conversao + 1):
-        ano_ref = ano_atual + (mes_atual - 1 + m) / 12
-        if m % 12 == 0 or m == meses_ate_conversao:
-            pontos.append({'ano': ano_ref, 'saldo': saldo, 'fase': 'acumulação'})
-        saldo = saldo * (1 + taxa_m) + aporte_mensal
-
-    saldo_conversao = pontos[-1]['saldo'] if pontos else saldo_atual
-    n_pag = anos_pagamento * 12
-    parcela = (saldo_conversao * taxa_m / (1 - (1 + taxa_m) ** -n_pag)) if taxa_m > 0 else (saldo_conversao / n_pag)
-
-    saldo2 = saldo_conversao
-    for m in range(1, n_pag + 1):
-        saldo2 = saldo2 * (1 + taxa_m) - parcela
-        ano_ref = ano_conversao + m / 12
-        if m % 12 == 0 or m == n_pag:
-            pontos.append({'ano': ano_ref, 'saldo': max(saldo2, 0), 'fase': 'pagamento'})
-
-    return pd.DataFrame(pontos)
 
 SHEET_PM_TAB = "precos_mensais"
 PM_HEADERS   = ["ano_mes", "ativo", "preco_fechamento"]
@@ -1399,59 +1238,7 @@ def pu_renda_fim_mes(df_hist, ultimo_dia):
         return None
     return float(h['pu'].iloc[-1])
 
-def migrar_precos_renda_mtm(df_pm, df_hist):
-    """uma vez: troca o preço médio de compra do Renda+ nos meses gravados pelo PU de mercado"""
-    if df_pm is None or df_pm.empty or df_hist is None or df_hist.empty:
-        return df_pm, False
-    import calendar
-    df = df_pm.copy()
-    mudou = False
-    for i, r in df[df['ativo'] == 'Renda+ 2050'].iterrows():
-        ano, m = int(str(r['ano_mes'])[:4]), int(str(r['ano_mes'])[5:7])
-        pu = pu_renda_fim_mes(df_hist, pd.Timestamp(ano, m, calendar.monthrange(ano, m)[1]))
-        if pu and pu > 1:
-            df.at[i, 'preco_fechamento'] = round(pu, 4)
-            mudou = True
-    if mudou:
-        svc = get_sheets_service()
-        svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A:C").execute()
-        corpo = [PM_HEADERS] + [[str(x['ano_mes']), str(x['ativo']), float(x['preco_fechamento'])]
-                                for _, x in df.iterrows()]
-        svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A1",
-                            valueInputOption="RAW", body={"values": corpo}).execute()
-    return df, mudou
 
-def migrar_precos_mensais_sem_ajuste(df_pm):
-    """
-    executa uma vez (marca na aba metas): recalcula, com fechamento SEM ajuste, os preços
-    mensais de FIIs/ETFs já gravados (BTC e Tesouro não mudam) e regrava a aba.
-    retorna o df atualizado.
-    """
-    if df_pm is None or df_pm.empty:
-        return df_pm
-    import calendar
-    nao_b3 = {'BTC', 'Renda+ 2050', 'Tesouro Selic 2031', 'Tesouro SELIC 2031', 'Tesouro Prefixado 2032'}
-    alias  = aliases_b3()
-    df = df_pm.copy()
-    for i, r in df.iterrows():
-        a = str(r['ativo']).strip()
-        if a in nao_b3:
-            continue
-        try:
-            ano, m = int(str(r['ano_mes'])[:4]), int(str(r['ano_mes'])[5:7])
-            ult = pd.Timestamp(ano, m, calendar.monthrange(ano, m)[1])
-            p = obter_preco_historico_yfinance(f"{alias.get(a, a)}.SA", ult)
-            if p and p >= 1.0:
-                df.at[i, 'preco_fechamento'] = round(p, 4)
-        except Exception:
-            continue
-    svc = get_sheets_service()
-    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A:C").execute()
-    corpo = [PM_HEADERS] + [[str(r['ano_mes']), str(r['ativo']), float(r['preco_fechamento'])]
-                            for _, r in df.iterrows()]
-    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PM_TAB}!A1",
-                        valueInputOption="RAW", body={"values": corpo}).execute()
-    return df
 
 def salvar_precos_mensais(rows_list):
     """rows_list: lista de [ano_mes, ativo, preco]"""
@@ -1503,12 +1290,69 @@ def obter_preco_historico_yfinance(ticker_sa, data_fim):
         return None
 
 # ── Google Sheets helpers ─────────────────────────────────────────────────────
+# a cota do Google é de ~60 leituras/min, somando este app e o de despesas (mesma conta de
+# serviço). por isso: (1) toda chamada tenta de novo sozinha se vier 429; (2) as leituras ficam
+# num cache compartilhado entre sessões (abrir no celular e no computador não dobra a conta);
+# (3) qualquer gravação deste app muda a "versão" e a próxima leitura já vem atualizada.
+import googleapiclient.http as _gh
+if not getattr(_gh.HttpRequest.execute, "_com_retry", False):
+    _exec_orig = _gh.HttpRequest.execute
+    def _exec_com_retry(self, http=None, num_retries=4):
+        return _exec_orig(self, http=http, num_retries=max(num_retries, 4))
+    _exec_com_retry._com_retry = True
+    _gh.HttpRequest.execute = _exec_com_retry
+
+@st.cache_resource
+def _versao_planilha():
+    return {"v": 0}
+
+def _invalidar_leituras():
+    _versao_planilha()["v"] += 1
+
+class _ValuesGravacao:
+    """values() que avisa o cache quando grava"""
+    def __init__(self, v):
+        self._v = v
+    def __getattr__(self, nome):
+        f = getattr(self._v, nome)
+        if nome in ("update", "clear", "append", "batchUpdate", "batchClear"):
+            def _grava(*a, **k):
+                _invalidar_leituras()
+                return f(*a, **k)
+            return _grava
+        return f
+
+class _SheetsGravacao:
+    def __init__(self, s):
+        self._s = s
+    def values(self):
+        return _ValuesGravacao(self._s.values())
+    def batchUpdate(self, *a, **k):
+        _invalidar_leituras()
+        return self._s.batchUpdate(*a, **k)
+    def __getattr__(self, nome):
+        return getattr(self._s, nome)
+
 def get_sheets_service():
     creds = service_account.Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=["https://www.googleapis.com/auth/spreadsheets"]
     )
-    return build("sheets", "v4", credentials=creds).spreadsheets()
+    return _SheetsGravacao(build("sheets", "v4", credentials=creds, cache_discovery=False).spreadsheets())
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _abas_cache(versao):
+    meta = get_sheets_service().get(spreadsheetId=SHEET_ID, fields="sheets.properties.title").execute()
+    return {x["properties"]["title"] for x in meta.get("sheets", [])}
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _lote_cache(ranges, versao):
+    res = get_sheets_service().values().batchGet(spreadsheetId=SHEET_ID, ranges=list(ranges)).execute()
+    return {r: vr.get("values", []) for r, vr in zip(ranges, res.get("valueRanges", []))}
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _valores_cache(rng, versao):
+    return get_sheets_service().values().get(spreadsheetId=SHEET_ID, range=rng).execute()
 
 SHEET_ID   = st.secrets["google_sheets"]["spreadsheet_id"]
 
@@ -1518,8 +1362,8 @@ SHEET_ID   = st.secrets["google_sheets"]["spreadsheet_id"]
 def _abas_lote():
     return [f"{SHEET_TAB}!A:G", f"{SHEET_CFG}!A:D", f"{SHEET_PM_TAB}!A:C", f"{SHEET_METAS_TAB}!A:C",
             f"{SHEET_ATIVOS_INFO_TAB}!A:F", f"{SHEET_RENDA_TAB}!A:C", f"{SHEET_RENDA_MERCADO_TAB}!A:C",
-            f"{SHEET_DIV_MENSAL_TAB}!A:C", f"{SHEET_PJ_PAR_TAB}!A:B", f"{SHEET_PJ_FAT_TAB}!A:C",
-            f"{SHEET_PJ_HIST_TAB}!A:C", f"{SHEET_PF_CARTAO_TAB}!A:B", f"{SHEET_PF_REEMB_TAB}!A:B",
+            f"{SHEET_DIV_MENSAL_TAB}!A:C", f"{SHEET_PJ_PAR_TAB}!A:B",
+            f"{SHEET_PJ_HIST_TAB}!A:C", f"{SHEET_PF_CARTAO_TAB}!A:B",
             f"{SHEET_PJ_NOTAS_TAB}!A:E"]
 
 def _falha_leitura(nome, erro):
@@ -1530,8 +1374,7 @@ def _falha_leitura(nome, erro):
 
 def _abas_existentes():
     if "_sheet_abas" not in st.session_state:
-        meta = get_sheets_service().get(spreadsheetId=SHEET_ID, fields="sheets.properties.title").execute()
-        st.session_state["_sheet_abas"] = {x["properties"]["title"] for x in meta.get("sheets", [])}
+        st.session_state["_sheet_abas"] = set(_abas_cache(_versao_planilha()["v"]))
     return st.session_state["_sheet_abas"]
 
 def prefetch_planilha():
@@ -1542,9 +1385,7 @@ def prefetch_planilha():
         abas = _abas_existentes()
         ranges = [r for r in _abas_lote() if r.split("!")[0] in abas]
         if ranges:
-            res = get_sheets_service().values().batchGet(spreadsheetId=SHEET_ID, ranges=ranges).execute()
-            for r, vr in zip(ranges, res.get("valueRanges", [])):
-                st.session_state["_sheet_lote"][r] = vr.get("values", [])
+            st.session_state["_sheet_lote"] = dict(_lote_cache(tuple(ranges), _versao_planilha()["v"]))
         st.session_state["_planilha_momento"] = _agora_sp().strftime("%d/%m %H:%M")
     except Exception:
         st.session_state["_sheet_lote"] = {}   # sem lote: cada leitor busca a sua aba (e avisa se falhar)
@@ -1557,7 +1398,7 @@ def _ler_valores(rng):
     abas = st.session_state.get("_sheet_abas")
     if abas is not None and rng.split("!")[0] not in abas:
         return {"values": []}
-    return get_sheets_service().values().get(spreadsheetId=SHEET_ID, range=rng).execute()
+    return _valores_cache(rng, _versao_planilha()["v"])
 SHEET_TAB  = "lancamentos"
 SHEET_CFG  = "configuracoes"
 HEADERS    = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
@@ -1611,7 +1452,6 @@ def ler_metas():
 
 # ── PJ → PF: parâmetros e faturamento mensal (abas pj_parametros e pj_faturamento) ──
 SHEET_PJ_PAR_TAB = "pj_parametros"
-SHEET_PJ_FAT_TAB = "pj_faturamento"
 # chave, rótulo, padrão, casas decimais
 PJ_PARAMS = [
     ("faturamento_minimo", "faturamento base (R$)",             0.0,     2),
@@ -1655,19 +1495,10 @@ def _mes_ano(s):
             pass
     return None
 
-def pj_proxima_base(par, meses=18):
-    """(início da base atual, próxima atualização) como Timestamps, ou (None, None)"""
-    try:
-        ini = _mes_ano(par.get("base_desde"))
-        if ini is None:
-            return None, None
-    except (ValueError, TypeError):
-        return None, None
-    return ini, ini + pd.DateOffset(months=meses)
 
 def fies_status(par, hoje=None):
     """parcelas pagas/restantes, saldo nominal e próximo débito do FIES"""
-    hoje = (hoje or pd.Timestamp.today()).normalize()
+    hoje = (hoje or hoje_br()).normalize()
     try:
         fim = _mes_ano(par.get("fies_fim"))
         if fim is None:
@@ -1688,62 +1519,63 @@ def fies_status(par, hoje=None):
 # [google_sheets] fatura_spreadsheet_id = "..."
 SHEET_ID_FATURA = st.secrets.get("google_sheets", {}).get("fatura_spreadsheet_id", "")
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
+def _lote_fatura():
+    """planilha do Controle de Fatura numa leitura só: ({aba: linhas}, erro ou None).
+    usada pela fatura do mês, pelo histórico de gastos e pelo PIX"""
+    if not SHEET_ID_FATURA:
+        return {}, "fatura_spreadsheet_id não configurado nos secrets"
+    try:
+        svc = get_sheets_service()
+        abas = [s["properties"]["title"] for s in svc.get(
+            spreadsheetId=SHEET_ID_FATURA, fields="sheets.properties.title").execute()["sheets"]]
+        alvo = [a for a in abas if a in ("lancamentos", "categorias", "config", "pix") or a.startswith("arquivo_")]
+        res = svc.values().batchGet(spreadsheetId=SHEET_ID_FATURA, ranges=[f"'{a}'!A:E" for a in alvo],
+                                    valueRenderOption="UNFORMATTED_VALUE",
+                                    dateTimeRenderOption="FORMATTED_STRING").execute()
+        marcar_atualizacao("Controle de Fatura")
+        return {a: vr.get("values", []) for a, vr in zip(alvo, res.get("valueRanges", []))}, None
+    except Exception as e:
+        return {}, str(e)[:80]
+
 def ler_cartao_mensal():
     """
     gasto no cartão por mês, lido do Controle de Fatura: aba lancamentos + abas arquivo_AAAA
     (colunas data, categoria, descricao, valor). retorna ({'2026-11': 1234.5, ...},
     limite_mensal da aba config ou None, erro ou None)
     """
-    if not SHEET_ID_FATURA:
-        return {}, None, "fatura_spreadsheet_id não configurado nos secrets"
-    try:
-        svc = get_sheets_service()
-        abas = [s["properties"]["title"] for s in svc.get(
-            spreadsheetId=SHEET_ID_FATURA, fields="sheets.properties.title").execute()["sheets"]]
-        alvo = [a for a in abas if a == "lancamentos" or a.startswith("arquivo_")]
-        res = svc.values().batchGet(spreadsheetId=SHEET_ID_FATURA,
-                                    ranges=[f"'{a}'!A:D" for a in alvo] + ["'config'!A:B"] if "config" in abas
-                                    else [f"'{a}'!A:D" for a in alvo],
-                                    valueRenderOption="UNFORMATTED_VALUE",
-                                    dateTimeRenderOption="FORMATTED_STRING").execute()
-        faixas = res.get("valueRanges", [])
-        linhas = []
-        for fx in faixas[:len(alvo)]:
-            vals = fx.get("values", [])
-            if not vals:
-                continue
-            cab = [str(c).strip().lower() for c in vals[0]]
-            if "data" not in cab or "valor" not in cab:
-                continue
-            i_d, i_v = cab.index("data"), cab.index("valor")
-            for r in vals[1:]:
-                if len(r) > max(i_d, i_v):
-                    linhas.append((r[i_d], r[i_v]))
-        df = pd.DataFrame(linhas, columns=["data", "valor"])
-        if df.empty:
-            mensal = {}
-        else:
-            d = pd.to_datetime(df["data"].astype(str), format="%Y-%m-%d", errors="coerce")
-            d = d.fillna(pd.to_datetime(df["data"].astype(str), dayfirst=True, errors="coerce"))
-            v = df["valor"].apply(lambda x: x if isinstance(x, (int, float)) else _num_br(x)
-                                  if str(x).strip() else 0.0)
-            df = pd.DataFrame({"mes": d.dt.strftime("%Y-%m"), "valor": pd.to_numeric(v, errors="coerce")}).dropna()
-            mensal = df.groupby("mes")["valor"].sum().round(2).to_dict()
-        limite = None
-        if len(faixas) > len(alvo):
-            for r in faixas[-1].get("values", [])[1:]:
-                if len(r) >= 2 and str(r[0]).strip() == "limite_mensal":
-                    try:
-                        limite = float(r[1]) if isinstance(r[1], (int, float)) else _num_br(r[1])
-                    except ValueError:
-                        pass
-        marcar_atualizacao("Controle de Fatura")
-        return mensal, limite, None
-    except Exception as e:
-        return {}, None, str(e)[:80]
-
-@st.cache_data(ttl=1800, show_spinner=False)
+    lote, erro = _lote_fatura()
+    if erro:
+        return {}, None, erro
+    linhas = []
+    for aba, vals in lote.items():
+        if not (aba == "lancamentos" or aba.startswith("arquivo_")) or not vals:
+            continue
+        cab = [str(c).strip().lower() for c in vals[0]]
+        if "data" not in cab or "valor" not in cab:
+            continue
+        i_d, i_v = cab.index("data"), cab.index("valor")
+        for r in vals[1:]:
+            if len(r) > max(i_d, i_v):
+                linhas.append((r[i_d], r[i_v]))
+    df = pd.DataFrame(linhas, columns=["data", "valor"])
+    if df.empty:
+        mensal = {}
+    else:
+        d = pd.to_datetime(df["data"].astype(str), format="%Y-%m-%d", errors="coerce")
+        d = d.fillna(pd.to_datetime(df["data"].astype(str), dayfirst=True, errors="coerce"))
+        v = df["valor"].apply(lambda x: x if isinstance(x, (int, float)) else _num_br(x)
+                              if str(x).strip() else 0.0)
+        df = pd.DataFrame({"mes": d.dt.strftime("%Y-%m"), "valor": pd.to_numeric(v, errors="coerce")}).dropna()
+        mensal = df.groupby("mes")["valor"].sum().round(2).to_dict()
+    limite = None
+    for r in lote.get("config", [])[1:]:
+        if len(r) >= 2 and str(r[0]).strip() == "limite_mensal":
+            try:
+                limite = float(r[1]) if isinstance(r[1], (int, float)) else _num_br(r[1])
+            except ValueError:
+                pass
+    return mensal, limite, None
 def ler_fatura_detalhe():
     """
     Controle de Fatura: aba lancamentos (o mês corrente vive nela; meses antigos vão para
@@ -1751,15 +1583,13 @@ def ler_fatura_detalhe():
     lista de categorias {id, nome, cor, valor_alvo, fixo}, erro ou None)
     """
     _vazio = pd.DataFrame(columns=["data", "categoria", "descricao", "valor"])
-    if not SHEET_ID_FATURA:
-        return _vazio, [], "fatura_spreadsheet_id não configurado nos secrets"
+    lote, erro = _lote_fatura()
+    if erro:
+        return _vazio, [], erro
     try:
-        res = get_sheets_service().values().batchGet(
-            spreadsheetId=SHEET_ID_FATURA, ranges=["'lancamentos'!A:D", "'categorias'!A:E"],
-            valueRenderOption="UNFORMATTED_VALUE", dateTimeRenderOption="FORMATTED_STRING").execute()
-        fx = res.get("valueRanges", [])
+        fx = [lote.get("lancamentos", []), lote.get("categorias", [])]
         def _linhas(i):
-            vals = fx[i].get("values", []) if len(fx) > i else []
+            vals = fx[i]
             if not vals:
                 return [], []
             return [str(c).strip().lower() for c in vals[0]], vals[1:]
@@ -1794,44 +1624,19 @@ def ler_fatura_detalhe():
     except Exception as e:
         return _vazio, [], str(e)[:80]
 
-SHEET_PF_PIX_TAB = "pf_pix"
-PIX_HEADERS = ["data", "categoria", "descricao", "valor"]
 
-def ler_pf_pix():
-    """compras no PIX (saem da conta na hora): DataFrame data/categoria/descricao/valor"""
-    if "_pf_pix" not in st.session_state:
-        df = pd.DataFrame(columns=PIX_HEADERS)
-        try:
-            rows = _ler_valores(f"{SHEET_PF_PIX_TAB}!A:D").get("values", [])
-            if len(rows) > 1:
-                df = pd.DataFrame([(list(r) + [""] * 4)[:4] for r in rows[1:]], columns=PIX_HEADERS)
-                d = pd.to_datetime(df["data"].astype(str), format="%Y-%m-%d", errors="coerce")
-                df["data"] = d.fillna(pd.to_datetime(df["data"].astype(str), dayfirst=True, errors="coerce"))
-                df["valor"] = pd.to_numeric(df["valor"].apply(
-                    lambda x: x if isinstance(x, (int, float)) else (_num_br(x) if str(x).strip() else None)),
-                    errors="coerce")
-                df = df.dropna(subset=["data", "valor"])
-        except Exception as _e_leit:
-            _falha_leitura("compras PIX", _e_leit)
-        st.session_state["_pf_pix"] = df
-    return st.session_state["_pf_pix"]
 
-@st.cache_data(ttl=600, show_spinner=False)
 def ler_pix_fatura():
     """PIX lançados no Controle de Fatura (aba pix: data, tipo entrada/saida, categoria, descricao, valor).
     retorna (DataFrame, erro ou None) — a aba fica fora da fatura do cartão"""
     _vazio = pd.DataFrame(columns=["data", "tipo", "valor"])
-    if not SHEET_ID_FATURA:
-        return _vazio, "fatura_spreadsheet_id não configurado nos secrets"
+    lote, erro = _lote_fatura()
+    if erro:
+        return _vazio, erro
     try:
-        svc = get_sheets_service()
-        abas = [x["properties"]["title"] for x in svc.get(
-            spreadsheetId=SHEET_ID_FATURA, fields="sheets.properties.title").execute()["sheets"]]
-        if "pix" not in abas:
+        if "pix" not in lote:
             return _vazio, None
-        vals = svc.values().get(spreadsheetId=SHEET_ID_FATURA, range="'pix'!A:E",
-                                valueRenderOption="UNFORMATTED_VALUE",
-                                dateTimeRenderOption="FORMATTED_STRING").execute().get("values", [])
+        vals = lote["pix"]
         if len(vals) <= 1:
             return _vazio, None
         cab = [str(c).strip().lower() for c in vals[0]]
@@ -1858,10 +1663,6 @@ def pix_mensal():
         t = "entrada" if r["tipo"].startswith("entr") else "saida"
         d = out.setdefault(r["data"].strftime("%Y-%m"), {"saida": 0.0, "entrada": 0.0})
         d[t] += float(r["valor"])
-    leg = ler_pf_pix()
-    for _, r in leg.iterrows():
-        d = out.setdefault(r["data"].strftime("%Y-%m"), {"saida": 0.0, "entrada": 0.0})
-        d["saida"] += float(r["valor"])
     return out
 
 def ler_pj_parametros():
@@ -1892,25 +1693,6 @@ def salvar_pj_parametros(par):
                         valueInputOption="RAW", body={"values": corpo}).execute()
     st.session_state.pop("_pj_par", None)
 
-def ler_pj_faturamento():
-    """
-    {'2026-11': {'fat': 12000.0, 'extra': 0.0}, ...} por mês de ATIVIDADE:
-    fat = notas recebidas no mês seguinte · extra = notas recebidas no próprio mês
-    """
-    fat = {}
-    try:
-        rows = _ler_valores(f"{SHEET_PJ_FAT_TAB}!A:C").get("values", [])
-        for r in rows[1:]:
-            if len(r) >= 2 and str(r[0]).strip():
-                try:
-                    _ex = _num_br(r[2]) if len(r) > 2 and str(r[2]).strip() else 0.0
-                    fat[str(r[0]).strip()] = {"fat": _num_br(r[1]), "extra": _ex}
-                except ValueError:
-                    pass
-    except Exception as _e_leit:
-        _falha_leitura("faturamento PJ", _e_leit)
-        pass
-    return fat
 
 def ler_pj_param_hist():
     """[{'chave': 'pro_labore', 'desde': '2026-01', 'valor': 1700.0}, ...] ordenado"""
@@ -1974,60 +1756,11 @@ def ler_pf_cartao():
         pass
     return out
 
-def salvar_pf_cartao(novos):
-    """mescla {ano_mes: valor ou None} (None apaga o mês) e regrava a aba ordenada"""
-    tudo = ler_pf_cartao()
-    for k, v in novos.items():
-        if v is None:
-            tudo.pop(k, None)
-        else:
-            tudo[k] = float(v)
-    svc = get_sheets_service()
-    _garantir_aba_existe(svc, SHEET_PF_CARTAO_TAB, ["ano_mes", "fatura"])
-    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_CARTAO_TAB}!A:B").execute()
-    corpo = [["ano_mes", "fatura"]] + [[k, tudo[k]] for k in sorted(tudo)]
-    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_CARTAO_TAB}!A1",
-                        valueInputOption="RAW", body={"values": corpo}).execute()
-    st.session_state.pop("_pf_cartao", None)
 
-SHEET_PF_REEMB_TAB = "pf_reembolsos"     # reembolsos extras por mês de recebimento (além da base)
 
-def ler_pf_reembolsos():
-    """{'2026-03': 450.0, ...} — só os extras; a base mensal vem dos parâmetros"""
-    out = {}
-    try:
-        rows = _ler_valores(f"{SHEET_PF_REEMB_TAB}!A:B").get("values", [])
-        for r in rows[1:]:
-            if len(r) >= 2 and str(r[0]).strip() and str(r[1]).strip():
-                try:
-                    out[str(r[0]).strip()] = _num_br(r[1])
-                except ValueError:
-                    pass
-    except Exception as _e_leit:
-        _falha_leitura("reembolsos", _e_leit)
-        pass
-    return out
 
-def salvar_pf_reembolsos(novos):
-    """mescla {ano_mes: valor} (0 ou None apaga o mês) e regrava a aba ordenada"""
-    tudo = ler_pf_reembolsos()
-    for k, v in novos.items():
-        if v is None or abs(float(v)) < 0.005:
-            tudo.pop(k, None)
-        else:
-            tudo[k] = float(v)
-    svc = get_sheets_service()
-    _garantir_aba_existe(svc, SHEET_PF_REEMB_TAB, ["ano_mes", "reembolso_extra"])
-    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_REEMB_TAB}!A:B").execute()
-    corpo = [["ano_mes", "reembolso_extra"]] + [[k, tudo[k]] for k in sorted(tudo)]
-    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PF_REEMB_TAB}!A1",
-                        valueInputOption="RAW", body={"values": corpo}).execute()
-    st.session_state.pop("_pf_reemb", None)
 
 SHEET_PJ_NOTAS_TAB = "pj_notas"          # notas fiscais emitidas e reembolsos recebidos (um por linha)
-NOTAS_HEADERS = ["tipo", "data", "valor", "recebimento", "descricao"]
-NOTA_TIPOS    = ["nota fiscal", "reembolso"]
-NOTA_RECEB    = ["mês seguinte", "mesmo mês"]
 
 def ler_pj_notas():
     """[{tipo, data (Timestamp), valor, recebimento, descricao}] · None se a aba ainda não existe"""
@@ -2054,40 +1787,7 @@ def ler_pj_notas():
                     "descricao": str(r[4]).strip()})
     return sorted(out, key=lambda n: n["data"])
 
-def salvar_pj_notas(lista):
-    svc = get_sheets_service()
-    _garantir_aba_existe(svc, SHEET_PJ_NOTAS_TAB, NOTAS_HEADERS)
-    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_NOTAS_TAB}!A:E").execute()
-    lista = sorted(lista, key=lambda n: n["data"])
-    corpo = [NOTAS_HEADERS] + [[n["tipo"], n["data"].strftime("%d/%m/%Y"), float(n["valor"]),
-                                n["recebimento"] if n["tipo"] == "nota fiscal" else "",
-                                n.get("descricao", "")] for n in lista]
-    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_NOTAS_TAB}!A1",
-                        valueInputOption="RAW", body={"values": corpo}).execute()
-    st.session_state.pop("_pj_notas", None)
 
-def migrar_para_notas(par):
-    """1ª vez: converte pj_faturamento (mês a mês) e pf_reembolsos em notas — as abas antigas ficam
-    intactas como backup. meses futuros iguais à base não viram nota (a base já é a projeção)."""
-    fat, reemb = ler_pj_faturamento(), ler_pf_reembolsos()
-    mes_atual = pd.Timestamp.today().strftime("%Y-%m")
-    base = float(par.get("faturamento_minimo") or 0.0)
-    notas = []
-    fim = lambda k: pd.Timestamp(f"{k}-01") + pd.offsets.MonthEnd(0)
-    for k, v in fat.items():
-        f, e = float(v.get("fat", 0.0)), float(v.get("extra", 0.0))
-        if f > 0 and not (k >= mes_atual and abs(f - base) < 0.005):
-            notas.append({"tipo": "nota fiscal", "data": fim(k), "valor": f,
-                          "recebimento": "mês seguinte", "descricao": ""})
-        if e > 0:
-            notas.append({"tipo": "nota fiscal", "data": fim(k), "valor": e,
-                          "recebimento": "mesmo mês", "descricao": "extra"})
-    for k, v in reemb.items():
-        if float(v) > 0:
-            notas.append({"tipo": "reembolso", "data": fim(k), "valor": float(v),
-                          "recebimento": "", "descricao": ""})
-    salvar_pj_notas(notas)
-    return sorted(notas, key=lambda n: n["data"])
 
 def resumo_notas(notas):
     """notas → ({mês de emissão: {'fat': soma mês seguinte ou None, 'extra': soma mesmo mês}},
@@ -2108,22 +1808,10 @@ def fat_do_mes(a, fat_salvo, par, hist):
     v = fat_salvo.get(a, {}).get("fat")
     if v is not None:
         return float(v)
-    if a >= pd.Timestamp.today().strftime("%Y-%m"):
+    if a >= hoje_br().strftime("%Y-%m"):
         return float(par_vigente(par, hist, a)["faturamento_minimo"])
     return 0.0
 
-def salvar_pj_faturamento(novos):
-    """mescla {ano_mes: {'fat': x, 'extra': y}} com o que já existe e regrava a aba ordenada"""
-    tudo = ler_pj_faturamento()
-    tudo.update(novos)
-    svc = get_sheets_service()
-    _cab = ["ano_mes", "faturamento", "extra_mesmo_mes"]
-    _garantir_aba_existe(svc, SHEET_PJ_FAT_TAB, _cab)
-    svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_FAT_TAB}!A:C").execute()
-    corpo = [_cab] + [[k, float(tudo[k]["fat"]), float(tudo[k].get("extra", 0.0))] for k in sorted(tudo)]
-    svc.values().update(spreadsheetId=SHEET_ID, range=f"{SHEET_PJ_FAT_TAB}!A1",
-                        valueInputOption="RAW", body={"values": corpo}).execute()
-    st.session_state.pop("_pj_fat", None)
 
 def calcular_pj_mes(fat, par, ano_mes, cartao=0.0, base_das=None, reemb_extra=0.0, pix=0.0, pix_in=0.0):
     """
@@ -2178,9 +1866,7 @@ def salvar_meta(chave, valor, descricao=""):
 
 # classificação dos ativos (tipo/indexador dos FIIs, país dos ETFs) — editável pelo app
 SHEET_ATIVOS_INFO_TAB = "ativos_info"
-ATIVOS_INFO_HEADERS   = ["ativo", "classe", "tipo", "indexador", "pais", "ticker_atual"]
 
-PAISES_ETF     = ['Brasil', 'EUA', 'China', 'Europa', 'Emergentes', 'Global']
 
 def ler_ativos_info():
     """lê a aba ativos_info → {ativo: {classe, tipo, indexador, pais, ticker_atual}} (vazio se não existir).
@@ -2240,24 +1926,6 @@ def _garantir_aba_existe(svc, nome_aba, headers=None):
                 valueInputOption="USER_ENTERED", body={"values": [headers]}
             ).execute()
 
-def salvar_renda_taxas(df_novo):
-    """sobrescreve a aba inteira com o conteúdo do extrato mais recente (fonte é sempre o extrato completo)"""
-    try:
-        svc = get_sheets_service()
-        _garantir_aba_existe(svc, SHEET_RENDA_TAB, RENDA_HEADERS)
-        svc.values().clear(spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_TAB}!A:C").execute()
-        fmt_rows = [RENDA_HEADERS] + [
-            [r['data'], str(r['valor_investido']).replace('.', ','), str(r['taxa_contratada_pct']).replace('.', ',')]
-            for _, r in df_novo.iterrows()
-        ]
-        svc.values().update(
-            spreadsheetId=SHEET_ID, range=f"{SHEET_RENDA_TAB}!A1",
-            valueInputOption="USER_ENTERED", body={"values": fmt_rows}
-        ).execute()
-        return True
-    except Exception as e:
-        st.warning(f"erro ao salvar taxas do Renda+: {e}")
-        return False
 
 # ── histórico de taxa de mercado do Renda+ 2050 (persistido, atualizado incrementalmente) ──
 SHEET_RENDA_MERCADO_TAB = "renda_mais_taxa_mercado"
@@ -2356,7 +2024,7 @@ def atualizar_dividendos_mensais(df_lanc_json):
     if pd.isna(_primeira_data):
         return df_existente
 
-    hoje = _dt_div.date.today()
+    hoje = _hoje_data()
     _periodo_fim = pd.Period(hoje, freq='M') - 1  # último mês fechado
     _periodo_ini = _primeira_data.to_period('M')
     if _periodo_ini > _periodo_fim:
@@ -2425,45 +2093,6 @@ def _obter_historico_taxa_renda_mais():
     salvar_historico_taxa_mercado(df_completo)
     return df_completo, None
 
-def parse_extrato_renda_mais(arquivo_upload):
-    """
-    parseia o Extrato Analítico do Tesouro Renda+ (xlsx baixado do Tesouro Direto/corretora).
-    retorna DataFrame [data, valor_investido, taxa_contratada_pct] com uma linha por aporte.
-    """
-    import re
-    wb = openpyxl.load_workbook(arquivo_upload, data_only=True)
-    ws = wb.worksheets[0]
-
-    def _to_float(v):
-        if v is None:
-            return None
-        if isinstance(v, (int, float)):
-            return float(v)
-        s = str(v).strip().replace('.', '').replace(',', '.')
-        try:
-            return float(s)
-        except Exception:
-            return None
-
-    registros = []
-    for row in ws.iter_rows(min_row=1, values_only=True):
-        if not row or row[0] is None:
-            continue
-        data_str = str(row[0]).strip()
-        # linhas de aporte começam com data no formato DD/MM/AAAA
-        if not re.match(r'^\d{2}/\d{2}/\d{4}$', data_str):
-            continue
-        valor_investido = _to_float(row[3]) if len(row) > 3 else None   # coluna D
-        taxa_raw = row[4] if len(row) > 4 else None                    # coluna E: "IPCA + 6,36%"
-        if valor_investido is None or not taxa_raw:
-            continue
-        m = re.search(r'([\d,]+)\s*%', str(taxa_raw))
-        if not m:
-            continue
-        taxa = float(m.group(1).replace(',', '.'))
-        registros.append({'data': data_str, 'valor_investido': valor_investido, 'taxa_contratada_pct': taxa})
-
-    return pd.DataFrame(registros)
 
 def taxas_aportes_renda_mais(df_lanc, df_hist_taxa, df_extrato=None):
     """
@@ -2593,30 +2222,8 @@ def ler_lancamentos(_versao=0):
         _falha_leitura("lançamentos", _e_leit)
         return pd.DataFrame(columns=HEADERS)
 
-def _get_sheet_id(svc, nome_aba):
-    """retorna o sheetId numérico real da aba pelo nome"""
-    meta = svc.get(spreadsheetId=SHEET_ID, fields="sheets.properties").execute()
-    for s in meta.get("sheets", []):
-        p = s.get("properties", {})
-        if p.get("title") == nome_aba:
-            return p["sheetId"]
-    raise ValueError(f"aba '{nome_aba}' não encontrada no spreadsheet")
 
-def garantir_cabecalho():
-    try:
-        svc = get_sheets_service()
-        res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A1:H1").execute()
-        if not res.get("values"):
-            svc.values().update(
-                spreadsheetId=SHEET_ID, range=f"{SHEET_TAB}!A1",
-                valueInputOption="RAW", body={"values": [HEADERS]}
-            ).execute()
-    except:
-        pass
-
-if not st.session_state.get("_cabecalho_ok"):          # 1× por sessão, não a cada clique
-    garantir_cabecalho()
-    st.session_state["_cabecalho_ok"] = True
+# (o cabeçalho da aba lancamentos é criado pelo app de despesas, que faz os lançamentos)
 
 def popular_precos_mensais(df_lanc, df_pm_existente):
     """verifica meses sem preço e popula via yfinance, retorna df_pm atualizado"""
@@ -2625,7 +2232,7 @@ def popular_precos_mensais(df_lanc, df_pm_existente):
 
     df_lanc = df_lanc.copy()
     df_lanc['data_dt'] = pd.to_datetime(df_lanc['data'], format='%d/%m/%Y', errors='coerce')
-    hoje = datetime.date.today()
+    hoje = _hoje_data()
     mes_atual = f"{hoje.year}-{hoje.month:02d}"
 
     # todos os meses desde o primeiro lançamento até o mês anterior ao atual
@@ -2752,7 +2359,7 @@ def calcular_valores_mensais(df_lanc_json, df_pm_json):
     df_pm   = pd.DataFrame(df_pm_json)
     if df_lanc.empty or df_pm.empty:
         return []
-    hoje      = datetime.date.today()
+    hoje      = _hoje_data()
     mes_atual = f"{hoje.year}-{hoje.month:02d}"
     meses_pm  = sorted(df_pm['ano_mes'].unique())
     meses_pm  = [m for m in meses_pm if m < mes_atual]
@@ -2860,7 +2467,7 @@ _ph_avisos = st.container()          # avisos de leitura da planilha (preenchido
 _janela_sessao = janela_mercado(30)
 if st.session_state.get("_janela_sessao") != _janela_sessao:
     for _k in ["_df_lanc_raw_cached", "_cache_versao", "_df_pm", "cfg_alvos",
-               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pj_fat", "_pf_cartao", "_pf_pix", "_pj_hist", "_pf_reemb", "_pj_notas",
+               "_ativos_info", "_metas", "_precos_falha", "_pj_par", "_pf_cartao", "_pj_hist", "_pj_notas",
                "_sheet_lote", "_sheet_abas"]:
         st.session_state.pop(_k, None)
     st.session_state["_janela_sessao"] = _janela_sessao
@@ -2963,19 +2570,6 @@ if _pagina != "fluxo":
         try:
             with st.spinner("atualizando histórico de preços..."):
                 _df_pm_lido = ler_precos_mensais()
-                # migração única para fechamentos sem ajuste de proventos
-                if "_metas" not in st.session_state:
-                    st.session_state["_metas"] = ler_metas()
-                if not st.session_state["_metas"].get("precos_mensais_sem_ajuste"):
-                    _df_pm_lido = migrar_precos_mensais_sem_ajuste(_df_pm_lido)
-                    salvar_meta("precos_mensais_sem_ajuste", 1,
-                                "preços mensais de FIIs/ETFs regravados sem ajuste de proventos")
-                if not st.session_state.get("_metas", {}).get("precos_mensais_renda_mtm"):
-                    _hist_mig, _ = obter_historico_taxa_renda_mais()
-                    _df_pm_lido, _ok_mig = migrar_precos_renda_mtm(_df_pm_lido, _hist_mig)
-                    if _ok_mig:
-                        salvar_meta("precos_mensais_renda_mtm", 1,
-                                    "Renda+ 2050 nos preços mensais pelo PU de mercado (não pelo custo)")
                 _antes = len(_df_pm_lido)
                 _df_pm_lido = popular_precos_mensais(_df_lanc_raw, _df_pm_lido)
                 st.session_state["_df_pm"] = _df_pm_lido
@@ -3132,7 +2726,7 @@ if _pagina == "dashboard":
         with col_mensal:
             import calendar as _cal
             import datetime as _dt
-            hoje_dt   = _dt.date.today()
+            hoje_dt   = _hoje_data()
             mes_atual = f"{hoje_dt.year}-{hoje_dt.month:02d}"
 
             if not _df_pm.empty and 'ano_mes' in _df_pm.columns:
@@ -3244,20 +2838,87 @@ if _pagina == "dashboard":
             else:
                 st.info("preços mensais históricos ainda não disponíveis. serão populados automaticamente no próximo carregamento.")
 
+    # ── visão geral (antes em detalhe › resumo): geografia, renda fixa x variável, distribuição por ativo ──
+    st.markdown("---")
+    # ── linha 1: exposição geográfica ─────────────────────────────────────
+    GEO_FLAG = {'Brasil': '🇧🇷', 'EUA': '🇺🇸', 'China': '🇨🇳', 'Europa': '🇪🇺',
+                'Emergentes': '🌏', 'Global': '🌐', 'Global (cripto)': '🌍'}
+    geo_totais = {}
+    for _, row in df[df['Classe'] == 'ETF'].iterrows():
+        pais = GEO_ETF.get(row['Ativo'], 'Brasil')
+        geo_totais[pais] = geo_totais.get(pais, 0) + row['Total Atual']
+    geo_totais['Brasil'] = geo_totais.get('Brasil', 0) \
+        + df[df['Classe'] == 'FII']['Total Atual'].sum() \
+        + df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
+    geo_totais['Global (cripto)'] = df[df['Classe'] == 'Cripto']['Total Atual'].sum()
+    geo_sorted = sorted(geo_totais.items(), key=lambda x: -x[1])
 
+    with st.container(key="row_geo"):
+        cols_geo = st.columns(len(geo_sorted))
+        for i, (pais, val) in enumerate(geo_sorted):
+            pct   = val / total_geral * 100 if total_geral > 0 else 0
+            flag  = GEO_FLAG.get(pais, '')
+            val_k = abreviar_rs(val)
+            cols_geo[i].metric(f"{flag}  ·  {val_k}", f"{fmt_pct(pct)}".replace('.', ','))
+
+    st.markdown("---")
+
+    # ── linha 2: renda fixa/variável + CDI/IPCA, tudo junto ────────────────
+    # ETFs de renda fixa (tipo "renda fixa" na aba ativos_info) vão para RF
+    _etfs_rf = list(ETF_RF)
+    total_rf = df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum() + \
+               df[df['Ativo'].isin(_etfs_rf)]['Total Atual'].sum()
+    total_rv = df[(df['Classe'].isin(['ETF','FII','Cripto'])) & (~df['Ativo'].isin(_etfs_rf))]['Total Atual'].sum()
+    pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
+    pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
+
+    # CDI = ETFs de RF em CDI + FIIs papel CDI · IPCA = Renda+ 2050 + ETFs de RF em IPCA + FIIs papel IPCA
+    _df_fii_idx = df[df['Classe'] == 'FII'].copy()
+    _df_fii_idx['indexador'] = _df_fii_idx['Ativo'].map(
+        lambda t: FII_INFO.get(t, {}).get('indexador'))
+
+    total_cdi  = df[df['Ativo'].isin([a for a, i in ETF_RF.items() if i != 'IPCA'])]['Total Atual'].sum() + \
+                 _df_fii_idx[_df_fii_idx['indexador'] == 'CDI']['Total Atual'].sum()
+    total_ipca = df[df['Ativo'] == 'Renda+ 2050']['Total Atual'].sum() + \
+                 df[df['Ativo'].isin([a for a, i in ETF_RF.items() if i == 'IPCA'])]['Total Atual'].sum() + \
+                 _df_fii_idx[_df_fii_idx['indexador'] == 'IPCA']['Total Atual'].sum()
+    pct_cdi    = total_cdi  / total_geral * 100 if total_geral > 0 else 0
+    pct_ipca   = total_ipca / total_geral * 100 if total_geral > 0 else 0
+
+    with st.container(key="row_indices"):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(f"RF  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}")
+        c2.metric(f"RV  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}")
+        c3.metric(f"CDI  ·  {abreviar_rs(total_cdi)}", fmt_pct(pct_cdi))
+        c4.metric(f"IPCA+  ·  {abreviar_rs(total_ipca)}", fmt_pct(pct_ipca))
+
+    st.markdown("---")
+
+    # ── distribuição por ativo: barras com alvo e banda (FIIs: banda da classe ÷ nº de FIIs) ──
+    _n_f = len([a for a, c in _classe_de.items() if c == 'FII'])
+    _bfc = _get_banda(_cfg_alvos, '__FIIs__')
+    _itens_at = []
+    for _, r in df_ativo.iterrows():
+        if _classe_de.get(r['Ativo']) == 'FII':
+            _d = lambda v: (v / _n_f) if v and _n_f else None
+            _al, _mn, _mx = _d(_bfc.get('alvo')), _d(_bfc.get('min')), _d(_bfc.get('max'))
+        else:
+            _b = _get_banda(_cfg_alvos, r['Ativo'])
+            _al, _mn, _mx = _b.get('alvo'), _b.get('min'), _b.get('max')
+        _itens_at.append((r['Ativo'], r['Part. %'], r['Total Atual'], _al, _mn, _mx))
+    barras_alvo(_itens_at, "bar_ativo_box")
 
 if _pagina == "detalhe":
     if _sem_classif:
         st.warning("sem classificação (tipo/país): " + ", ".join(_sem_classif) +
                    " — cadastre em + novo ativo, no app de despesas.")
-    # resumo primeiro; as classes em ordem decrescente de montante na carteira
+    # as classes em ordem decrescente de montante na carteira (a visão geral fica no dashboard)
     _tot_cls = df.groupby('Classe')['Total Atual'].sum().to_dict() if not df.empty else {}
     _ordem_cls = sorted([("FIIs", "FII"), ("ETFs", "ETF"), ("cripto", "Cripto"), ("tesouro", "Tesouro Direto")],
                         key=lambda x: -float(_tot_cls.get(x[1], 0.0)))
-    _nomes_det = ["resumo"] + [n for n, _ in _ordem_cls]
+    _nomes_det = [n for n, _ in _ordem_cls]
     _tab_det = dict(zip(_nomes_det, st.tabs(_nomes_det)))
-    sub_resumo, sub_fiis, sub_etfs, sub_cripto, sub_tesouro = (
-        _tab_det[k] for k in ["resumo", "FIIs", "ETFs", "cripto", "tesouro"])
+    sub_fiis, sub_etfs, sub_cripto, sub_tesouro = (_tab_det[k] for k in ["FIIs", "ETFs", "cripto", "tesouro"])
 
     # ── helpers compartilhados ────────────────────────────────────────────────
     def _lanc_json_cached():
@@ -3269,7 +2930,7 @@ if _pagina == "detalhe":
     # ══════════════════════════════════════════════════════════════════════════
     with sub_fiis:
         from datetime import date as _d
-        hoje_d    = _d.today()
+        hoje_d    = _hoje_data()
         mes_ref_f = hoje_d.month - 1 if hoje_d.month > 1 else 12
         ano_ref_f = hoje_d.year if hoje_d.month > 1 else hoje_d.year - 1
         meses_pt3 = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
@@ -3656,7 +3317,7 @@ if _pagina == "detalhe":
                 r3c1, r3c2, r3c3 = st.columns(3)
                 if ativo == 'Renda+ 2050':
                     # contagem regressiva: meses que faltam até dez/2045 (sem contar o mês atual)
-                    _hoje_c = pd.Timestamp.today()
+                    _hoje_c = hoje_br()
                     _meses_ate_2045 = max((2045 - _hoje_c.year) * 12 + (12 - _hoje_c.month), 0)
                     r3c1.metric("até 2045", f"{_meses_ate_2045} meses")
 
@@ -3691,7 +3352,7 @@ if _pagina == "detalhe":
                 _taxa_hoje = st.session_state.get('taxa_renda_auto')
                 if (_taxa_hoje and 'Tesouro Direto' in str(st.session_state.get('data_renda_auto', ''))
                         and not _df_hist_taxa.empty):
-                    _hoje_tx = pd.Timestamp.today().normalize()
+                    _hoje_tx = hoje_br().normalize()
                     _df_hist_taxa = _df_hist_taxa.copy()
                     _df_hist_taxa['data_dt'] = pd.to_datetime(_df_hist_taxa['data_dt'])
                     _df_hist_taxa = pd.concat([
@@ -3741,104 +3402,6 @@ if _pagina == "detalhe":
     # ══════════════════════════════════════════════════════════════════════════
     # SUB-ABA: CARTEIRA
     # ══════════════════════════════════════════════════════════════════════════
-    with sub_resumo:
-        # ── linha 1: exposição geográfica ─────────────────────────────────────
-        GEO_FLAG = {'Brasil': '🇧🇷', 'EUA': '🇺🇸', 'China': '🇨🇳', 'Europa': '🇪🇺',
-                    'Emergentes': '🌏', 'Global': '🌐', 'Global (cripto)': '🌍'}
-        geo_totais = {}
-        for _, row in df[df['Classe'] == 'ETF'].iterrows():
-            pais = GEO_ETF.get(row['Ativo'], 'Brasil')
-            geo_totais[pais] = geo_totais.get(pais, 0) + row['Total Atual']
-        geo_totais['Brasil'] = geo_totais.get('Brasil', 0) \
-            + df[df['Classe'] == 'FII']['Total Atual'].sum() \
-            + df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum()
-        geo_totais['Global (cripto)'] = df[df['Classe'] == 'Cripto']['Total Atual'].sum()
-        geo_sorted = sorted(geo_totais.items(), key=lambda x: -x[1])
-
-        with st.container(key="row_geo"):
-            cols_geo = st.columns(len(geo_sorted))
-            for i, (pais, val) in enumerate(geo_sorted):
-                pct   = val / total_geral * 100 if total_geral > 0 else 0
-                flag  = GEO_FLAG.get(pais, '')
-                val_k = abreviar_rs(val)
-                cols_geo[i].metric(f"{flag}  ·  {val_k}", f"{fmt_pct(pct)}".replace('.', ','))
-
-        st.markdown("---")
-
-        # ── linha 2: renda fixa/variável + CDI/IPCA, tudo junto ────────────────
-        # ETFs de renda fixa (tipo "renda fixa" na aba ativos_info) vão para RF
-        _etfs_rf = list(ETF_RF)
-        total_rf = df[df['Classe'] == 'Tesouro Direto']['Total Atual'].sum() + \
-                   df[df['Ativo'].isin(_etfs_rf)]['Total Atual'].sum()
-        total_rv = df[(df['Classe'].isin(['ETF','FII','Cripto'])) & (~df['Ativo'].isin(_etfs_rf))]['Total Atual'].sum()
-        pct_rf   = total_rf / total_geral * 100 if total_geral > 0 else 0
-        pct_rv   = total_rv / total_geral * 100 if total_geral > 0 else 0
-
-        # CDI = ETFs de RF em CDI + FIIs papel CDI · IPCA = Renda+ 2050 + ETFs de RF em IPCA + FIIs papel IPCA
-        _df_fii_idx = df[df['Classe'] == 'FII'].copy()
-        _df_fii_idx['indexador'] = _df_fii_idx['Ativo'].map(
-            lambda t: FII_INFO.get(t, {}).get('indexador'))
-
-        total_cdi  = df[df['Ativo'].isin([a for a, i in ETF_RF.items() if i != 'IPCA'])]['Total Atual'].sum() + \
-                     _df_fii_idx[_df_fii_idx['indexador'] == 'CDI']['Total Atual'].sum()
-        total_ipca = df[df['Ativo'] == 'Renda+ 2050']['Total Atual'].sum() + \
-                     df[df['Ativo'].isin([a for a, i in ETF_RF.items() if i == 'IPCA'])]['Total Atual'].sum() + \
-                     _df_fii_idx[_df_fii_idx['indexador'] == 'IPCA']['Total Atual'].sum()
-        pct_cdi    = total_cdi  / total_geral * 100 if total_geral > 0 else 0
-        pct_ipca   = total_ipca / total_geral * 100 if total_geral > 0 else 0
-
-        with st.container(key="row_indices"):
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric(f"RF  ·  {abreviar_rs(total_rf)}", f"{fmt_pct(pct_rf)}")
-            c2.metric(f"RV  ·  {abreviar_rs(total_rv)}", f"{fmt_pct(pct_rv)}")
-            c3.metric(f"CDI  ·  {abreviar_rs(total_cdi)}", fmt_pct(pct_cdi))
-            c4.metric(f"IPCA+  ·  {abreviar_rs(total_ipca)}", fmt_pct(pct_ipca))
-
-        st.markdown("---")
-
-        # ── distribuição por ativo: barras com alvo e banda (FIIs: banda da classe ÷ nº de FIIs) ──
-        _n_f = len([a for a, c in _classe_de.items() if c == 'FII'])
-        _bfc = _get_banda(_cfg_alvos, '__FIIs__')
-        _itens_at = []
-        for _, r in df_ativo.iterrows():
-            if _classe_de.get(r['Ativo']) == 'FII':
-                _d = lambda v: (v / _n_f) if v and _n_f else None
-                _al, _mn, _mx = _d(_bfc.get('alvo')), _d(_bfc.get('min')), _d(_bfc.get('max'))
-            else:
-                _b = _get_banda(_cfg_alvos, r['Ativo'])
-                _al, _mn, _mx = _b.get('alvo'), _b.get('min'), _b.get('max')
-            _itens_at.append((r['Ativo'], r['Part. %'], r['Total Atual'], _al, _mn, _mx))
-        barras_alvo(_itens_at, "bar_ativo_box")
-
-        st.markdown("---")
-
-        # ── cards de todos os ativos (mesmo padrão das demais abas) ──────────
-        def _fmt_preco_geral(ativo_nome, preco):
-            return abreviar_rs(preco) if ativo_nome == 'BTC' else formatar_brl(preco)
-
-        for _, row in df.sort_values('Total Atual', ascending=False).iterrows():
-            _ativo_g  = row['Ativo']
-            _qtd_g    = float(row['Qtd'])
-            _preco_g  = row['preco_unit']
-            _total_g  = row['Total Atual']
-            _custo_g  = row['custo_total']
-            _pm_g     = row['preco_medio']
-            _var_g_rs  = _total_g - _custo_g
-            _var_g_pct = _var_g_rs / _custo_g * 100 if _custo_g > 0 else 0
-            _holding_g = holding_ponderado_meses(_ativo_g, _df_lanc_raw)
-            _qtd_g_str = fmt_num(_qtd_g, 6 if _qtd_g < 1 else 2)
-
-            with st.container(key=f"row_all_{_ativo_g}"):
-                r1c1, r1c2, r1c3 = st.columns(3)
-                r1c1.metric("ativo", _ativo_g)
-                r1c2.metric(f"total  ·  ({_qtd_g_str})", abreviar_rs(_total_g))
-                r1c3.metric("~holding", fmt_holding(_holding_g))
-
-                r2c1, r2c2, r2c3 = st.columns(3)
-                r2c2.metric(f"preço  ·  (~{_fmt_preco_geral(_ativo_g, _pm_g)})", _fmt_preco_geral(_ativo_g, _preco_g))
-                card_valorizacao(r2c3, _var_g_rs, _var_g_pct)
-
-            st.markdown("---")
 
 
 # ── Aba lancamentos ────────────────────────────────────────────────────────────
@@ -4186,10 +3749,7 @@ def carregar_dados_pj():
         st.session_state.pop("_pj_notas", None)
     if "_pj_notas" not in st.session_state:
         st.session_state["_pj_notas_ts"] = _time.time()
-        _n = ler_pj_notas()
-        if _n is None:                                   # aba ainda não existe: migra o formato antigo
-            _n = migrar_para_notas(st.session_state["_pj_par"])
-        st.session_state["_pj_notas"] = _n
+        st.session_state["_pj_notas"] = ler_pj_notas() or []
     _fs, _re = resumo_notas(st.session_state["_pj_notas"])
     return (st.session_state["_pj_par"], st.session_state["_pj_hist"], _fs, _re)
 
@@ -4212,7 +3772,7 @@ def investido_por_mes():
 def fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano):
     """meses de caixa de um ano: composição PJ → PF de cada mês (mesma conta da página cashflow).
     usada pelo cashflow e pela página mês."""
-    _hoje_pj = pd.Timestamp.today()
+    _hoje_pj = hoje_br()
     # regime: a atividade de um mês (faturamento da PJ e gastos no cartão) se realiza no mês
     # seguinte — o faturamento de fev entra em mar e a fatura de fev é paga em mar.
     # _meses = meses de caixa (recebimento) do ano · _comp[k] = mês de atividade que cai em k
@@ -4286,16 +3846,13 @@ def render_fies(_par, chave):
             f"<tr><td>{x}</td><td>{y}</td></tr>" for x, y in _fl) + "</table>",
             unsafe_allow_html=True)
 
-def _cap_pj(t):
-    """legenda com R$ literal (dois "$" na mesma linha viram fórmula no markdown)"""
-    st.caption(str(t).replace("$", "\\$"))
 
 @st.fragment
 def _pagina_pj():
   with st.container(key="pj_area"):
     _par, _hist_pj, _fat_salvo, _reemb_extra = carregar_dados_pj()
     _MES3 = MESES3
-    _hoje_pj = pd.Timestamp.today()
+    _hoje_pj = hoje_br()
     if not _par.get("faturamento_minimo"):
         st.info("configure os parâmetros PJ/PF em configurações › fluxo (ou na aba pj_parametros da planilha) "
                 "para ver a previsão.")
@@ -4439,9 +3996,6 @@ MESES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agos
 
 # ── resumo da fatura: cópia dos painéis do app Controle de Fatura (aba lançar: limite;
 # aba dashboard: rosca + barras por categoria), com a mesma formatação de lá ──
-def _fx_brl(valor):
-    """formatação do Controle de Fatura ('R$ 1234', sem centavos) — cifrão como entidade HTML"""
-    return ("R$ " + f"{valor:.0f}").replace("$", "&#36;")
 
 def _fx_pct(p):
     if p == 0:
@@ -4472,10 +4026,6 @@ def _fx_barra_html(titulo, direita, pct, cor):
         f"<div style='width:{largura:.1f}%;height:100%;background:{cor};border-radius:6px;'></div>"
         "</div></div>"
     )
-
-def hoje_br():
-    """agora no horário de Brasília (o Streamlit Cloud roda em UTC), sem fuso"""
-    return pd.Timestamp.now(tz="America/Sao_Paulo").tz_localize(None)
 
 def fx_render_cards_limite(df_mes, limite_mensal, fechada=False):
     """total da fatura / limite disponível + barras de fatura e de mês (igual ao Controle de Fatura).
@@ -4659,7 +4209,7 @@ if _pagina == "mês":
 # ── Aba configurações ─────────────────────────────────────────────────────────
 if _pagina == "configurações":
   _par, _hist_pj, _fat_salvo, _reemb_extra = carregar_dados_pj()
-  _hoje_pj = pd.Timestamp.today()
+  _hoje_pj = hoje_br()
   _MES3 = MESES3
   _rot = lambda k: f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}"
   _fat_de = lambda a: fat_do_mes(a, _fat_salvo, _par, _hist_pj)
@@ -4843,53 +4393,8 @@ if _pagina == "configurações":
 
 
   with _sub_pj, st.container(key="cfg_pj_area"):
-    _cpj_fat, _cpj_par = st.container(key="cfg_pj_layout").columns([1, 1], gap="large")
-    # ── faturamento por mês (editável) ───────────────────────────────────────
-    with _cpj_fat:
-        st.markdown("<p class='cfg-sec'>notas fiscais e reembolsos</p>", unsafe_allow_html=True)
-        st.markdown("<p class='cfg-nota'>para lançar uma nova, use o app de despesas (aba receitas) · aqui dá para "
-                    "corrigir ou apagar</p>", unsafe_allow_html=True)
-        _notas_cfg = st.session_state.get("_pj_notas", [])
-        _anos_c = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [n["data"].year for n in _notas_cfg])
-                         if a >= ANO_INICIO_PJ)
-        _ano_c = st.segmented_control("ano das notas", _anos_c, default=_hoje_pj.year,
-                                      label_visibility="collapsed", key="cfg_pj_ano") or _hoje_pj.year
-        _do_ano = sorted([n for n in _notas_cfg if n["data"].year == _ano_c],
-                         key=lambda n: n["data"], reverse=True)
-        with st.form(f"form_pj_notas_{_ano_c}", border=True):
-            _df_n = pd.DataFrame({
-                "tipo":        pd.Series([n["tipo"] for n in _do_ano], dtype="object"),
-                "data":        pd.Series([n["data"].date() for n in _do_ano], dtype="object"),
-                "valor":       pd.Series([n["valor"] for n in _do_ano], dtype="float64"),
-                "descrição":   pd.Series([n.get("descricao", "") for n in _do_ano], dtype="object"),
-            })
-            _df_n_ret = st.data_editor(
-                _df_n, hide_index=True, width="stretch", num_rows="dynamic", key=f"pj_notas_ed_{_ano_c}",
-                height="content",
-                column_config={
-                    "tipo": st.column_config.SelectboxColumn("tipo", options=NOTA_TIPOS,
-                                                             default="nota fiscal", required=True),
-                    "data": st.column_config.DateColumn("emissão / recebimento", format="DD/MM/YYYY",
-                                                        required=True),
-                    "valor": st.column_config.NumberColumn("valor", min_value=0.0, step=0.01,
-                                                           format="localized", required=True),
-                    "descrição": st.column_config.TextColumn("descrição"),
-                })
-            if st.form_submit_button("salvar", type="primary"):
-                _novas = []
-                for _, r in _df_n_ret.iterrows():
-                    if pd.isna(r["data"]) or pd.isna(r["valor"]):
-                        continue
-                    _tp = r["tipo"] if r["tipo"] in NOTA_TIPOS else "nota fiscal"
-                    _novas.append({"tipo": _tp, "data": pd.Timestamp(r["data"]).normalize(),
-                                   "valor": float(r["valor"]),
-                                   "recebimento": "" if _tp == "reembolso" else "mês seguinte",
-                                   "descricao": "" if pd.isna(r["descrição"]) else str(r["descrição"])})
-                _outras = [n for n in _notas_cfg if n["data"].year != _ano_c]
-                salvar_pj_notas(_outras + _novas)
-                st.success("notas salvas.")
-                st.rerun(scope="app")
-
+    # notas fiscais e reembolsos são lançados e corrigidos no app de despesas (aba receitas)
+    _cpj_par = st.container(key="cfg_pj_layout")
     with _cpj_par:
         # ── parâmetros PJ ────────────────────────────────────────────────────────
         _md(st, "cfg-sec", "parâmetros PJ/PF")
@@ -4913,7 +4418,7 @@ if _pagina == "configurações":
             with st.container(key="cfgrow_pj_vig"):
                 p0, p1 = st.columns(2, vertical_alignment="center")
                 _md(p0, "cfg-ativo-quebra", "alterações valem a partir de (mm/aaaa)")
-                _hj = pd.Timestamp.today()
+                _hj = hoje_br()
                 _vig_str = p1.text_input("vigência", label_visibility="collapsed",
                                          value=f"{_hj.month:02d}/{_hj.year}", key="pj_par_vigencia")
             st.markdown("<div style='height:0.3rem'></div>", unsafe_allow_html=True)
