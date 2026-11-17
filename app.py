@@ -520,7 +520,8 @@ def _baixar_precos_b3(tickers_tupla, janela):
 def obter_precos_b3(tickers_lista):
     _tk = tuple(sorted(set(tickers_lista)))
     try:
-        precos, falhas, momento = sem_espera("b3", janela_mercado(5), _baixar_precos_b3, _tk)
+        # carteira de longo prazo: cotação a cada 30 min no pregão basta (antes: 5 min)
+        precos, falhas, momento = sem_espera("b3", janela_mercado(30), _baixar_precos_b3, _tk)
     except Exception:
         precos, falhas, momento = {t.upper(): 0.0 for t in _tk}, list(_tk), "—"
     if falhas:
@@ -535,6 +536,22 @@ def aliases_b3():
     if "_ativos_info" not in st.session_state:
         st.session_state["_ativos_info"] = ler_ativos_info()
     return {a: v["ticker_atual"] for a, v in st.session_state["_ativos_info"].items() if v.get("ticker_atual")}
+
+@st.cache_data(ttl=86400, max_entries=60, show_spinner=False)
+def _serie_dividendos(ticker_sa, dia):
+    """proventos por cota de um ticker (yfinance), baixados uma vez por dia e compartilhados por
+    todos os cálculos (mês atual, mês anterior, histórico, últimos 12 meses). assim um lançamento
+    novo não faz o app buscar de novo os proventos de todos os FIIs"""
+    divs = yf.Ticker(ticker_sa).dividends
+    if divs is None:
+        return pd.Series(dtype=float)
+    divs = divs.copy()
+    if getattr(divs.index, "tz", None) is not None:
+        divs.index = divs.index.tz_localize(None)
+    return divs
+
+def proventos_por_cota(ticker_sa):
+    return _serie_dividendos(ticker_sa, _hoje_data().isoformat())
 
 @st.cache_data(ttl=12 * 3600)      # mês fechado: os proventos não mudam; a chave já inclui o mês
 def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
@@ -562,8 +579,7 @@ def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
     for fii in fiis:
         fii_norm = aliases_b3().get(fii, fii)
         try:
-            tk = yf.Ticker(f"{fii_norm}.SA")
-            divs = tk.dividends
+            divs = proventos_por_cota(f"{fii_norm}.SA")
             if divs is None or divs.empty:
                 continue
             divs.index = divs.index.tz_localize(None) if divs.index.tzinfo else divs.index
@@ -677,7 +693,7 @@ def obter_proventos_12m_por_cota(tickers_tupla, df_lanc_json=None):
     for t in tickers_tupla:
         try:
             t_norm = aliases_b3().get(t, t)
-            divs = yf.Ticker(f"{t_norm}.SA").dividends
+            divs = proventos_por_cota(f"{t_norm}.SA")
             if divs is None or divs.empty:
                 resultado[t] = 0.0
                 continue
@@ -2055,8 +2071,9 @@ def _historico_renda_janela(janela):
     return _obter_historico_taxa_renda_mais()
 
 def obter_historico_taxa_renda_mais():
-    """histórico de taxa e PU do Renda+ — relido a cada 1h no pregão, congelado fora dele"""
-    return _historico_renda_janela(janela_mercado(60))
+    """histórico de taxa e PU do Renda+ — o Tesouro publica um ponto por dia: baixa uma vez por
+    dia e sem travar a tela (o valor anterior aparece na hora e o novo chega em segundo plano)"""
+    return sem_espera("renda_hist", janela_mercado(24 * 60), _historico_renda_janela)
 
 def _obter_historico_taxa_renda_mais():
     """
@@ -2499,6 +2516,9 @@ if _pagina != "fluxo":
 
     _df_lanc_raw = st.session_state["_df_lanc_raw_cached"]
 
+# a página mês só usa os lançamentos (proventos do mês): cotações, preços mensais e classificação
+# ficam para as páginas da carteira e configurações — abrir o app fica bem mais rápido
+if _pagina not in ("fluxo", "mês"):
     # calcular posição atual
     _posicao = calcular_posicao(_df_lanc_raw)
 
@@ -2508,7 +2528,7 @@ if _pagina != "fluxo":
     _cfg_alvos = st.session_state["cfg_alvos"]
 
 
-    # preços atuais — a cada 5 min no pregão (seg–sex, 10h–19h), congelados fora dele
+    # preços atuais — a cada 30 min no pregão (seg–sex, 10h–19h), congelados fora dele
     _todos_b3 = [r['ativo'] for _, r in _posicao.iterrows()
                  if r['classe'] in ('ETF', 'FII') and r['ativo'] != 'BTC']
     precos = obter_precos_b3(_todos_b3)
@@ -2614,6 +2634,37 @@ if _pagina != "fluxo":
     else:
         _label_div_dash, _div_mes_total, _total_divs_geral = "—", 0.0, 0.0
 
+def rendimento_na_carteira():
+    """{ativo: % que rendeu na carteira} = valor atual / custo das cotas em carteira − 1"""
+    out = {}
+    for _, r in df.iterrows():
+        custo = float(r.get("custo_total") or 0)
+        if custo > 0 and r["Total Atual"] > 0:
+            out[r["Ativo"]] = (float(r["Total Atual"]) / custo - 1) * 100
+    return out
+
+def _alertas_banda():
+    """ativos fora da banda min/máx (FIIs avaliados juntos, contra a banda da classe)"""
+    if total_geral <= 0 or not _cfg_alvos:
+        return []
+    part = dict(zip(df['Ativo'], df['Part. %']))
+    itens = []
+    _fiis = [a for a, c in _classe_de.items() if c == 'FII']
+    if _fiis:
+        itens.append(("FIIs", sum(part.get(a, 0.0) for a in _fiis), _get_banda(_cfg_alvos, "__FIIs__")))
+    for a, c in _classe_de.items():
+        if c != 'FII':
+            itens.append((a, part.get(a, 0.0), _get_banda(_cfg_alvos, a)))
+    out = []
+    for nome, p, b in itens:
+        if not b or not b.get("alvo"):                     # sem alvo (ex.: Tesouro Selic, meta 0%)
+            continue
+        if b.get("min") is not None and p < b["min"]:
+            out.append((nome, p, "abaixo do mín", b["min"], b["alvo"]))
+        elif b.get("max") is not None and p > b["max"]:
+            out.append((nome, p, "acima do máx", b["max"], b["alvo"]))
+    return sorted(out, key=lambda x: -abs(x[1] - x[4]))
+
 if _pagina == "dashboard":
 
     # base por fluxo de caixa: compras − vendas. variação = ganho de capital (realizado + não realizado)
@@ -2636,6 +2687,9 @@ if _pagina == "dashboard":
         .st-key-dash_layout > div > [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
             width: 100% !important; min-width: 100% !important; flex: 1 1 100% !important; }
         .st-key-dash_layout > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) { margin-top: 0.8rem !important; }
+        .st-key-row_dash_12m [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; gap: 0.3rem !important; }
+        .st-key-row_dash_12m [data-testid="stColumn"] {
+            min-width: 48% !important; width: 48% !important; flex: 1 1 48% !important; }
     }</style>""", unsafe_allow_html=True)
     _col_res, _col_aloc = st.container(key="dash_layout").columns([1, 1], gap="medium")
 
@@ -2684,6 +2738,32 @@ if _pagina == "dashboard":
                          formatar_brl(_div_mes_total))
                 + "</table>",
                 unsafe_allow_html=True)
+
+        # rendimento de cada ativo na carteira (valor atual ÷ custo) e ativos fora da banda
+        st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+        with st.container(key="dash_altas_box"):
+            _v12 = sorted(rendimento_na_carteira().items(), key=lambda x: -x[1])
+            if _v12:
+                _altas = _v12[:3]
+                _quedas = [x for x in sorted(_v12, key=lambda x: x[1])[:3] if x not in _altas]
+                _lin = lambda lst: "".join(
+                    f"<tr><td>{a}</td><td style='color:{'#22c55e' if v >= 0 else '#ef4444'}'>"
+                    f"{'▲ +' if v >= 0 else '▼ '}{fmt_pct(v)}</td></tr>" for a, v in lst)
+                ca, cq = st.container(key="row_dash_12m").columns(2)
+                ca.markdown("<p class='card-label'>maiores altas</p><table class='pj-tab'>"
+                            + _lin(_altas) + "</table>", unsafe_allow_html=True)
+                if _quedas:
+                    cq.markdown("<p class='card-label'>maiores quedas</p><table class='pj-tab'>"
+                                + _lin(_quedas) + "</table>", unsafe_allow_html=True)
+                st.caption("rendimento de cada ativo na carteira: valor atual sobre o custo.")
+            alertas = _alertas_banda()
+            if not alertas:
+                st.caption("todos os ativos dentro da banda.")
+            else:
+                st.markdown("<p class='card-label'>fora da banda</p><table class='pj-tab'>" + "".join(
+                    f"<tr><td>{n}</td><td style='color:{'#ef4444' if 'abaixo' in s else '#f59e0b'}'>"
+                    f"{fmt_pct(p)} · {s} {fmt_pct(lim_b)}</td></tr>"
+                    for n, p, s, lim_b, _ in alertas) + "</table>", unsafe_allow_html=True)
 
     with _col_aloc:
         with st.container(key="dash_aloc_box"):
@@ -4064,37 +4144,6 @@ def fx_render_cards_limite(df_mes, limite_mensal, fechada=False):
     )
     st.markdown(html, unsafe_allow_html=True)
 
-def rendimento_na_carteira():
-    """{ativo: % que rendeu na carteira} = valor atual / custo das cotas em carteira − 1"""
-    out = {}
-    for _, r in df.iterrows():
-        custo = float(r.get("custo_total") or 0)
-        if custo > 0 and r["Total Atual"] > 0:
-            out[r["Ativo"]] = (float(r["Total Atual"]) / custo - 1) * 100
-    return out
-
-def _alertas_banda():
-    """ativos fora da banda min/máx (FIIs avaliados juntos, contra a banda da classe)"""
-    if total_geral <= 0 or not _cfg_alvos:
-        return []
-    part = dict(zip(df['Ativo'], df['Part. %']))
-    itens = []
-    _fiis = [a for a, c in _classe_de.items() if c == 'FII']
-    if _fiis:
-        itens.append(("FIIs", sum(part.get(a, 0.0) for a in _fiis), _get_banda(_cfg_alvos, "__FIIs__")))
-    for a, c in _classe_de.items():
-        if c != 'FII':
-            itens.append((a, part.get(a, 0.0), _get_banda(_cfg_alvos, a)))
-    out = []
-    for nome, p, b in itens:
-        if not b or not b.get("alvo"):                     # sem alvo (ex.: Tesouro Selic, meta 0%)
-            continue
-        if b.get("min") is not None and p < b["min"]:
-            out.append((nome, p, "abaixo do mín", b["min"], b["alvo"]))
-        elif b.get("max") is not None and p > b["max"]:
-            out.append((nome, p, "acima do máx", b["max"], b["alvo"]))
-    return sorted(out, key=lambda x: -abs(x[1] - x[4]))
-
 def _pagina_mes():
     hoje = hoje_br()
     k = hoje.strftime("%Y-%m")
@@ -4107,12 +4156,10 @@ def _pagina_mes():
         .st-key-mes_layout > div > [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
             width: 100% !important; min-width: 100% !important; flex: 1 1 100% !important; }
         .st-key-mes_layout > div > [data-testid="stHorizontalBlock"] > div:nth-child(2) { margin-top: 1.2rem !important; }
-        :is(.st-key-row_mes_ap, .st-key-row_mes_12m) [data-testid="stHorizontalBlock"] {
+        .st-key-row_mes_ap [data-testid="stHorizontalBlock"] {
             flex-wrap: nowrap !important; gap: 0.3rem !important; }
         .st-key-row_mes_ap [data-testid="stColumn"] {
             min-width: 31% !important; width: 31% !important; flex: 1 1 31% !important; }
-        .st-key-row_mes_12m [data-testid="stColumn"] {
-            min-width: 48% !important; width: 48% !important; flex: 1 1 48% !important; }
     }
     </style>""", unsafe_allow_html=True)
     col_fat, col_ap = st.container(key="mes_layout").columns([1, 1], gap="large")
@@ -4175,33 +4222,6 @@ def _pagina_mes():
                                         use_container_width=True):
                 st.session_state["_aporte_do_mes"] = fmt_num(aporte, 2)
                 st.switch_page(_PG["simulador"])
-
-        # ── alertas da carteira ──────────────────────────────────────────────
-        st.markdown("<p class='cfg-sec'>carteira</p>", unsafe_allow_html=True)
-        with st.container(border=True, key="mes_alerta_box"):
-            card_html(st, "patrimônio", abreviar_rs(total_geral))
-            _v12 = sorted(rendimento_na_carteira().items(), key=lambda x: -x[1])
-            if _v12:
-                _altas = _v12[:3]
-                _quedas = [x for x in sorted(_v12, key=lambda x: x[1])[:3] if x not in _altas]
-                _lin = lambda lst: "".join(
-                    f"<tr><td>{a}</td><td style='color:{'#22c55e' if v >= 0 else '#ef4444'}'>"
-                    f"{'▲ +' if v >= 0 else '▼ '}{fmt_pct(v)}</td></tr>" for a, v in lst)
-                ca, cq = st.container(key="row_mes_12m").columns(2)
-                ca.markdown("<p class='card-label'>maiores altas</p><table class='pj-tab'>"
-                            + _lin(_altas) + "</table>", unsafe_allow_html=True)
-                if _quedas:
-                    cq.markdown("<p class='card-label'>maiores quedas</p><table class='pj-tab'>"
-                                + _lin(_quedas) + "</table>", unsafe_allow_html=True)
-                st.caption("rendimento de cada ativo na carteira: valor atual sobre o custo.")
-            alertas = _alertas_banda()
-            if not alertas:
-                st.caption("todos os ativos dentro da banda.")
-            else:
-                st.markdown("<p class='card-label'>fora da banda</p><table class='pj-tab'>" + "".join(
-                    f"<tr><td>{n}</td><td style='color:{'#ef4444' if 'abaixo' in s else '#f59e0b'}'>"
-                    f"{fmt_pct(p)} · {s} {fmt_pct(lim_b)}</td></tr>"
-                    for n, p, s, lim_b, _ in alertas) + "</table>", unsafe_allow_html=True)
 
 if _pagina == "mês":
     _pagina_mes()
@@ -4507,7 +4527,7 @@ if _pagina == "configurações":
 # ── rodapé: quando cada dado foi consultado pela última vez ──────────────────
 _marcas = _marcas_atualizacao()
 _partes_rod = []
-if _pagina != "fluxo":
+if _pagina not in ("fluxo", "mês"):
     _partes_rod.append(f"cotações B3 {st.session_state.get('_precos_momento', '—')}")
     for _f in ["BTC", "Renda+"]:
         if _f in _marcas:
