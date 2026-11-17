@@ -4266,7 +4266,7 @@ def fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano):
             "cart_erro": _cart_erro, "fat_de": _fat_de, "extra_de": _extra_de}
 
 def render_fies(_par, chave):
-    """card do FIES: progresso (% · faltam N, à direita), saldo devedor, parcela (n/total), última parcela"""
+    """card do FIES: progresso (% pago · N parcelas restantes, à direita), saldo devedor, última parcela"""
     _fs = fies_status(_par)
     if not (_fs and _fs["total"]):
         return
@@ -4275,10 +4275,11 @@ def render_fies(_par, chave):
                 f"{{ width: 100%; }}</style><p class='cfg-sec'>FIES</p>", unsafe_allow_html=True)
     with st.container(key=chave, border=True):
         _pct_fies = _fs["pagas"] / _fs["total"]
-        st.progress(_pct_fies, text=f"{fmt_pct(_pct_fies * 100)} · faltam {_fs['restantes']}")
+        _n_rest = _fs["restantes"]
+        st.progress(_pct_fies, text=f"{fmt_pct(_pct_fies * 100)} pago · {_n_rest} "
+                                    f"{'parcela restante' if _n_rest == 1 else 'parcelas restantes'}")
         _fl = [
             ("saldo devedor nominal", formatar_brl(_fs["saldo"])),
-            ("parcela", f"{formatar_brl(_par['fies'])} - ({_fs['pagas']}/{_fs['total']})"),
             ("última parcela", f"{MESES3[_fs['fim'].month - 1]}/{_fs['fim'].year}"),
         ]
         st.markdown("<table class='pj-tab'>" + "".join(
@@ -4472,14 +4473,19 @@ def _fx_barra_html(titulo, direita, pct, cor):
         "</div></div>"
     )
 
-def fx_render_cards_limite(df_mes, limite_mensal):
-    """total da fatura / limite disponível + barras de fatura e de mês (igual ao Controle de Fatura)"""
+def hoje_br():
+    """agora no horário de Brasília (o Streamlit Cloud roda em UTC), sem fuso"""
+    return pd.Timestamp.now(tz="America/Sao_Paulo").tz_localize(None)
+
+def fx_render_cards_limite(df_mes, limite_mensal, fechada=False):
+    """total da fatura / limite disponível + barras de fatura e de mês (igual ao Controle de Fatura).
+    fechada=True: fatura de mês já encerrado (mês 100% decorrido)"""
     import calendar
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
     disponivel = limite_mensal - total_gasto
-    hoje = date.today()
+    hoje = hoje_br()
     dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
-    pct_mes = hoje.day / dias_no_mes
+    pct_mes = 1.0 if fechada else hoje.day / dias_no_mes
     pct_fatura = total_gasto / limite_mensal if limite_mensal > 0 else 0
     if pct_fatura > 1:
         cor_fatura = "#e05252"
@@ -4540,7 +4546,7 @@ def _alertas_banda():
     return sorted(out, key=lambda x: -abs(x[1] - x[4]))
 
 def _pagina_mes():
-    hoje = pd.Timestamp.today()
+    hoje = hoje_br()
     k = hoje.strftime("%Y-%m")
     mes_ext = MESES_EXT[hoje.month - 1]
     if st.session_state.get("_dp_msg"):
@@ -4568,13 +4574,22 @@ def _pagina_mes():
     df_m = df_f[df_f["data"].dt.strftime("%Y-%m") == k] if not df_f.empty else df_f
     gasto = float(df_m["valor"].sum()) if not df_m.empty else 0.0
 
-    # ── fatura aberta: mesmos painéis do Controle de Fatura ─────────────────
+    # ── faturas: mesmos painéis do Controle de Fatura. até o dia 9, a do mês anterior (fechada)
+    # aparece em cima da aberta; do dia 10 em diante, só a aberta ─────────────
     with col_fat:
-        st.markdown(f"<p class='cfg-sec'>fatura de {mes_ext} · aberta</p>", unsafe_allow_html=True)
         if erro_f:
             st.warning(f"Controle de Fatura indisponível ({erro_f})")
         else:
             lim = float(limite or 0.0)
+            if hoje.day < 10:
+                _ant = hoje.replace(day=1) - pd.DateOffset(months=1)
+                df_ant = (df_f[df_f["data"].dt.strftime("%Y-%m") == _ant.strftime("%Y-%m")]
+                          if not df_f.empty else df_f)
+                st.markdown(f"<p class='cfg-sec'>fatura de {MESES_EXT[_ant.month - 1]} · fechada</p>",
+                            unsafe_allow_html=True)
+                fx_render_cards_limite(df_ant, lim, fechada=True)
+                st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+            st.markdown(f"<p class='cfg-sec'>fatura de {mes_ext} · aberta</p>", unsafe_allow_html=True)
             fx_render_cards_limite(df_m, lim)
         st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
         render_fies(carregar_dados_pj()[0], "mes_fies_box")
