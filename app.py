@@ -2997,7 +2997,12 @@ if _pagina == "detalhe":
     _ordem_cls = sorted([("FIIs", "FII"), ("ETFs", "ETF"), ("cripto", "Cripto"), ("tesouro", "Tesouro Direto")],
                         key=lambda x: -float(_tot_cls.get(x[1], 0.0)))
     _nomes_det = [n for n, _ in _ordem_cls]
-    _tab_det = dict(zip(_nomes_det, st.tabs(_nomes_det)))
+    # só a aba aberta é calculada e enviada ao navegador (antes as quatro rodavam a cada clique)
+    try:
+        _abas_det = st.tabs(_nomes_det, key="det_tabs", on_change="rerun")
+    except TypeError:                       # Streamlit antigo: sem execução preguiçosa
+        _abas_det = st.tabs(_nomes_det)
+    _tab_det = dict(zip(_nomes_det, _abas_det))
     sub_fiis, sub_etfs, sub_cripto, sub_tesouro = (_tab_det[k] for k in ["FIIs", "ETFs", "cripto", "tesouro"])
 
     # ── helpers compartilhados ────────────────────────────────────────────────
@@ -3009,6 +3014,7 @@ if _pagina == "detalhe":
     # SUB-ABA: FIIs
     # ══════════════════════════════════════════════════════════════════════════
     with sub_fiis:
+      if getattr(sub_fiis, 'open', True) is not False:
         from datetime import date as _d
         hoje_d    = _hoje_data()
         mes_ref_f = hoje_d.month - 1 if hoje_d.month > 1 else 12
@@ -3203,6 +3209,7 @@ if _pagina == "detalhe":
     # SUB-ABA: ETFs
     # ══════════════════════════════════════════════════════════════════════════
     with sub_etfs:
+      if getattr(sub_etfs, 'open', True) is not False:
         df_etf = df[df['Classe'] == 'ETF'].copy()
         total_etf        = df_etf['Total Atual'].sum()
         total_inv_etf    = df_etf['custo_total'].sum()
@@ -3267,6 +3274,7 @@ if _pagina == "detalhe":
     # SUB-ABA: CRIPTO
     # ══════════════════════════════════════════════════════════════════════════
     with sub_cripto:
+      if getattr(sub_cripto, 'open', True) is not False:
         preco_btc_atual = precos.get('BTC', 0.0)
         _btc_pos = _posicao[_posicao['ativo'] == 'BTC']
         qtd_btc  = float(_btc_pos['qtd_atual'].iloc[0]) if not _btc_pos.empty else 0.0
@@ -3348,6 +3356,7 @@ if _pagina == "detalhe":
     # SUB-ABA: TESOURO
     # ══════════════════════════════════════════════════════════════════════════
     with sub_tesouro:
+      if getattr(sub_tesouro, 'open', True) is not False:
         df_td = df[df['Classe'] == 'Tesouro Direto'].copy()
 
         lanc_all = _df_lanc_raw
