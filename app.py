@@ -2661,6 +2661,9 @@ if _pagina not in ("fluxo", "mês"):
         _div_mes_total = float(_div_mes_total or 0.0)
     except Exception:
         _div_mes_total = 0.0
+    # os proventos são reinvestidos conforme chegam: o total de dividendos (reinvestidos, lucro,
+    # saiu do bolso) já inclui o mês em curso, além do acumulado dos meses fechados
+    _total_divs_geral = float(_total_divs_geral or 0.0) + _div_mes_total
 
 def rendimento_na_carteira():
     """{ativo: % que rendeu na carteira} = valor atual / custo das cotas em carteira − 1"""
@@ -2701,9 +2704,8 @@ if _pagina == "dashboard":
     _var_pct     = (_var_val / _invest_liq * 100) if _invest_liq > 0 else 0
 
 
-    # lucro total = ganho de capital (valorização) + dividendos: acumulado dos meses fechados
-    # + proventos do mês em curso (já são lucro, mesmo antes de serem reinvestidos no próximo aporte)
-    _lucro_total = _var_val + _total_divs_geral + _div_mes_total
+    # lucro total = ganho de capital (valorização) + dividendos recebidos (meses fechados + mês em curso)
+    _lucro_total = _var_val + _total_divs_geral
 
     # "saiu do bolso": dividendos reinvestidos viram novas compras nos lançamentos,
     # então já estão dentro de custo_total como se fossem dinheiro novo — subtrai pra isolar
