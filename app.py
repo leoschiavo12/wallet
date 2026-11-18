@@ -551,7 +551,9 @@ def _serie_dividendos(ticker_sa, dia):
     return divs
 
 def proventos_por_cota(ticker_sa):
-    return _serie_dividendos(ticker_sa, _hoje_data().isoformat())
+    # chave muda a cada 6h: um provento anunciado hoje aparece no mesmo dia, assim que o yfinance registrar
+    _a = _agora_sp()
+    return _serie_dividendos(ticker_sa, f"{_a.date().isoformat()}-{_a.hour // 6}")
 
 @st.cache_data(ttl=12 * 3600)      # mês fechado: os proventos não mudam; a chave já inclui o mês
 def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
@@ -4015,7 +4017,9 @@ def _pagina_pj():
         fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, ano)
         fx["pix_out"] = {k: float(fx["pix"].get(k, {}).get("saida", 0.0)) for k in fx["meses"]}
         fx["inv"] = {k: _inv_mes.get(k, 0.0) for k in fx["meses"]}
-        fx["divs"] = {k: _divs_mes.get(k, 0.0) for k in fx["meses"]}
+        # dividendos recebidos em k = proventos com data-com no mês anterior (pagos em k) — o mesmo
+        # valor do card "proventos · <mês> até hoje" que entra na previsão do aporte de k
+        fx["divs"] = {k: _divs_mes.get(fx["comp"][k], 0.0) for k in fx["meses"]}
         return fx
 
     def _render_mensal():
