@@ -1,4 +1,4 @@
-2import streamlit as st
+import streamlit as st
 import yfinance as yf
 import plotly.express as px
 import plotly.graph_objects as go
