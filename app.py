@@ -3048,21 +3048,14 @@ if _pagina == "detalhe":
       if getattr(sub_fiis, 'open', True) is not False:
         from datetime import date as _d
         hoje_d    = _hoje_data()
-        mes_ref_f = hoje_d.month - 1 if hoje_d.month > 1 else 12
-        ano_ref_f = hoje_d.year if hoje_d.month > 1 else hoje_d.year - 1
+        # mês de referência = mês em curso, com os proventos até hoje — o mesmo número do
+        # dashboard e do card "proventos · <mês> até hoje" da previsão do aporte
+        mes_ref_f, ano_ref_f = hoje_d.month, hoje_d.year
         meses_pt3 = {1:'janeiro',2:'fevereiro',3:'março',4:'abril',5:'maio',6:'junho',
                      7:'julho',8:'agosto',9:'setembro',10:'outubro',11:'novembro',12:'dezembro'}
 
         lanc_json = _lanc_json_cached()
-        div_total, div_detalhe = obter_dividendos_mes_anterior(lanc_json)
-        # total do mês vem da aba dividendos_mensais quando o mês já está gravado (mesmo número
-        # do dashboard e respeita correções feitas na planilha); o cálculo ao vivo fica só
-        # para o detalhamento por FII e para o caso de o mês ainda não ter sido gravado
-        _linha_mes_planilha = _df_div_mensal[_df_div_mensal['ano_mes'] == f"{ano_ref_f}-{mes_ref_f:02d}"] \
-            if _df_div_mensal is not None and not _df_div_mensal.empty else None
-        if _linha_mes_planilha is not None and not _linha_mes_planilha.empty \
-                and pd.notna(_linha_mes_planilha['valor_mes'].iloc[-1]):
-            div_total = float(_linha_mes_planilha['valor_mes'].iloc[-1])
+        div_total = _div_mes_total
 
         df_fii = df[df['Classe'] == 'FII'].copy()
         total_fii = df_fii['Total Atual'].sum()
@@ -3100,7 +3093,7 @@ if _pagina == "detalhe":
                 if _qtd_ref > 0:
                     _total_fii_base += _qtd_ref * float(_pm_row_g['preco_fechamento'])
         if _total_fii_base == 0.0:
-            _total_fii_base = total_fii  # fallback
+            _total_fii_base = total_fii  # mês em curso ainda sem fechamento: valor atual dos FIIs
 
         yield_mensal = (div_total / _total_fii_base * 100) if _total_fii_base > 0 and div_total > 0 else None
 
@@ -3131,7 +3124,7 @@ if _pagina == "detalhe":
         _yoc_mes_str   = fmt_pct(_yoc_mes_carteira, 2) if _yoc_mes_carteira else "—"
         _meses_abrev3 = {1:'jan',2:'fev',3:'mar',4:'abr',5:'mai',6:'jun',
                           7:'jul',8:'ago',9:'set',10:'out',11:'nov',12:'dez'}
-        _label_mes = f"{_meses_abrev3[mes_ref_f]}/{str(ano_ref_f)[-2:]}"
+        _label_mes = f"{_meses_abrev3[mes_ref_f]} até hoje"
 
         # ── bloco resumo: grade 3 colunas, mesmo padrão dos cards por ativo ──
         #    posição em cima · mês de referência no meio · acumulados (div. totais / YoC 12m) embaixo
