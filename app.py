@@ -1,4 +1,4 @@
-import streamlit as st
+2import streamlit as st
 import yfinance as yf
 import plotly.express as px
 import plotly.graph_objects as go
@@ -2701,8 +2701,9 @@ if _pagina == "dashboard":
     _var_pct     = (_var_val / _invest_liq * 100) if _invest_liq > 0 else 0
 
 
-    # lucro total = ganho de capital (valorização) + dividendos recebidos (acumulado persistido)
-    _lucro_total = _var_val + _total_divs_geral
+    # lucro total = ganho de capital (valorização) + dividendos: acumulado dos meses fechados
+    # + proventos do mês em curso (já são lucro, mesmo antes de serem reinvestidos no próximo aporte)
+    _lucro_total = _var_val + _total_divs_geral + _div_mes_total
 
     # "saiu do bolso": dividendos reinvestidos viram novas compras nos lançamentos,
     # então já estão dentro de custo_total como se fossem dinheiro novo — subtrai pra isolar
