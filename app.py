@@ -555,6 +555,21 @@ def proventos_por_cota(ticker_sa):
     _a = _agora_sp()
     return _serie_dividendos(ticker_sa, f"{_a.date().isoformat()}-{_a.hour // 6}")
 
+# feriados nacionais de data fixa sem pregão na B3 (31/12 também não tem pregão)
+_SEM_PREGAO = {(1, 1), (4, 21), (5, 1), (9, 7), (10, 12), (11, 2), (11, 15), (11, 20), (12, 25), (12, 31)}
+# antes desta data o mês do provento era o da data-ex — os meses já gravados em dividendos_mensais
+# seguem essa regra, então a troca vale só daqui em diante (nada é contado duas vezes nem some)
+_DATACOM_DESDE = pd.Timestamp("2026-11-01")
+
+def _mes_do_provento(data_ex):
+    """data que define o mês do provento: a data-com (pregão anterior à data-ex que o yfinance
+    informa). Ex.: data-com 28/11 e data-ex 01/12 → provento de novembro"""
+    data_ex = pd.Timestamp(data_ex).normalize()
+    d = data_ex - pd.offsets.BDay(1)
+    while (d.month, d.day) in _SEM_PREGAO:
+        d -= pd.offsets.BDay(1)
+    return d if d >= _DATACOM_DESDE else data_ex
+
 @st.cache_data(ttl=12 * 3600)      # mês fechado: os proventos não mudam; a chave já inclui o mês
 def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
     """
@@ -586,8 +601,9 @@ def calcular_dividendos_mes(df_lancamentos_json, mes_ref, ano_ref):
                 continue
             divs.index = divs.index.tz_localize(None) if divs.index.tzinfo else divs.index
 
-            # filtrar pelo mes de referencia apenas
-            mask   = (divs.index.month == mes_ref) & (divs.index.year == ano_ref)
+            # filtrar pelo mês de referência da data-com (o yfinance indexa pela data-ex)
+            _ref = pd.DatetimeIndex([_mes_do_provento(d) for d in divs.index])
+            mask   = (_ref.month == mes_ref) & (_ref.year == ano_ref)
             divs_ex = divs[mask]
             if divs_ex.empty:
                 continue
@@ -2635,6 +2651,16 @@ if _pagina not in ("fluxo", "mês"):
         _total_divs_geral = _ultimo_mes_div['acumulado']
     else:
         _label_div_dash, _div_mes_total, _total_divs_geral = "—", 0.0, 0.0
+    # linha do dashboard: proventos do mês em curso até hoje — o mesmo valor do card
+    # "proventos · <mês> até hoje" da previsão do aporte (página mês)
+    _hoje_div = _hoje_data()
+    _label_div_dash = f"{_meses_abrev3_dash[_hoje_div.month]} até hoje"
+    try:
+        _div_mes_total, _ = calcular_dividendos_mes(_df_lanc_raw.to_dict(orient='records'),
+                                                    _hoje_div.month, _hoje_div.year)
+        _div_mes_total = float(_div_mes_total or 0.0)
+    except Exception:
+        _div_mes_total = 0.0
 
 def rendimento_na_carteira():
     """{ativo: % que rendeu na carteira} = valor atual / custo das cotas em carteira − 1"""
@@ -4017,9 +4043,7 @@ def _pagina_pj():
         fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, ano)
         fx["pix_out"] = {k: float(fx["pix"].get(k, {}).get("saida", 0.0)) for k in fx["meses"]}
         fx["inv"] = {k: _inv_mes.get(k, 0.0) for k in fx["meses"]}
-        # dividendos recebidos em k = proventos com data-com no mês anterior (pagos em k) — o mesmo
-        # valor do card "proventos · <mês> até hoje" que entra na previsão do aporte de k
-        fx["divs"] = {k: _divs_mes.get(fx["comp"][k], 0.0) for k in fx["meses"]}
+        fx["divs"] = {k: _divs_mes.get(k, 0.0) for k in fx["meses"]}
         return fx
 
     def _render_mensal():
